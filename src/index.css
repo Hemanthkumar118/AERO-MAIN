@@ -1,0 +1,162 @@
+@import "tailwindcss";
+
+@theme {
+  --color-brand-primary: #FF3B30;
+  --color-bg-main: #070A0F;
+  --color-bg-surface: #0D1219;
+  --color-bg-elevated: #121923;
+  --color-text-primary: #F4F7FA;
+  --color-text-secondary: #8D98A6;
+  --color-border-subtle: rgba(255, 255, 255, 0.07);
+  --color-border-strong: rgba(255, 255, 255, 0.13);
+  
+  --color-status-success: #20D67A;
+  --color-status-warning: #FFB020;
+  --color-status-error: #FF3B30;
+  --color-status-info: #35C7FF;
+}
+
+@layer base {
+  :root {
+    color-scheme: dark;
+  }
+  
+  html {
+    scroll-behavior: smooth;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    background-color: var(--color-bg-main);
+  }
+
+  body {
+    @apply bg-bg-main text-text-primary font-sans selection:bg-brand-primary/30 selection:text-white overflow-x-hidden;
+  }
+
+  /* Headings typography adjustments */
+  h1, h2, h3, h4, h5, h6 {
+    @apply tracking-tight font-bold text-white;
+  }
+
+  /* Custom Premium Scrollbar */
+  ::-webkit-scrollbar {
+    width: 6px;
+    height: 6px;
+  }
+  ::-webkit-scrollbar-track {
+    background: var(--color-bg-main);
+  }
+  ::-webkit-scrollbar-thumb {
+    background: rgba(255, 255, 255, 0.1);
+    border-radius: 10px;
+  }
+  ::-webkit-scrollbar-thumb:hover {
+    background: rgba(255, 59, 48, 0.5); /* AERO red subtle hover */
+  }
+}
+
+@layer components {
+  /* Cinematic Enterprise Component Primitives */
+  .enterprise-card {
+    @apply bg-bg-surface border border-border-subtle rounded-xl shadow-2xl transition-all duration-300 hover:border-border-strong relative overflow-hidden;
+  }
+  
+  .enterprise-input {
+    @apply w-full bg-[#0F1218] border border-border-subtle rounded-lg px-4 py-3 text-sm text-text-primary outline-none transition-all placeholder:text-text-secondary focus:border-brand-primary focus:ring-1 focus:ring-brand-primary/50;
+  }
+  
+  .enterprise-button-primary {
+    @apply inline-flex items-center justify-center px-6 py-3 bg-brand-primary text-white rounded-lg text-sm font-bold tracking-wide transition-all hover:bg-red-600 hover:shadow-[0_0_20px_rgba(229,57,53,0.3)] active:scale-95 disabled:opacity-50 disabled:pointer-events-none;
+  }
+  
+  .enterprise-button-secondary {
+    @apply inline-flex items-center justify-center px-6 py-3 bg-transparent border border-border-strong text-text-primary rounded-lg text-sm font-bold tracking-wide transition-all hover:bg-white/5 hover:border-white/30 active:scale-95 disabled:opacity-50 disabled:pointer-events-none;
+  }
+
+  .enterprise-badge {
+    @apply inline-flex items-center px-2.5 py-1 rounded-md text-[10px] font-bold uppercase tracking-widest border border-border-subtle bg-[#0F1218] text-text-secondary;
+  }
+  
+  /* Specific Layout Overrides */
+  .glass-panel {
+    @apply bg-[#0B0D10]/80 backdrop-blur-md border border-border-subtle shadow-2xl;
+  }
+
+  /* Custom Scrollbar */
+  ::-webkit-scrollbar {
+    width: 6px;
+    height: 6px;
+  }
+  
+  ::-webkit-scrollbar-track {
+    background: var(--color-bg-main);
+  }
+  
+  ::-webkit-scrollbar-thumb {
+    @apply bg-white/10 rounded-full;
+  }
+  
+  ::-webkit-scrollbar-thumb:hover {
+    @apply bg-white/20;
+  }
+
+  /* Telemetry panel */
+  .telemetry-panel {
+    border: 1px solid rgba(255,255,255,0.06);
+    background: rgba(13,18,25,0.85);
+    backdrop-filter: blur(8px);
+    -webkit-backdrop-filter: blur(8px);
+    color: #8D98A6;
+    font-family: 'JetBrains Mono', 'Fira Code', 'Cascadia Code', ui-monospace, monospace;
+  }
+
+  .telemetry-label {
+    @apply text-[9px] tracking-[0.22em] uppercase font-bold;
+    color: #8D98A6;
+  }
+
+  .telemetry-value {
+    font-family: 'JetBrains Mono', 'Fira Code', ui-monospace, monospace;
+    @apply font-bold;
+    color: #F4F7FA;
+  }
+
+  .cinematic-h1 {
+    font-size: clamp(3.2rem, 8.5vw, 7.5rem);
+    font-weight: 900;
+    line-height: 0.88;
+    letter-spacing: -0.03em;
+    color: #F4F7FA;
+  }
+
+  .cinematic-h2 {
+    font-size: clamp(2rem, 5.5vw, 5rem);
+    font-weight: 900;
+    line-height: 0.9;
+    letter-spacing: -0.025em;
+    color: #F4F7FA;
+  }
+}
+
+/* Base Maps overrides for cinematic dark mode */
+.leaflet-container {
+  background: #07090C !important;
+  font-family: inherit !important;
+}
+.leaflet-popup-content-wrapper, .leaflet-popup-tip {
+  background-color: var(--color-bg-surface) !important;
+  color: var(--color-text-primary) !important;
+  border: 1px solid var(--color-border-strong) !important;
+  box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.5) !important;
+}
+.leaflet-popup-content {
+  margin: 12px !important;
+}
+
+/* ─── Accessibility: Reduced Motion ─── */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
