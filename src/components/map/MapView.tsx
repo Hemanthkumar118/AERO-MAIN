@@ -200,8 +200,8 @@ export function MapView({
           <div className="mt-2 text-red-600">6. NETWORK TEST: {networkStatus}</div>
           {networkStatus.includes("401") || networkStatus.includes("403") ? (
             <div className="mt-2 text-sm text-red-700 bg-red-100 p-2">
-              ERROR: Mappls is rejecting your API Key or Domain (localhost:5174). 
-              Check your Mappls Dashboard for domain restrictions.
+              ERROR: Mappls is rejecting your API Key or Domain (401/403). 
+              Check your Mappls Dashboard for domain restrictions. Ensure you whitelisted https://aero-ambulance.netlify.app
             </div>
           ) : null}
         </div>
