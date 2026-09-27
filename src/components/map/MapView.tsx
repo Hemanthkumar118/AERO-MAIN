@@ -35,7 +35,7 @@ export function MapView({
   const hasInitialCentered = useRef(false);
 
   useEffect(() => {
-    const mapplsKey = import.meta.env.VITE_MAPPLS_KEY;
+    const mapplsKey = import.meta.env.VITE_MAPPLS_KEY?.trim();
     console.log("[MapView] MAPPLS KEY:", mapplsKey ? "CONFIGURED" : "MISSING");
     if (!mapplsKey) {
       console.error("VITE_MAPPLS_KEY is not defined");
@@ -180,7 +180,7 @@ export function MapView({
 
   useEffect(() => {
     // Explicitly test the Mappls script URL to see if it's returning 403 Forbidden
-    const testUrl = `https://apis.mappls.com/advancedmaps/api/${import.meta.env.VITE_MAPPLS_KEY}/map_sdk?layer=vector&v=3.0`;
+    const testUrl = `https://apis.mappls.com/advancedmaps/api/${import.meta.env.VITE_MAPPLS_KEY?.trim()}/map_sdk?layer=vector&v=3.0`;
     fetch(testUrl)
       .then(res => setNetworkStatus(`HTTP ${res.status} ${res.statusText}`))
       .catch(err => setNetworkStatus(`FAILED TO FETCH: ${err.message}`));
