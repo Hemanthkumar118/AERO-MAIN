@@ -193,7 +193,7 @@ export function MapView({
       {!isMapLoaded && (
         <div className="absolute top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2 z-[9999] bg-white p-4 text-black font-black text-lg border-4 border-red-500 shadow-2xl pointer-events-none w-3/4 max-w-lg text-left">
           <div>1. COMPONENT MOUNTED: YES</div>
-          <div>2. VITE_MAPPLS_KEY: {import.meta.env.VITE_MAPPLS_KEY ? "FOUND" : "MISSING"}</div>
+          <div>2. VITE_MAPPLS_KEY: {import.meta.env.VITE_MAPPLS_KEY ? `FOUND (${import.meta.env.VITE_MAPPLS_KEY.substring(0, 8)}...)` : "MISSING"}</div>
           <div>3. IS_MAP_LOADED: FALSE</div>
           <div>4. MAP_REF_EXISTS: {mapRef.current ? "YES" : "NO"}</div>
           <div>5. CONTAINER_CHILDREN: {childCount} nodes</div>
