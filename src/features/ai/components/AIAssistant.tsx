@@ -1,8 +1,7 @@
 import { useState, useRef, useEffect } from 'react';
 import ReactMarkdown from 'react-markdown';
-import { supabase } from '../../../lib/supabase';
 import { aiService, type ChatMessage } from '../services/aiService';
-import { realtimeService } from '../../../services/realtimeService';
+import { useAuth } from '../../../providers/AuthProvider';
 
 interface Conversation {
   id: string;
@@ -22,21 +21,10 @@ export function AIAssistant() {
   const [showHistory, setShowHistory] = useState(false);
   
   const [hasInitialized, setHasInitialized] = useState(false);
-  const [userRole, setUserRole] = useState<string>('Unknown');
+
+  const { session, authLoading } = useAuth();
   
   const messagesEndRef = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    supabase.auth.getUser()
-      .then(({ data: { user } }: any) => {
-        if (user?.user_metadata?.role) {
-          setUserRole(user.user_metadata.role);
-        }
-      })
-      .catch(() => {
-        console.warn("AIAssistant: Supabase auth bypassed for Demo Mode.");
-      });
-  }, []);
 
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -45,11 +33,12 @@ export function AIAssistant() {
   useEffect(() => {
     if (isOpen) {
       scrollToBottom();
-      if (!hasInitialized) {
+      // Only initialize conversation if we are authenticated and not loading auth
+      if (!hasInitialized && !authLoading && session) {
         initConversation();
       }
     }
-  }, [messages, isOpen, isLoading, hasInitialized]);
+  }, [messages, isOpen, isLoading, hasInitialized, authLoading, session]);
 
   const initConversation = async () => {
     setHasInitialized(true);
@@ -119,22 +108,7 @@ export function AIAssistant() {
     }
   };
 
-  const generateIncidentContext = () => {
-    const active = realtimeService.getActiveEmergency();
-    if (!active) return `User Role: ${userRole}\nNo active emergency incidents currently.`;
-    
-    return `
-User Role: ${userRole}
---- ACTIVE EMERGENCY CONTEXT ---
-Incident ID: ${active.id}
-Status: ${active.status}
-Priority: ${active.priority}
-Type: ${active.category}
-Ambulance: ${active.ambulanceId || 'Unassigned'}
-Hospital: ${active.hospital?.name || 'Unknown'}
-ETA: ${active.route?.etaSeconds ? Math.floor(active.route.etaSeconds/60) + ' mins' : 'Unknown'}
-`;
-  };
+
 
   const handleSend = async (text: string = input) => {
     if (!text.trim() || isLoading) return;
@@ -154,10 +128,8 @@ ETA: ${active.route?.etaSeconds ? Math.floor(active.route.etaSeconds/60) + ' min
     setIsLoading(true);
 
     try {
-      const context = generateIncidentContext();
-      
       // Send directly to authoritative backend endpoint
-      const response = await aiService.sendMessage(userText, activeConversationId, context);
+      const response = await aiService.sendMessage(userText, activeConversationId);
 
       const newAssistantMsg: ChatMessage = {
         id: (Date.now() + 1).toString(),
@@ -281,30 +253,52 @@ ETA: ${active.route?.etaSeconds ? Math.floor(active.route.etaSeconds/60) + ' min
 
           {/* Messages Area */}
           <div className="flex-1 overflow-y-auto p-4 space-y-5" onClick={() => setShowHistory(false)}>
-            {messages.length === 0 && !isLoading && (
+            {authLoading ? (
               <div className="h-full flex flex-col items-center justify-center text-center opacity-80 mt-8">
                 <div className="w-16 h-16 rounded-2xl bg-cyan-900/20 border border-cyan-500/20 flex items-center justify-center mb-4">
-                  <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="#22d3ee" strokeWidth="1.5">
-                    <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path>
+                  <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="#22d3ee" strokeWidth="1.5" className="animate-spin">
+                    <circle cx="12" cy="12" r="10" strokeDasharray="30"></circle>
                   </svg>
                 </div>
-                <h3 className="text-lg font-bold text-white mb-2">AERO Intelligence</h3>
-                <p className="text-sm text-text-secondary max-w-[250px] mb-8">Your emergency operations copilot. How can I assist with your coordination today?</p>
-                
-                <div className="flex flex-col gap-2 w-full max-w-[300px]">
-                  {quickActions.map(action => (
-                    <button
-                      key={action}
-                      onClick={() => handleSend(action)}
-                      className="bg-bg-elevated/50 hover:bg-cyan-900/30 border border-border-subtle hover:border-cyan-700/50 text-cyan-300 text-xs px-4 py-2.5 rounded-xl transition-colors font-medium text-left flex items-center justify-between group"
-                    >
-                      {action}
-                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="opacity-0 group-hover:opacity-100 transition-opacity"><path d="M5 12h14M12 5l7 7-7 7"></path></svg>
-                    </button>
-                  ))}
-                </div>
+                <h3 className="text-lg font-bold text-white mb-2">AERO INTELLIGENCE</h3>
+                <p className="text-sm text-text-secondary max-w-[250px] mb-8">Connecting to secure AERO session...</p>
               </div>
-            )}
+            ) : !session ? (
+              <div className="h-full flex flex-col items-center justify-center text-center opacity-80 mt-8">
+                <div className="w-16 h-16 rounded-2xl bg-cyan-900/20 border border-red-500/20 flex items-center justify-center mb-4 text-red-400">
+                  <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
+                    <rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect><path d="M7 11V7a5 5 0 0 1 10 0v4"></path>
+                  </svg>
+                </div>
+                <h3 className="text-lg font-bold text-white mb-2">AERO INTELLIGENCE</h3>
+                <p className="text-sm text-red-400 max-w-[250px] mb-8">Not authenticated.<br/><br/>Sign in to use personalized AERO Intelligence.</p>
+              </div>
+            ) : (
+              <>
+                {messages.length === 0 && !isLoading && (
+                  <div className="h-full flex flex-col items-center justify-center text-center opacity-80 mt-8">
+                    <div className="w-16 h-16 rounded-2xl bg-cyan-900/20 border border-cyan-500/20 flex items-center justify-center mb-4">
+                      <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="#22d3ee" strokeWidth="1.5">
+                        <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path>
+                      </svg>
+                    </div>
+                    <h3 className="text-lg font-bold text-white mb-2">AERO Intelligence</h3>
+                    <p className="text-sm text-text-secondary max-w-[250px] mb-8">Your emergency operations copilot. How can I assist with your coordination today?</p>
+                    
+                    <div className="flex flex-col gap-2 w-full max-w-[300px]">
+                      {quickActions.map(action => (
+                        <button
+                          key={action}
+                          onClick={() => handleSend(action)}
+                          className="bg-bg-elevated/50 hover:bg-cyan-900/30 border border-border-subtle hover:border-cyan-700/50 text-cyan-300 text-xs px-4 py-2.5 rounded-xl transition-colors font-medium text-left flex items-center justify-between group"
+                        >
+                          {action}
+                          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="opacity-0 group-hover:opacity-100 transition-opacity"><path d="M5 12h14M12 5l7 7-7 7"></path></svg>
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                )}
 
             {messages.map((msg, idx) => (
               <div key={idx} className={`flex flex-col ${msg.role === 'user' ? 'items-end' : 'items-start'}`}>
@@ -361,6 +355,8 @@ ETA: ${active.route?.etaSeconds ? Math.floor(active.route.etaSeconds/60) + ' min
               </div>
             )}
             <div ref={messagesEndRef} />
+              </>
+            )}
           </div>
         </div>
 
@@ -371,14 +367,14 @@ ETA: ${active.route?.etaSeconds ? Math.floor(active.route.etaSeconds/60) + ' min
               value={input}
               onChange={(e) => setInput(e.target.value)}
               onKeyDown={handleKeyDown}
-              placeholder="Ask AERO Intelligence..."
-              className="w-full bg-transparent p-3.5 text-[13px] text-white placeholder-text-secondary focus:outline-none resize-none max-h-[120px] scrollbar-thin"
+              placeholder={authLoading ? "Connecting..." : !session ? "Sign in to use AERO Intelligence" : "Ask AERO Intelligence..."}
+              className="w-full bg-transparent p-3.5 text-[13px] text-white placeholder-text-secondary focus:outline-none resize-none max-h-[120px] scrollbar-thin disabled:opacity-50"
               rows={input.split('\n').length > 1 ? Math.min(input.split('\n').length, 4) : 1}
-              disabled={isLoading}
+              disabled={isLoading || authLoading || !session}
             />
             <button
               onClick={() => handleSend()}
-              disabled={!input.trim() || isLoading}
+              disabled={!input.trim() || isLoading || authLoading || !session}
               className="p-3.5 text-cyan-500 hover:text-cyan-400 disabled:opacity-40 transition-colors shrink-0"
             >
               <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" className={isLoading ? "animate-pulse" : ""}>

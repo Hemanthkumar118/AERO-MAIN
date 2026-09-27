@@ -4,6 +4,7 @@ import { Tooltip } from '../ui/Tooltip';
 interface GPSIndicatorProps {
   state: GPSState;
   accuracy?: number;
+  timestamp?: Date | null;
   className?: string;
   showLabel?: boolean;
 }
@@ -61,13 +62,19 @@ function GPSSvg({ state }: { state: GPSState }) {
 export function GPSIndicator({
   state,
   accuracy,
+  timestamp,
   className = '',
   showLabel = false,
 }: GPSIndicatorProps) {
   const config = stateConfig[state];
-  const labelText = state === 'active' && accuracy != null
+  let labelText = state === 'active' && accuracy != null
     ? `GPS ±${Math.round(accuracy)}m`
     : config.label;
+
+  if (timestamp) {
+    const timeStr = timestamp.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+    labelText += ` (Updated: ${timeStr})`;
+  }
 
   const indicator = (
     <div

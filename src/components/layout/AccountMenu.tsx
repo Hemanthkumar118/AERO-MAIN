@@ -1,18 +1,16 @@
 import { useState, useRef, useEffect } from 'react';
 import type { UserRole } from '../../types';
 import { useNavigate } from 'react-router-dom';
-import { supabase } from '../../lib/supabase';
+import { useAuth } from '../../providers/AuthProvider';
 
-interface AccountMenuProps {
-  userName: string;
-  userRole: UserRole;
-}
-
-export function AccountMenu({ userName, userRole }: AccountMenuProps) {
+export function AccountMenu() {
   const [isOpen, setIsOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
-
+  const { profile, signOut } = useAuth();
   const navigate = useNavigate();
+  
+  const userName = profile?.full_name || 'Operator';
+  const userRole = (profile?.role?.toUpperCase() || 'UNKNOWN') as UserRole;
 
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
@@ -25,7 +23,7 @@ export function AccountMenu({ userName, userRole }: AccountMenuProps) {
   }, []);
 
   const handleLogout = async () => {
-    await supabase.auth.signOut();
+    await signOut();
     navigate('/login', { replace: true });
   };
 

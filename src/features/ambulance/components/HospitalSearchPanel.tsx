@@ -1,152 +1,54 @@
 /**
  * HospitalSearchPanel
- * Floating live hospital search on the map.
- * – Immediately loads real nearby hospitals via Overpass (within 15 km).
- * – Debounced text search via Nominatim.
- * – Results shown in a scrollable card below the search bar.
+ * Floating list of hospitals on the map.
+ * This is now a dumb component that receives hospitals from the parent.
  */
 
-import { useState, useEffect, useRef, useCallback } from 'react';
-import { Marker, Popup, useMap } from 'react-leaflet';
-import L from 'leaflet';
-import {
-  searchNearbyHospitals,
-  searchHospitalsByName,
-  type LiveHospital,
-} from '../../../services/hospitalSearchService';
+import { useState, useRef, useEffect } from 'react';
+import type { NormalizedHospital } from '../../../services/hospitalSearch/types';
 
 interface HospitalSearchPanelProps {
-  /** Driver's current GPS position */
-  userPos: [number, number] | null;
-  /** Called when user selects a hospital from search results */
-  onSelect: (hospital: LiveHospital) => void;
-  /** Which hospital is currently selected */
+  hospitals: NormalizedHospital[];
+  loading: boolean;
+  error?: string | null;
+  onSelect: (hospital: NormalizedHospital) => void;
   selectedHospitalId?: string;
-  /** Radius cap in metres — default 15000 */
-  radiusMeters?: number;
+  radiusKm: number;
+  onRadiusChange: (radiusKm: number) => void;
+  searchQuery: string;
+  onSearchChange: (query: string) => void;
 }
-
-// Pin icon for search results
-function searchResultIcon(selected: boolean) {
-  const color = selected ? '#10b981' : '#3b82f6';
-  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="28" height="36" viewBox="0 0 28 36">
-    <path d="M14 0C6.268 0 0 6.268 0 14c0 9.333 14 22 14 22s14-12.667 14-22C28 6.268 21.732 0 14 0z"
-      fill="${color}" stroke="white" stroke-width="1.5"/>
-    <circle cx="14" cy="14" r="7" fill="white" opacity="0.9"/>
-    <text x="14" y="18" text-anchor="middle" font-size="10" fill="${color}" font-weight="bold" font-family="sans-serif">H</text>
-  </svg>`;
-  return L.divIcon({
-    html: svg,
-    className: '',
-    iconSize: [28, 36],
-    iconAnchor: [14, 36],
-    popupAnchor: [0, -38],
-  });
-}
-
-
 
 export function HospitalSearchPanel({
-  userPos,
+  hospitals,
+  loading,
+  error,
   onSelect,
   selectedHospitalId,
-  radiusMeters = 15000,
+  radiusKm,
+  onRadiusChange,
+  searchQuery,
+  onSearchChange,
 }: HospitalSearchPanelProps) {
-  const map = useMap();
-  const [query, setQuery] = useState('');
-  const [hospitals, setHospitals] = useState<LiveHospital[]>([]);
-  const [loading, setLoading] = useState(false);
-  const [open, setOpen] = useState(false);
-  const [mapPins, setMapPins] = useState<LiveHospital[]>([]);
-  const abortRef = useRef<AbortController | null>(null);
-  const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [open, setOpen] = useState(true);
+  const [localSearch, setLocalSearch] = useState(searchQuery);
   const inputRef = useRef<HTMLInputElement>(null);
 
-  // Load real nearby hospitals on mount / when GPS position becomes available
-  const loadNearby = useCallback(async () => {
-    if (!userPos) return;
-    abortRef.current?.abort();
-    abortRef.current = new AbortController();
-    setLoading(true);
-    try {
-      const results = await searchNearbyHospitals(userPos, radiusMeters, abortRef.current.signal);
-      setHospitals(results);
-      setMapPins(results.slice(0, 20)); // show up to 20 pins
-    } catch {
-      // Overpass timed out or offline — silent
-    } finally {
-      setLoading(false);
-    }
-  }, [userPos, radiusMeters]);
-
+  // Debounce search
   useEffect(() => {
-    loadNearby();
-  }, [loadNearby]);
+    const handler = setTimeout(() => {
+      onSearchChange(localSearch);
+    }, 300);
+    return () => clearTimeout(handler);
+  }, [localSearch, onSearchChange]);
 
-  // Debounced text search
-  useEffect(() => {
-    if (debounceRef.current) clearTimeout(debounceRef.current);
-    if (!query.trim()) {
-      loadNearby();
-      return;
-    }
-    debounceRef.current = setTimeout(async () => {
-      if (!userPos) return;
-      abortRef.current?.abort();
-      abortRef.current = new AbortController();
-      setLoading(true);
-      try {
-        const results = await searchHospitalsByName(query.trim(), userPos, abortRef.current.signal);
-        setHospitals(results);
-        setMapPins(results.slice(0, 20));
-      } catch {
-        // ignore abort
-      } finally {
-        setLoading(false);
-      }
-    }, 500);
-  }, [query, userPos, loadNearby]);
-
-  const handleSelect = (h: LiveHospital) => {
+  const handleSelect = (h: NormalizedHospital) => {
     onSelect(h);
-    map.flyTo([h.lat, h.lng], 15, { animate: true, duration: 1.2 });
     setOpen(false);
-    setQuery('');
   };
-
-  const maxRadiusKm = radiusMeters / 1000;
 
   return (
     <>
-      {/* Map pins for search results */}
-      {mapPins.map(h => (
-        <Marker
-          key={h.id}
-          position={[h.lat, h.lng]}
-          icon={searchResultIcon(h.id === selectedHospitalId)}
-          zIndexOffset={h.id === selectedHospitalId ? 1000 : 500}
-          eventHandlers={{ click: () => handleSelect(h) }}
-        >
-          <Popup className="aero-custom-popup">
-            <div className="font-sans p-1 min-w-[180px]">
-              <p className="font-bold text-sm text-gray-900">{h.name}</p>
-              {h.address && <p className="text-xs text-gray-500 mt-0.5 leading-tight">{h.address.slice(0, 60)}</p>}
-              <div className="flex items-center justify-between mt-2">
-                <span className="text-xs bg-blue-100 text-blue-700 font-bold px-2 py-0.5 rounded-full">
-                  {h.distanceLabel}
-                </span>
-                <button
-                  onClick={() => handleSelect(h)}
-                  className="text-xs bg-emerald-600 text-white font-bold px-3 py-1 rounded-lg hover:bg-emerald-500 cursor-pointer"
-                >
-                  Select
-                </button>
-              </div>
-            </div>
-          </Popup>
-        </Marker>
-      ))}
-
       {/* Floating search panel — absolute positioned over map */}
       <div className="absolute top-14 left-3 z-[500] w-[320px] max-w-[calc(100vw-1.5rem)] pointer-events-auto">
 
@@ -165,15 +67,15 @@ export function HospitalSearchPanel({
           <input
             ref={inputRef}
             type="text"
-            value={query}
-            onChange={e => setQuery(e.target.value)}
+            value={localSearch}
+            onChange={e => setLocalSearch(e.target.value)}
             onFocus={() => setOpen(true)}
-            placeholder={`Search hospitals within ${maxRadiusKm} km…`}
+            placeholder={`Search hospitals within ${radiusKm} km…`}
             className="flex-1 text-xs text-white placeholder-text-secondary bg-transparent outline-none"
           />
-          {query && (
+          {localSearch && (
             <button
-              onClick={() => { setQuery(''); inputRef.current?.focus(); }}
+              onClick={() => { setLocalSearch(''); inputRef.current?.focus(); }}
               className="text-text-secondary hover:text-white cursor-pointer shrink-0"
             >
               <svg className="w-3.5 h-3.5" fill="currentColor" viewBox="0 0 20 20">
@@ -193,29 +95,55 @@ export function HospitalSearchPanel({
 
         {/* Results dropdown */}
         {open && (
-          <div className="mt-1.5 bg-bg-surface rounded-2xl shadow-xl border border-border-subtle overflow-hidden max-h-[340px] flex flex-col">
-            {/* Header */}
-            <div className="px-3 py-2 border-b border-border-subtle flex items-center justify-between bg-bg-elevated">
-              <span className="telemetry-label">
-                {loading ? 'Searching live map data…' : `${hospitals.length} hospitals within ${maxRadiusKm} km`}
-              </span>
-              {!loading && hospitals.length > 0 && (
-                <span className="text-[10px] text-[#35C7FF] font-medium">📡 Live Map Data</span>
-              )}
+          <div className="mt-1.5 bg-bg-surface rounded-2xl shadow-xl border border-border-subtle overflow-hidden flex flex-col" style={{ maxHeight: '60vh' }}>
+            {/* Header with Radius Selector */}
+            <div className="px-3 py-2 border-b border-border-subtle flex flex-col gap-2 bg-bg-elevated shrink-0">
+              <div className="flex items-center justify-between">
+                <span className="telemetry-label text-[10px] font-bold uppercase">
+                  {loading ? 'SEARCHING NEARBY HOSPITALS...' : 
+                   error ? (error.includes('configured') ? 'HOSPITAL SERVICE NOT CONFIGURED' : 'HOSPITAL SEARCH ERROR') :
+                   hospitals.length > 0 ? `${hospitals.length} HOSPITALS FOUND` : 
+                   'NO HOSPITALS FOUND'}
+                </span>
+                {!loading && !error && hospitals.length > 0 && (
+                  <span className="text-[10px] text-[#35C7FF] font-medium">📡 Live Map Data</span>
+                )}
+              </div>
+              <div className="flex items-center gap-1.5 mt-1">
+                {[5, 15, 25, 50].map(r => (
+                  <button
+                    key={r}
+                    onClick={() => onRadiusChange(r)}
+                    className={`px-2 py-0.5 rounded text-[10px] font-bold border transition-colors cursor-pointer ${
+                      radiusKm === r 
+                        ? 'bg-[#35C7FF] text-bg-main border-[#35C7FF]' 
+                        : 'bg-bg-main text-text-secondary border-border-subtle hover:text-white'
+                    }`}
+                  >
+                    {r} km
+                  </button>
+                ))}
+              </div>
             </div>
 
-            {/* List */}
-            <div className="overflow-y-auto flex-1">
+            {/* List with correct scroll containment */}
+            <div 
+              className="overflow-y-auto flex-1 overscroll-contain"
+              style={{ minHeight: 0 }}
+              onWheelCapture={e => e.stopPropagation()}
+            >
               {hospitals.length === 0 && !loading && (
                 <div className="flex flex-col items-center justify-center py-8 text-center px-4">
                   <span className="text-2xl mb-2">🏥</span>
-                  <p className="text-xs text-text-secondary font-medium">No hospitals found nearby</p>
+                  <p className="text-xs text-text-secondary font-medium">
+                    {error ? error : 'NO HOSPITALS FOUND'}
+                  </p>
                   <p className="text-[10px] text-text-secondary mt-1">Try a different search or extend the radius</p>
                 </div>
               )}
               {hospitals.map((h, i) => {
                 const isSelected = h.id === selectedHospitalId;
-                const distKm = h.distanceMeters / 1000;
+                const distKm = (h as any).drivingDistanceMeters ? (h as any).drivingDistanceMeters / 1000 : h.distanceMeters / 1000;
                 const urgencyColor = distKm < 3 ? 'text-[#20D67A]' : distKm < 8 ? 'text-[#FFB020]' : 'text-[#35C7FF]';
                 return (
                   <div key={h.id} className="flex flex-col border-b border-border-subtle last:border-0">
@@ -238,7 +166,7 @@ export function HospitalSearchPanel({
                             {h.name}
                           </p>
                           <span className={`text-[11px] font-mono font-bold shrink-0 ${urgencyColor}`}>
-                            {h.distanceLabel}
+                            {distKm.toFixed(1)} km
                           </span>
                         </div>
                         {h.address && (
@@ -260,13 +188,6 @@ export function HospitalSearchPanel({
                         </svg>
                       )}
                     </button>
-                    {h.googleMapsUri && (
-                      <div className="px-3 pb-2 pt-1 flex justify-end">
-                         <a href={h.googleMapsUri} target="_blank" rel="noreferrer" className="text-[10px] font-bold text-[#35C7FF] hover:text-[#35C7FF]/80 underline">
-                           [ OPEN IN GOOGLE MAPS ]
-                         </a>
-                      </div>
-                    )}
                   </div>
                 );
               })}

@@ -66,11 +66,23 @@ class RealtimeService {
   }
 
   // ── Event Bus ──
+  private lastEventData: Map<string, any> = new Map();
+
   public on(event: string, handler: EventHandler) {
     if (!this.listeners.has(event)) {
       this.listeners.set(event, new Set());
     }
     this.listeners.get(event)!.add(handler);
+
+    // If there's already data for this event, dispatch it immediately to the new listener
+    if (this.lastEventData.has(event)) {
+      try {
+        handler(this.lastEventData.get(event));
+      } catch (err) {
+        console.error(`Error in immediate event listener dispatch for ${event}:`, err);
+      }
+    }
+
     return () => this.off(event, handler);
   }
 
@@ -82,6 +94,7 @@ class RealtimeService {
   }
 
   private dispatchLocal(event: string, data: any) {
+    this.lastEventData.set(event, data);
     const set = this.listeners.get(event);
     if (set) {
       set.forEach(handler => {

@@ -1,11 +1,10 @@
-import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import type { UserRole, ConnectionState, GPSState } from '../../types';
 import { ConnectionIndicator } from '../status/ConnectionIndicator';
 import { GPSIndicator } from '../status/GPSIndicator';
 import { Badge } from '../ui/Badge';
 import { AccountMenu } from './AccountMenu';
-import { audioAlert } from '../../utils/audioAlert';
+import { useAuth } from '../../providers/AuthProvider';
 
 interface StatusBarProps {
   userRole?: UserRole;
@@ -13,6 +12,7 @@ interface StatusBarProps {
   connectionState: ConnectionState;
   gpsState?: GPSState;
   gpsAccuracy?: number;
+  gpsTimestamp?: Date | null;
 }
 
 const roleLabels: Record<UserRole, string> = {
@@ -30,23 +30,18 @@ const roleBadgeVariant: Record<UserRole, 'info' | 'warning' | 'emergency' | 'neu
 };
 
 export function StatusBar({
-  userRole,
-  userName,
+  userRole: propUserRole,
+  userName: propUserName,
   connectionState,
   gpsState,
   gpsAccuracy,
+  gpsTimestamp,
 }: StatusBarProps) {
   const navigate = useNavigate();
-  const [isMuted, setIsMuted] = useState(audioAlert.getIsMuted());
-
-  const toggleAudio = () => {
-    const nextMuted = !isMuted;
-    setIsMuted(nextMuted);
-    audioAlert.setMuted(nextMuted);
-    if (!nextMuted) {
-      audioAlert.playSuccessChime();
-    }
-  };
+  const { profile } = useAuth();
+  
+  const userRole = propUserRole || (profile?.role?.toUpperCase() as UserRole) || 'AMBULANCE';
+  const userName = propUserName || profile?.full_name || 'Operator';
 
   return (
     <header className="h-14 bg-bg-surface border-b border-border-subtle flex items-center justify-between px-4 sm:px-6 shrink-0 z-50">
@@ -79,33 +74,14 @@ export function StatusBar({
 
       {/* Right: Indicators & Controls */}
       <div className="flex items-center gap-3 sm:gap-4">
-        {/* Audio Siren Alert Toggle */}
-        <button
-          onClick={toggleAudio}
-          className={`px-3 py-1.5 rounded-lg text-xs font-bold flex items-center gap-1.5 border transition-all ${
-            isMuted
-              ? 'bg-transparent text-text-secondary border-border-subtle hover:text-text-primary hover:border-border-strong'
-              : 'bg-[#E53935]/10 text-[#E53935] border-[#E53935]/20 hover:bg-[#E53935]/20'
-          }`}
-          title={isMuted ? 'Unmute Audio Siren Alerts' : 'Mute Audio Siren Alerts'}
-        >
-          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round">
-            {isMuted
-              ? <><path d="M11 5L6 9H2v6h4l5 4V5z"/><line x1="23" y1="9" x2="17" y2="15"/><line x1="17" y1="9" x2="23" y2="15"/></>
-              : <><path d="M11 5L6 9H2v6h4l5 4V5z"/><path d="M15.54 8.46a5 5 0 0 1 0 7.07"/><path d="M19.07 4.93a10 10 0 0 1 0 14.14"/></>
-            }
-          </svg>
-          <span>{isMuted ? 'Muted' : 'Siren ON'}</span>
-        </button>
-
         {gpsState && (
-          <GPSIndicator state={gpsState} accuracy={gpsAccuracy} />
+          <GPSIndicator state={gpsState} accuracy={gpsAccuracy} timestamp={gpsTimestamp} />
         )}
         <ConnectionIndicator state={connectionState} />
         {userName && userRole && (
           <>
             <div className="w-px h-6 bg-border-subtle hidden sm:block mx-1" />
-            <AccountMenu userName={userName} userRole={userRole} />
+            <AccountMenu />
           </>
         )}
       </div>

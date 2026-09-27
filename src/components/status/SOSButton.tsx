@@ -1,12 +1,11 @@
-import { useState } from 'react';
-import { Dialog } from '../ui/Dialog';
+
 
 interface SOSButtonProps {
   disabled?: boolean;
   loading?: boolean;
   onConfirm: () => void;
-  hospitalName?: string;
   disabledReason?: string;
+  label?: string;
   className?: string;
 }
 
@@ -14,19 +13,12 @@ export function SOSButton({
   disabled = false,
   loading = false,
   onConfirm,
-  hospitalName,
   disabledReason,
+  label = 'SOS',
   className = '',
 }: SOSButtonProps) {
-  const [showConfirm, setShowConfirm] = useState(false);
-
   const handleClick = () => {
     if (disabled) return;
-    setShowConfirm(true);
-  };
-
-  const handleConfirm = () => {
-    setShowConfirm(false);
     onConfirm();
   };
 
@@ -58,7 +50,7 @@ export function SOSButton({
             </svg>
           ) : (
             <>
-              <span className="relative z-10">SOS</span>
+              <span className="relative z-10 text-center text-sm font-bold leading-tight">{label}</span>
               {!disabled && (
                 <span className="absolute inset-0 rounded-full animate-pulse-emergency" aria-hidden="true" />
               )}
@@ -71,24 +63,6 @@ export function SOSButton({
           </p>
         )}
       </div>
-
-      <Dialog
-        open={showConfirm}
-        onClose={() => setShowConfirm(false)}
-        onConfirm={handleConfirm}
-        variant="emergency"
-        title="Confirm Emergency Alert"
-        description="You are about to send an emergency SOS to all available traffic police officers."
-        confirmLabel="CONFIRM SOS"
-        cancelLabel="Cancel"
-      >
-        {hospitalName && (
-          <div className="bg-bg-surface rounded-[6px] p-3 text-sm">
-            <span className="text-text-secondary">Destination: </span>
-            <span className="text-text-primary font-medium">{hospitalName}</span>
-          </div>
-        )}
-      </Dialog>
     </>
   );
 }

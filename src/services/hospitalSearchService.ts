@@ -49,25 +49,17 @@ export async function searchNearbyHospitals(
 ): Promise<LiveHospital[]> {
   const [lat, lng] = pos;
 
-  // 1. Try Google Places API Proxy
+  // 1. Try Google Places API via Supabase Edge Function
   try {
     console.log(`[AERO HOSPITAL] Querying Google Places API proxy for hospitals...`);
-    // Need auth token for backend proxy
-    const { data: { session } } = await supabase.auth.getSession();
-    const token = session?.access_token || '';
 
-    const res = await fetch('http://localhost:3001/api/places/hospitals', {
-      method: 'POST',
-      signal,
-      headers: { 
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${token}`
-      },
-      body: JSON.stringify({ latitude: lat, longitude: lng, radius: radiusMeters })
+    const { data, error } = await supabase.functions.invoke('search-hospitals', {
+      body: { latitude: lat, longitude: lng, radius: radiusMeters, type: 'hospital' }
     });
 
-    if (res.ok) {
-      const data = await res.json();
+    if (error) {
+      console.warn(`[AERO HOSPITAL] Google Places Proxy failed:`, error.message);
+    } else if (data) {
       const places = data.places || [];
       console.log(`[AERO HOSPITAL] Google Places returned ${places.length} results.`);
       
@@ -93,9 +85,6 @@ export async function searchNearbyHospitals(
       if (hospitals.length > 0) {
         return hospitals;
       }
-    } else {
-      const errorText = await res.text();
-      console.warn(`[AERO HOSPITAL] Google Places Proxy failed: HTTP ${res.status} - ${errorText}`);
     }
   } catch (err: any) {
     if (err.name === 'AbortError' && signal?.aborted) throw err;

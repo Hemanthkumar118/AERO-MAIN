@@ -1,9 +1,14 @@
-import { useState } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { mockHospitals } from '../../../mock';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Drawer } from '../../../components/ui/Drawer';
 import { EmergencyProtocolContent, TermsOfServiceContent } from '../../public/components/LegalContent';
+import { supabase } from '../../../lib/supabase';
+import { hospitalService } from '../../../services/hospitalService';
+import { geolocationService } from '../../../services/geolocationService';
+import { discoverHospitals } from '../../../services/hospitalSearch';
+import type { Hospital } from '../../../types';
+import type { NormalizedHospital } from '../../../services/hospitalSearch/types';
 
 interface RegisterPageProps {
   onRegister: (role: string) => void;
@@ -11,6 +16,7 @@ interface RegisterPageProps {
 
 export function RegisterPage({ onRegister }: RegisterPageProps) {
   const navigate = useNavigate();
+  const [hospitals, setHospitals] = useState<Hospital[]>([]);
   const [formData, setFormData] = useState({
     fullName: '',
     email: '',
@@ -18,16 +24,53 @@ export function RegisterPage({ onRegister }: RegisterPageProps) {
     role: 'AMBULANCE',
     badgeNumber: '',
     vehicleNumber: '',
-    hospitalId: mockHospitals[0].id,
+    hospitalId: '',
   });
   const [confirmPassword, setConfirmPassword] = useState('');
   const [agreed, setAgreed] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState('');
+  const [mapHospitals, setMapHospitals] = useState<NormalizedHospital[]>([]);
   
   // Drawer state
   const [legalDrawerOpen, setLegalDrawerOpen] = useState(false);
   const [legalDrawerType, setLegalDrawerType] = useState<'protocol' | 'terms'>('protocol');
+
+  // Combobox state
+  const [hospitalSearchTerm, setHospitalSearchTerm] = useState('');
+  const [isDropdownOpen, setIsDropdownOpen] = useState(false);
+
+  useEffect(() => {
+    const loadMapHospitals = (lat: number, lng: number) => {
+      const abortCtrl = new AbortController();
+      discoverHospitals(lat, lng, 5000, undefined, abortCtrl.signal)
+        .then(data => {
+          setMapHospitals(data);
+          if (data.length > 0 && !formData.hospitalId) {
+            setFormData(prev => ({ ...prev, hospitalId: data[0].id }));
+          }
+        })
+        .catch(console.error);
+    };
+
+    // Attempt to load from map API if geolocation is available
+    geolocationService.getCurrentPosition()
+      .then(pos => {
+        loadMapHospitals(pos.latitude, pos.longitude);
+      })
+      .catch(() => {
+        // Fallback to a default location (Hyderabad) if geolocation is denied/fails
+        loadMapHospitals(17.44, 78.34);
+      });
+
+    // Also load local DB hospitals
+    hospitalService.getAllHospitals().then(data => {
+      setHospitals(data);
+      if (data.length > 0) {
+        setFormData(prev => ({ ...prev, hospitalId: prev.hospitalId || data[0].id }));
+      }
+    });
+  }, []);
 
   const calculatePasswordStrength = (pass: string) => {
     if (pass.length === 0) return 0;
@@ -41,6 +84,37 @@ export function RegisterPage({ onRegister }: RegisterPageProps) {
 
   const strength = calculatePasswordStrength(formData.password || '');
 
+  const activeHospitals = useMemo(() => {
+    const combinedMap = new Map<string, typeof hospitals[0] | NormalizedHospital>();
+    
+    // Add Map hospitals first so they retain their distanceMeters for correct sorting
+    mapHospitals.forEach(h => {
+      combinedMap.set(h.name.toLowerCase().trim(), h as any);
+    });
+
+    // Add DB hospitals (keeping map hospitals if they are similar)
+    hospitals.forEach(h => {
+      const key = h.name.toLowerCase().trim();
+      if (!combinedMap.has(key)) {
+        combinedMap.set(key, h);
+      }
+    });
+    
+    const combined = Array.from(combinedMap.values());
+    
+    return combined.sort((a, b) => {
+      const distA = 'distanceMeters' in a ? (a as NormalizedHospital).distanceMeters : 999999;
+      const distB = 'distanceMeters' in b ? (b as NormalizedHospital).distanceMeters : 999999;
+      return distA - distB;
+    });
+  }, [hospitals, mapHospitals]);
+
+  const filteredHospitals = activeHospitals.filter(h => 
+    h.name.toLowerCase().includes(hospitalSearchTerm.toLowerCase()) || 
+    (h.address && h.address.toLowerCase().includes(hospitalSearchTerm.toLowerCase()))
+  );
+  const selectedHospitalName = activeHospitals.find(h => h.id === formData.hospitalId)?.name || '';
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError('');
@@ -52,11 +126,51 @@ export function RegisterPage({ onRegister }: RegisterPageProps) {
 
     setIsLoading(true);
     
-    // DEMO MODE: Bypass Supabase Auth completely
-    setTimeout(() => {
+    try {
+      let finalHospitalId = formData.hospitalId;
+
+      // If user selected a map-based hospital (id is not a UUID)
+      const isUuid = /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/.test(finalHospitalId);
+      if (!isUuid && ['HOSPITAL', 'AMBULANCE'].includes(formData.role) && finalHospitalId) {
+        const selectedMapHosp = mapHospitals.find(h => h.id === finalHospitalId);
+        if (selectedMapHosp) {
+          const { data, error: rpcError } = await supabase.rpc('get_or_create_hospital', {
+            p_name: selectedMapHosp.name,
+            p_address: selectedMapHosp.address || '',
+            p_lat: selectedMapHosp.lat,
+            p_lng: selectedMapHosp.lng,
+            p_phone: selectedMapHosp.phone || ''
+          });
+          
+          if (rpcError) throw rpcError;
+          if (data) finalHospitalId = data;
+        }
+      }
+      const { data: _data, error: signUpError } = await supabase.auth.signUp({
+        email: formData.email,
+        password: formData.password,
+        options: {
+          data: {
+            full_name: formData.fullName,
+            role: formData.role.toLowerCase(),
+            badge_number: formData.badgeNumber,
+            vehicle_number: formData.vehicleNumber,
+            hospital_id: finalHospitalId || null,
+          },
+        },
+      });
+
+      if (signUpError) throw signUpError;
+      
+      // Successfully registered and (if email confirmations are disabled) logged in.
+      // Assuming automatic login:
       onRegister(formData.role);
+    } catch (err: any) {
+      console.error('Registration error:', err);
+      setError(err.message || 'Failed to create account');
+    } finally {
       setIsLoading(false);
-    }, 600); // Small fake delay for UX
+    }
   };
 
   const strengthColor = strength < 50 ? '#E53935' : strength < 75 ? '#FFB020' : '#20C997';
@@ -295,18 +409,65 @@ export function RegisterPage({ onRegister }: RegisterPageProps) {
                   </motion.div>
                 )}
 
-                {formData.role === 'HOSPITAL' && (
-                  <motion.div initial={{ opacity: 0, y: -8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -8 }} transition={{ duration: 0.3 }} className="group">
+                {['HOSPITAL', 'AMBULANCE'].includes(formData.role) && (
+                  <motion.div initial={{ opacity: 0, y: -8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -8 }} transition={{ duration: 0.3 }} className="group relative z-20">
                     <label className="block text-[10px] font-bold text-[#A7ADB5] uppercase tracking-widest mb-2 transition-colors group-focus-within:text-white">Assigned Hospital Facility</label>
-                    <select
-                      value={formData.hospitalId || mockHospitals[0].id}
-                      onChange={(e) => setFormData({...formData, hospitalId: e.target.value})}
-                      className="enterprise-input appearance-none cursor-pointer focus:border-[#E53935] focus:ring-1 focus:ring-[#E53935]/30 focus:shadow-[0_0_15px_rgba(229,57,53,0.15)] transition duration-200"
-                    >
-                      {mockHospitals.map(h => (
-                        <option key={h.id} value={h.id}>{h.name} ({h.address})</option>
-                      ))}
-                    </select>
+                    <div className="relative">
+                      <input
+                        type="text"
+                        placeholder="Search hospital..."
+                        value={isDropdownOpen ? hospitalSearchTerm : (selectedHospitalName || hospitalSearchTerm)}
+                        onChange={(e) => {
+                          setHospitalSearchTerm(e.target.value);
+                          setIsDropdownOpen(true);
+                        }}
+                        onFocus={() => {
+                          setHospitalSearchTerm('');
+                          setIsDropdownOpen(true);
+                        }}
+                        onBlur={() => setTimeout(() => setIsDropdownOpen(false), 200)}
+                        className="enterprise-input focus:border-[#E53935] focus:ring-1 focus:ring-[#E53935]/30 focus:shadow-[0_0_15px_rgba(229,57,53,0.15)] transition duration-200"
+                      />
+                      <AnimatePresence>
+                        {isDropdownOpen && (
+                          <motion.div 
+                            initial={{ opacity: 0, y: 5 }}
+                            animate={{ opacity: 1, y: 0 }}
+                            exit={{ opacity: 0, y: 5 }}
+                            className="absolute z-[100] w-full mt-2 max-h-60 overflow-y-auto bg-[#0F1218] border border-border-subtle rounded-xl shadow-2xl custom-scrollbar"
+                          >
+                            {filteredHospitals.length === 0 ? (
+                              <div className="p-4 text-sm text-[#A7ADB5] text-center">No hospitals found</div>
+                            ) : (
+                              filteredHospitals.map(h => (
+                                <div
+                                  key={h.id}
+                                  onClick={() => {
+                                    setFormData({...formData, hospitalId: h.id});
+                                    setHospitalSearchTerm('');
+                                    setIsDropdownOpen(false);
+                                  }}
+                                  className="p-3 hover:bg-white/5 cursor-pointer border-b border-white/5 last:border-0 transition-colors flex justify-between items-start gap-4"
+                                >
+                                  <div>
+                                    <div className="text-white text-sm font-medium">{h.name}</div>
+                                    {h.address && <div className="text-[#A7ADB5] text-[10px] mt-0.5 line-clamp-1">{h.address}</div>}
+                                  </div>
+                                  {('distanceMeters' in h) && (
+                                    <div className="text-xs font-bold text-[#20C997] shrink-0 bg-[#20C997]/10 px-2 py-0.5 rounded-full">
+                                      {((h as NormalizedHospital).distanceMeters / 1000).toFixed(1)} km
+                                    </div>
+                                  )}
+                                </div>
+                              ))
+                            )}
+                          </motion.div>
+                        )}
+                      </AnimatePresence>
+                    </div>
+                    {mapHospitals.length > 0 && (
+                      <p className="text-[10px] text-[#20C997] mt-1.5 font-bold">📡 Loaded from Live Map Data</p>
+                    )}
                   </motion.div>
                 )}
               </AnimatePresence>

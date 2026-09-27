@@ -1,5 +1,6 @@
-import { Polyline } from 'react-leaflet';
+import { useEffect, useRef } from 'react';
 import type { CongestionSegment } from '../../types';
+import { useMappls } from './MapplsContext';
 
 interface RoutePolylineProps {
   positions: [number, number][];
@@ -12,7 +13,12 @@ export function RoutePolyline({
   active = true,
   congestionSegments,
 }: RoutePolylineProps) {
-  if (!positions || positions.length < 2) return null;
+  const { map, mapplsClassObject } = useMappls();
+  const outerLineRef = useRef<any>(null);
+  const baseLineRef = useRef<any>(null);
+  const congestionLinesRef = useRef<any[]>([]);
+  const mainLineRef = useRef<any>(null);
+  const pulseLineRef = useRef<any>(null);
 
   // Color mapping for traffic congestion
   const congestionColors: Record<string, string> = {
@@ -22,75 +28,83 @@ export function RoutePolyline({
     red: '#ef4444', // Gridlock (< 10 km/h)
   };
 
-  return (
-    <>
-      {/* Outer Neon Glow Layer */}
-      <Polyline
-        positions={positions}
-        pathOptions={{
-          color: active ? '#ef4444' : '#94a3b8',
-          weight: 10,
-          opacity: active ? 0.3 : 0.15,
-          lineCap: 'round',
-          lineJoin: 'round',
-        }}
-      />
+  useEffect(() => {
+    if (!map || !mapplsClassObject || !positions || positions.length < 2) return;
 
-      {/* Base Solid Route Line */}
-      <Polyline
-        positions={positions}
-        pathOptions={{
-          color: active ? '#1e293b' : '#cbd5e1',
-          weight: 6,
-          opacity: 0.8,
-          lineCap: 'round',
-          lineJoin: 'round',
-        }}
-      />
+    const path = positions.map(pos => ({ lat: pos[0], lng: pos[1] }));
 
-      {/* Render Congestion Segments if available */}
-      {congestionSegments && congestionSegments.length > 0 ? (
-        congestionSegments.map((segment, idx) => (
-          <Polyline
-            key={`congestion-${idx}`}
-            positions={segment.polyline}
-            pathOptions={{
-              color: congestionColors[segment.level] || '#06b6d4',
-              weight: 4,
-              opacity: 0.95,
-              lineCap: 'round',
-              lineJoin: 'round',
-            }}
-          />
-        ))
-      ) : (
-        /* Main Neon Line */
-        <Polyline
-          positions={positions}
-          pathOptions={{
-            color: active ? '#06b6d4' : '#64748b',
-            weight: 4,
-            opacity: active ? 0.95 : 0.6,
-            lineCap: 'round',
-            lineJoin: 'round',
-            dashArray: active ? undefined : '6 10',
-          }}
-        />
-      )}
+    // Cleanup previous lines
+    const cleanup = () => {
+      if (outerLineRef.current) outerLineRef.current.remove();
+      if (baseLineRef.current) baseLineRef.current.remove();
+      congestionLinesRef.current.forEach(line => line.remove());
+      congestionLinesRef.current = [];
+      if (mainLineRef.current) mainLineRef.current.remove();
+      if (pulseLineRef.current) pulseLineRef.current.remove();
+    };
+    
+    cleanup();
 
-      {/* Pulsing Emergency Flow (Dashed Top Overlay) */}
-      {active && (
-        <Polyline
-          positions={positions}
-          pathOptions={{
-            color: '#ffffff',
-            weight: 2,
-            opacity: 0.8,
-            dashArray: '8 16',
-            lineCap: 'round',
-          }}
-        />
-      )}
-    </>
-  );
+    const createPolyline = (options: any) => {
+      return new (mapplsClassObject as any).Polyline({
+        map: map,
+        path: options.path || path,
+        strokeColor: options.strokeColor,
+        strokeOpacity: options.strokeOpacity,
+        strokeWeight: options.strokeWeight,
+        lineCap: 'round',
+        lineJoin: 'round',
+        strokeDashstyle: options.strokeDashstyle,
+      });
+    };
+
+    // Outer Neon Glow Layer
+    outerLineRef.current = createPolyline({
+      strokeColor: active ? '#ef4444' : '#94a3b8',
+      strokeWeight: 10,
+      strokeOpacity: active ? 0.3 : 0.15,
+    });
+
+    // Base Solid Route Line
+    baseLineRef.current = createPolyline({
+      strokeColor: active ? '#1e293b' : '#cbd5e1',
+      strokeWeight: 6,
+      strokeOpacity: 0.8,
+    });
+
+    if (congestionSegments && congestionSegments.length > 0) {
+      congestionSegments.forEach((segment) => {
+        const segPath = segment.polyline.map(pos => ({ lat: pos[0], lng: pos[1] }));
+        const segLine = createPolyline({
+          path: segPath,
+          strokeColor: congestionColors[segment.level] || '#06b6d4',
+          strokeWeight: 4,
+          strokeOpacity: 0.95,
+        });
+        congestionLinesRef.current.push(segLine);
+      });
+    } else {
+      mainLineRef.current = createPolyline({
+        strokeColor: active ? '#06b6d4' : '#64748b',
+        strokeWeight: 4,
+        strokeOpacity: active ? 0.95 : 0.6,
+        strokeDashstyle: active ? undefined : 'dash',
+      });
+    }
+
+    if (active) {
+      // Mappls SDK doesn't natively support animating dashed lines easily without direct mapbox gl integration.
+      // But we can add a basic dashed line on top.
+      pulseLineRef.current = createPolyline({
+        strokeColor: '#ffffff',
+        strokeWeight: 2,
+        strokeOpacity: 0.8,
+        strokeDashstyle: 'dash',
+      });
+    }
+
+    return cleanup;
+  }, [map, mapplsClassObject, positions, active, congestionSegments]);
+
+  return null;
 }

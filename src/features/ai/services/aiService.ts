@@ -8,20 +8,30 @@ export interface ChatMessage {
 }
 
 export const aiService = {
-  async sendMessage(message: string, conversationId: string | null, incidentContext?: string): Promise<{ reply: string, conversationId: string }> {
+  async sendMessage(message: string, conversationId: string | null, retryCount = 0): Promise<{ reply: string, conversationId: string }> {
     const { data: { session } } = await supabase.auth.getSession();
     if (!session) throw new Error('Not authenticated');
 
-    const response = await fetch('http://localhost:3001/api/ai/chat', {
+    const baseUrl = import.meta.env.VITE_BACKEND_URL || (import.meta.env.DEV ? 'http://localhost:3001' : '');
+    const response = await fetch(`${baseUrl}/api/ai/chat`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
         'Authorization': `Bearer ${session.access_token}`
       },
-      body: JSON.stringify({ message, conversationId, incidentContext })
+      body: JSON.stringify({ message, conversationId })
     });
 
     if (!response.ok) {
+      if (response.status === 401 && retryCount === 0) {
+        // Token might have expired, try fetching fresh session and retry once
+        return this.sendMessage(message, conversationId, 1);
+      }
+      
+      if (response.status === 401) {
+        throw new Error('Your AERO session has expired. Please sign in again.');
+      }
+
       const errorData = await response.json().catch(() => ({}));
       throw new Error(errorData.error || 'Failed to communicate with AERO AI.');
     }

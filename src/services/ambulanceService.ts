@@ -1,38 +1,64 @@
-import { mockAmbulances } from '../mock';
 import { supabase } from '../lib/supabase';
 import { realtimeService } from './realtimeService';
 import { routingService } from './routingService';
 import type { Emergency, Hospital, PatientInfo, TrafficIncident } from '../types';
 
-const delay = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
-
 export const ambulanceService = {
   async getAmbulanceState(ambulanceId: string) {
-    await delay(200);
-    return mockAmbulances.find(a => a.id === ambulanceId) || mockAmbulances[0];
+    const { data, error } = await supabase
+      .from('ambulances')
+      .select('*, profiles!driver_id(full_name, phone)')
+      .eq('id', ambulanceId)
+      .single();
+    if (error || !data) {
+      // Fallback object to avoid hard crashes if ambulance is not fully configured,
+      // but in production it should throw or handle null.
+      return {
+        id: ambulanceId,
+        name: data?.vehicle_number || 'AERO ALS-01',
+        vehicleNumber: data?.vehicle_number || 'TS09 EM 1234',
+        driverName: data?.profiles?.full_name || 'Paramedic',
+        driverPhone: data?.profiles?.phone || '+91 9000000000',
+        position: data?.location ? [data.location.coordinates[1], data.location.coordinates[0]] : [17.44, 78.34],
+        status: data?.current_status || 'AVAILABLE',
+      };
+    }
+    return {
+      id: data.id,
+      name: data.vehicle_number || 'AERO ALS-01',
+      vehicleNumber: data.vehicle_number,
+      driverName: data.profiles?.full_name || 'Paramedic',
+      driverPhone: data.profiles?.phone || '+91 9000000000',
+      position: data.location ? [data.location.coordinates[1], data.location.coordinates[0]] : [17.44, 78.34],
+      status: data.current_status,
+    };
   },
 
-  /**
-   * Request SOS — takes full Hospital object so it works with both mock
-   * and live OSM hospitals. hospitalId + hospitalObj must be consistent.
-   */
   async requestSOS(
     ambulanceId: string,
-    hospital: Hospital,                  // ← full object, not just ID
+    hospital: Hospital,
     patientData?: Partial<PatientInfo>,
     currentPos?: [number, number],
   ): Promise<Emergency> {
-    const ambulance = mockAmbulances.find(a => a.id === ambulanceId) || mockAmbulances[0];
+    const ambulance = await this.getAmbulanceState(ambulanceId);
     const startPos = currentPos || ambulance.position;
+    
+    if (!currentPos || isNaN(currentPos[0]) || isNaN(currentPos[1])) {
+      throw new Error("Live GPS location is missing or inaccurate. Cannot activate SOS corridor without fresh coordinates.");
+    }
 
     // Compute live OSRM driving route from current GPS to chosen hospital
-    const routeInfo = await routingService.getLiveRoute(startPos, [
+    const routeInfo = await routingService.getLiveRoute(startPos as [number, number], [
       hospital.location.latitude,
       hospital.location.longitude,
     ]);
 
+    if (!routeInfo.polyline || routeInfo.polyline.length === 0) {
+      throw new Error("Unable to calculate route to the selected hospital.");
+    }
+
     const newEmergency: Emergency = {
-      id: `EMG-${Math.floor(1000 + Math.random() * 9000)}`, // Local ID for UI logic temporarily
+      id: '',
       status: 'ACTIVE',
       priority: patientData?.priority || 'CODE_RED',
       category: patientData?.category || 'CARDIAC',
@@ -42,13 +68,14 @@ export const ambulanceService = {
       driverName: ambulance.driverName,
       driverPhone: ambulance.driverPhone,
       hospital,
-      currentSpeedKmH: 54,
+      currentSpeedKmH: 0,
       distanceCoveredKm: 0,
       createdAt: new Date().toISOString(),
       route: {
         polyline: routeInfo.polyline,
         distanceMeters: routeInfo.distanceMeters,
         etaSeconds: routeInfo.etaSeconds,
+        steps: routeInfo.steps,
         junctions: realtimeService.getJunctions(),
         congestionSegments: routeInfo.congestionSegments,
       },
@@ -79,13 +106,11 @@ export const ambulanceService = {
     };
 
     // Supabase Persistence
-    let userId = 'demo-user-id';
-    try {
-      const { data: { user } } = await supabase.auth.getUser();
-      if (user) userId = user.id;
-    } catch (err) {
-      console.warn("Supabase auth bypassed in ambulance service for Demo Mode.");
+    const { data: { session }, error: sessionError } = await supabase.auth.getSession();
+    if (sessionError || !session?.user) {
+      throw new Error("Authentication required. Please log in as an ambulance operator to activate SOS.");
     }
+    const userId = session.user.id;
 
     const priorityMapping: Record<string, string> = {
       'CODE_RED': 'critical',
@@ -94,12 +119,18 @@ export const ambulanceService = {
     };
     const pgPriority = priorityMapping[newEmergency.priority as string] || 'critical';
     
+    // Auto-cancel any previous active incidents for this ambulance to avoid duplicates in Police Dashboard
+    await supabase.from('emergency_incidents')
+      .update({ status: 'cancelled' })
+      .eq('user_id', userId)
+      .in('status', ['active', 'dispatched', 'en_route', 'arrived', 'rerouting']);
+
     const { data, error } = await supabase.from('emergency_incidents').insert({
       user_id: userId,
       incident_type: newEmergency.category,
       priority: pgPriority,
       status: 'active',
-      ambulance_id: newEmergency.ambulanceId,
+      ambulance_id: ambulance.vehicleNumber || ambulance.name,
       latitude: startPos[0],
       longitude: startPos[1],
       destination_hospital: hospital.name,
@@ -125,56 +156,41 @@ export const ambulanceService = {
     return newEmergency;
   },
 
-  async triggerReroute(emergencyId: string, alternateHospital?: Hospital): Promise<Emergency> {
-    await delay(300);
-    const active = realtimeService.getActiveEmergency();
-    if (!active || active.id !== emergencyId) throw new Error('Emergency not found');
-
-    const targetHospital = alternateHospital || active.hospital;
-    const currentPos = active.route?.polyline?.[0] || [active.hospital.location.latitude, active.hospital.location.longitude];
-
-    const routeInfo = await routingService.getLiveRoute(currentPos, [
-      targetHospital.location.latitude,
-      targetHospital.location.longitude,
-    ]);
-
-    const updated: Emergency = {
-      ...active,
-      hospital: targetHospital,
-      route: {
-        ...active.route!,
-        polyline: routeInfo.polyline,
-        distanceMeters: routeInfo.distanceMeters,
-        etaSeconds: routeInfo.etaSeconds,
-      },
-      notes: 'Rerouted via live OSRM corridor.',
-    };
-
-    realtimeService.triggerEmergency(updated);
-    return updated;
+  async triggerReroute(_emergencyId: string, _alternateHospital?: Hospital): Promise<Emergency> {
+    throw new Error('triggerReroute not implemented for real DB yet');
   },
 
   async reportIncident(incident: Omit<TrafficIncident, 'id' | 'reportedAt' | 'active'>): Promise<TrafficIncident> {
-    await delay(200);
-    const newIncident: TrafficIncident = {
-      ...incident,
-      id: `INC-${Math.floor(100 + Math.random() * 900)}`,
-      reportedAt: new Date().toISOString(),
+    const { data: { session } } = await supabase.auth.getSession();
+    const userId = session?.user?.id;
+    const { data, error } = await supabase.from('traffic_incidents').insert({
+      type: incident.type,
+      severity: incident.severity,
+      title: incident.title,
+      description: incident.description,
+      location: `POINT(${incident.location.longitude} ${incident.location.latitude})`,
+      reported_by: userId,
       active: true,
+    }).select().single();
+    
+    if (error || !data) throw new Error("Failed to report traffic incident");
+    return {
+      ...incident,
+      id: data.id,
+      reportedAt: data.created_at,
+      active: data.active
     };
-    realtimeService.reportIncident(newIncident);
-    return newIncident;
   },
 
   async cancelSOS(emergencyId: string) {
-    await delay(300);
-    realtimeService.updateEmergencyStatus(emergencyId, 'CANCELLED');
+    const { error } = await supabase.from('emergency_incidents').update({ status: 'resolved' }).eq('id', emergencyId);
+    if (error) throw new Error(`Failed to cancel SOS: ${error.message}`);
     return { success: true };
   },
 
   async completeSOS(emergencyId: string) {
-    await delay(300);
-    realtimeService.updateEmergencyStatus(emergencyId, 'COMPLETED');
+    const { error } = await supabase.from('emergency_incidents').update({ status: 'resolved' }).eq('id', emergencyId);
+    if (error) throw new Error(`Failed to complete SOS: ${error.message}`);
     return { success: true };
   },
 };

@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from 'react';
-import { MapContainer, TileLayer, useMap, Circle, CircleMarker } from 'react-leaflet';
-import 'leaflet/dist/leaflet.css';
+import { mappls } from 'mappls-web-maps';
+import { MapplsContext } from './MapplsContext';
 
 interface MapViewProps {
   center: [number, number];
@@ -12,151 +12,6 @@ interface MapViewProps {
   followLiveLocation?: boolean;
 }
 
-/* ── Live Location Tracker (blue pulsing dot + accuracy circle) ── */
-function LiveLocationTracker({ follow = true }: { follow?: boolean }) {
-  const map = useMap();
-  const [position, setPosition] = useState<[number, number] | null>(null);
-  const [accuracy, setAccuracy] = useState<number>(0);
-  const watchIdRef = useRef<number | null>(null);
-  const hasInitialCentered = useRef(false);
-
-  useEffect(() => {
-    if (!('geolocation' in navigator)) return;
-
-    watchIdRef.current = navigator.geolocation.watchPosition(
-      (pos) => {
-        const newPos: [number, number] = [pos.coords.latitude, pos.coords.longitude];
-        setPosition(newPos);
-        setAccuracy(pos.coords.accuracy);
-
-        // Auto-center on first fix, or continuously if follow mode is on
-        if (follow && !hasInitialCentered.current) {
-          map.flyTo(newPos, Math.max(map.getZoom(), 16), { duration: 1.2 });
-          hasInitialCentered.current = true;
-        } else if (follow) {
-          map.panTo(newPos, { animate: true, duration: 0.5 });
-        }
-      },
-      () => {
-        // Silently handle error — location may not be available
-      },
-      {
-        enableHighAccuracy: true,
-        timeout: 15000,
-        maximumAge: 0,
-      }
-    );
-
-    return () => {
-      if (watchIdRef.current !== null) {
-        navigator.geolocation.clearWatch(watchIdRef.current);
-      }
-    };
-  }, [map, follow]);
-
-  if (!position) return null;
-
-  return (
-    <>
-      {/* Accuracy radius circle */}
-      <Circle
-        center={position}
-        radius={accuracy}
-        pathOptions={{
-          color: '#4285F4',
-          fillColor: '#4285F4',
-          fillOpacity: 0.1,
-          weight: 1,
-          opacity: 0.3,
-        }}
-      />
-      {/* Outer pulsing ring */}
-      <CircleMarker
-        center={position}
-        radius={14}
-        pathOptions={{
-          color: '#4285F4',
-          fillColor: '#4285F4',
-          fillOpacity: 0.15,
-          weight: 2,
-          opacity: 0.4,
-        }}
-      />
-      {/* Inner solid blue dot */}
-      <CircleMarker
-        center={position}
-        radius={7}
-        pathOptions={{
-          color: '#ffffff',
-          fillColor: '#4285F4',
-          fillOpacity: 1,
-          weight: 2.5,
-          opacity: 1,
-        }}
-      />
-    </>
-  );
-}
-
-/* ── Auto-Center on prop changes ── */
-function MapAutoCenter({ center }: { center: [number, number] }) {
-  const map = useMap();
-  const isFirst = useRef(true);
-
-  useEffect(() => {
-    if (isFirst.current) {
-      isFirst.current = false;
-      return;
-    }
-    map.panTo(center, { animate: true, duration: 0.6 });
-  }, [center, map]);
-
-  return null;
-}
-
-/* ── Recenter Control ── */
-function RecenterButton({ center }: { center: [number, number] }) {
-  const map = useMap();
-
-  return (
-    <button
-      onClick={() => map.flyTo(center, map.getZoom(), { duration: 0.8 })}
-      className="w-9 h-9 bg-white/90 backdrop-blur border border-gray-200 rounded-lg flex items-center justify-center text-gray-600 hover:text-gray-900 hover:bg-white transition-colors shadow-md cursor-pointer"
-      aria-label="Recenter map"
-      title="Recenter Map"
-    >
-      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
-        <circle cx="12" cy="12" r="3" />
-        <path d="M12 2v4M12 18v4M2 12h4M18 12h4" />
-      </svg>
-    </button>
-  );
-}
-
-/* ── Zoom Controls ── */
-function ZoomButtons() {
-  const map = useMap();
-
-  return (
-    <div className="flex flex-col gap-1">
-      <button
-        onClick={() => map.zoomIn()}
-        className="w-9 h-9 bg-white/90 backdrop-blur border border-gray-200 rounded-lg flex items-center justify-center text-gray-600 hover:text-gray-900 hover:bg-white transition-colors shadow-md cursor-pointer font-bold text-lg"
-        title="Zoom In"
-      >
-        +
-      </button>
-      <button
-        onClick={() => map.zoomOut()}
-        className="w-9 h-9 bg-white/90 backdrop-blur border border-gray-200 rounded-lg flex items-center justify-center text-gray-600 hover:text-gray-900 hover:bg-white transition-colors shadow-md cursor-pointer font-bold text-lg"
-        title="Zoom Out"
-      >
-        −
-      </button>
-    </div>
-  );
-}
-
 export function MapView({
   center,
   zoom = 14,
@@ -166,52 +21,248 @@ export function MapView({
   showLiveLocation = true,
   followLiveLocation = false,
 }: MapViewProps) {
+  console.log("[MapView] COMPONENT MOUNTED", Date.now());
+
+  const mapContainerRef = useRef<HTMLDivElement>(null);
+  const mapRef = useRef<any>(null);
+  const mapplsClassObject = useRef(new mappls());
+  const uniqueId = useRef(`mappls-map-${Math.random().toString(36).substr(2, 9)}`);
+  const [isMapLoaded, setIsMapLoaded] = useState(false);
   const [showLegend, setShowLegend] = useState(false);
+
+  // Live location tracker marker
+  const liveLocationMarker = useRef<any>(null);
+  const hasInitialCentered = useRef(false);
+
+  useEffect(() => {
+    const mapplsKey = import.meta.env.VITE_MAPPLS_KEY;
+    console.log("[MapView] MAPPLS KEY:", mapplsKey ? "CONFIGURED" : "MISSING");
+    if (!mapplsKey) {
+      console.error("VITE_MAPPLS_KEY is not defined");
+      return;
+    }
+
+    let isMounted = true;
+    
+    // Clear any existing map instance to be safe
+    if (mapRef.current) {
+      mapRef.current.remove();
+      mapRef.current = null;
+    }
+
+    const loadObject = {
+      map: true,
+      version: '3.0'
+    };
+
+    try {
+      console.log("[MapView] Attempting to initialize Mappls with key:", mapplsKey.substring(0, 5) + "...");
+      mapplsClassObject.current.initialize(mapplsKey, loadObject, () => {
+        console.log("[MapView] Mappls initialize callback executed.");
+        if (!isMounted) {
+            console.log("[MapView] Component unmounted before map could initialize.");
+            return;
+        }
+        const mapContainer = document.getElementById(uniqueId.current);
+        if (!mapContainer) {
+            console.error("[MapView] mapContainer not found in DOM!");
+            return;
+        }
+        
+        console.log("[MapView] mapContainer found. Instantiating map...");
+        // Clear container just in case
+        mapContainer.innerHTML = '';
+
+        // If center is exactly 0,0, default to India's center (Nagpur) to avoid black ocean tiles
+        const safeCenter = (center[0] === 0 && center[1] === 0) 
+            ? [28.6139, 77.2090] // New Delhi fallback
+            : [center[0], center[1]];
+
+        const newMap = mapplsClassObject.current.Map({
+          id: uniqueId.current,
+          properties: {
+            center: safeCenter,
+            zoom: zoom,
+            zoomControl: false,
+            location: false
+          },
+        });
+
+        console.log("[MapView] Map instance created. Waiting for 'load' event...");
+
+        newMap.on("load", () => {
+          console.log("[MapView] Map 'load' event fired!");
+          if (isMounted) setIsMapLoaded(true);
+        });
+        
+        newMap.on("error", (err: any) => {
+            console.error("[MapView] Map SDK threw an error:", err);
+        });
+
+        mapRef.current = newMap;
+      });
+    } catch (err) {
+      console.error("Failed to initialize Mappls map:", err);
+    }
+
+    return () => {
+      isMounted = false;
+      if (mapRef.current) {
+        mapRef.current.remove();
+        mapRef.current = null;
+      }
+    };
+  }, []);
+
+  // Update center when prop changes
+  useEffect(() => {
+    if (isMapLoaded && mapRef.current) {
+      mapRef.current.setCenter([center[0], center[1]]);
+    }
+  }, [center[0], center[1], isMapLoaded]);
+
+  // Live Location Tracker
+  useEffect(() => {
+    if (!showLiveLocation || !isMapLoaded || !('geolocation' in navigator)) return;
+
+    const watchId = navigator.geolocation.watchPosition(
+      (pos) => {
+        const newPos = [pos.coords.latitude, pos.coords.longitude];
+
+        if (!liveLocationMarker.current) {
+          liveLocationMarker.current = new (mapplsClassObject.current as any).Marker({
+            map: mapRef.current,
+            position: { lat: newPos[0], lng: newPos[1] },
+            html: `
+              <div style="display: flex; align-items: center; justify-content: center; width: 24px; height: 24px;">
+                <div style="width: 14px; height: 14px; background-color: #4285F4; border-radius: 50%; border: 2.5px solid #ffffff; box-shadow: 0 0 10px rgba(66, 133, 244, 0.6);"></div>
+              </div>
+            `,
+            width: 24,
+            height: 24,
+            offset: [12, 12]
+          });
+        } else {
+          liveLocationMarker.current.setPosition({ lat: newPos[0], lng: newPos[1] });
+        }
+
+        if (followLiveLocation && !hasInitialCentered.current) {
+          mapRef.current.setCenter([newPos[0], newPos[1]]);
+          mapRef.current.setZoom(Math.max(mapRef.current.getZoom(), 16));
+          hasInitialCentered.current = true;
+        } else if (followLiveLocation) {
+          mapRef.current.setCenter([newPos[0], newPos[1]]);
+        }
+      },
+      () => {},
+      { enableHighAccuracy: true, timeout: 15000, maximumAge: 0 }
+    );
+
+    return () => {
+      navigator.geolocation.clearWatch(watchId);
+      if (liveLocationMarker.current) {
+        liveLocationMarker.current.remove();
+        liveLocationMarker.current = null;
+      }
+    };
+  }, [isMapLoaded, showLiveLocation, followLiveLocation]);
+
+  const [childCount, setChildCount] = useState(0);
+  const [networkStatus, setNetworkStatus] = useState<string>("TESTING...");
+  
+  useEffect(() => {
+    const interval = setInterval(() => {
+      const el = document.getElementById(uniqueId.current);
+      if (el) setChildCount(el.childNodes.length);
+    }, 1000);
+    return () => clearInterval(interval);
+  }, []);
+
+  useEffect(() => {
+    // Explicitly test the Mappls script URL to see if it's returning 403 Forbidden
+    const testUrl = `https://apis.mappls.com/advancedmaps/api/${import.meta.env.VITE_MAPPLS_KEY}/map_sdk?layer=vector&v=3.0`;
+    fetch(testUrl)
+      .then(res => setNetworkStatus(`HTTP ${res.status} ${res.statusText}`))
+      .catch(err => setNetworkStatus(`FAILED TO FETCH: ${err.message}`));
+  }, []);
 
   return (
     <div className={`relative w-full h-full min-h-[300px] bg-bg-main overflow-hidden ${className}`}>
-      <MapContainer
-        center={center}
-        zoom={zoom}
-        className="w-full h-full z-0"
-        zoomControl={false}
-        attributionControl={false}
-      >
-        <TileLayer
-          url="https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png"
-          attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors &copy; <a href="https://carto.com/attributions">CARTO</a>'
-          maxZoom={20}
-        />
-
-        {/* Auto-center map when center prop changes */}
-        <MapAutoCenter center={center} />
-
-        {/* Live GPS blue dot */}
-        {showLiveLocation && <LiveLocationTracker follow={followLiveLocation} />}
-
-        {children}
-
-        {/* Bottom Left Floating Controls */}
-        {showControls && (
-          <div className="leaflet-bottom leaflet-left" style={{ marginBottom: '16px', marginLeft: '16px' }}>
-            <div className="leaflet-control flex flex-col gap-2 pointer-events-auto">
-              <RecenterButton center={center} />
-              <ZoomButtons />
-              <button
-                onClick={() => setShowLegend(!showLegend)}
-                className={`w-9 h-9 rounded-lg border flex items-center justify-center transition-colors shadow-md cursor-pointer text-xs font-bold ${
-                  showLegend 
-                    ? 'bg-primary-600 text-white border-primary-500' 
-                    : 'bg-white/90 backdrop-blur border-gray-200 text-gray-500 hover:text-gray-900'
-                }`}
-                title="Toggle Map Legend"
-              >
-                🗺️
-              </button>
+      
+      {/* EXTREMELY VISIBLE DEBUG TEXT FOR USER TO VERIFY CODE IS UPDATED */}
+      {!isMapLoaded && (
+        <div className="absolute top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2 z-[9999] bg-white p-4 text-black font-black text-lg border-4 border-red-500 shadow-2xl pointer-events-none w-3/4 max-w-lg text-left">
+          <div>1. COMPONENT MOUNTED: YES</div>
+          <div>2. VITE_MAPPLS_KEY: {import.meta.env.VITE_MAPPLS_KEY ? "FOUND" : "MISSING"}</div>
+          <div>3. IS_MAP_LOADED: FALSE</div>
+          <div>4. MAP_REF_EXISTS: {mapRef.current ? "YES" : "NO"}</div>
+          <div>5. CONTAINER_CHILDREN: {childCount} nodes</div>
+          <div className="mt-2 text-red-600">6. NETWORK TEST: {networkStatus}</div>
+          {networkStatus.includes("401") || networkStatus.includes("403") ? (
+            <div className="mt-2 text-sm text-red-700 bg-red-100 p-2">
+              ERROR: Mappls is rejecting your API Key or Domain (localhost:5174). 
+              Check your Mappls Dashboard for domain restrictions.
             </div>
+          ) : null}
+        </div>
+      )}
+
+      <div id={uniqueId.current} ref={mapContainerRef} className="w-full h-full z-0 bg-[#0a0e1a]" />
+
+      {isMapLoaded && (
+        <MapplsContext.Provider value={{ map: mapRef.current, mapplsClassObject: mapplsClassObject.current }}>
+          {children}
+        </MapplsContext.Provider>
+      )}
+
+      {/* Bottom Left Floating Controls */}
+      {showControls && (
+        <div className="absolute bottom-4 left-4 z-[400] flex flex-col gap-2 pointer-events-auto">
+          <button
+            onClick={() => {
+              if (mapRef.current) {
+                mapRef.current.setCenter([center[0], center[1]]);
+              }
+            }}
+            className="w-9 h-9 bg-white/90 backdrop-blur border border-gray-200 rounded-lg flex items-center justify-center text-gray-600 hover:text-gray-900 hover:bg-white transition-colors shadow-md cursor-pointer pointer-events-auto"
+            title="Recenter Map"
+          >
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
+              <circle cx="12" cy="12" r="3" />
+              <path d="M12 2v4M12 18v4M2 12h4M18 12h4" />
+            </svg>
+          </button>
+          
+          <div className="flex flex-col gap-1">
+            <button
+              onClick={() => mapRef.current && mapRef.current.setZoom(mapRef.current.getZoom() + 1)}
+              className="w-9 h-9 bg-white/90 backdrop-blur border border-gray-200 rounded-lg flex items-center justify-center text-gray-600 hover:text-gray-900 hover:bg-white transition-colors shadow-md cursor-pointer font-bold text-lg"
+              title="Zoom In"
+            >
+              +
+            </button>
+            <button
+              onClick={() => mapRef.current && mapRef.current.setZoom(mapRef.current.getZoom() - 1)}
+              className="w-9 h-9 bg-white/90 backdrop-blur border border-gray-200 rounded-lg flex items-center justify-center text-gray-600 hover:text-gray-900 hover:bg-white transition-colors shadow-md cursor-pointer font-bold text-lg"
+              title="Zoom Out"
+            >
+              −
+            </button>
           </div>
-        )}
-      </MapContainer>
+          
+          <button
+            onClick={() => setShowLegend(!showLegend)}
+            className={`w-9 h-9 rounded-lg border flex items-center justify-center transition-colors shadow-md cursor-pointer text-xs font-bold ${
+              showLegend 
+                ? 'bg-primary-600 text-white border-primary-500' 
+                : 'bg-white/90 backdrop-blur border-gray-200 text-gray-500 hover:text-gray-900'
+            }`}
+            title="Toggle Map Legend"
+          >
+            🗺️
+          </button>
+        </div>
+      )}
 
       {/* Map Legend Overlay */}
       {showLegend && (
@@ -258,10 +309,11 @@ export function MapView({
       {/* Police-Assisted System Notice */}
       <div className="absolute bottom-2 right-4 z-[400] pointer-events-none">
         <span className="text-[10px] text-gray-400 bg-white/80 px-2 py-0.5 rounded border border-gray-200 font-mono">
-          Police-Assisted Traffic Clearance • Leaflet/OSM
+          Police-Assisted Traffic Clearance • Mappls
         </span>
       </div>
     </div>
   );
 }
+
 

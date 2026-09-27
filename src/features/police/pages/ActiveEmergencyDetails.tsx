@@ -16,7 +16,6 @@ import { ETADisplay } from '../../../components/status/ETADisplay';
 import { EmergencyStatusBar } from '../../../components/status/EmergencyStatusBar';
 import { policeService } from '../../../services/policeService';
 import { realtimeService } from '../../../services/realtimeService';
-import { mockAmbulances } from '../../../mock';
 import type { Emergency, Junction, JunctionStatus } from '../../../types';
 
 export function ActiveEmergencyDetails() {
@@ -25,22 +24,18 @@ export function ActiveEmergencyDetails() {
   const { addToast } = useToast();
   const [emergency, setEmergency] = useState<Emergency | null>(null);
   const [ambulancePos, setAmbulancePos] = useState<[number, number] | null>(null);
-  const [ambulanceHeading, setAmbulanceHeading] = useState<number>(0);
+
   const [junctions, setJunctions] = useState<Junction[]>([]);
   const [showCompleteDialog, setShowCompleteDialog] = useState(false);
 
   useEffect(() => {
     if (id) {
       policeService.getEmergencyDetails(id).then(res => {
-        if (res) {
-          setEmergency(res);
-        } else {
-          const fallback = realtimeService.getActiveEmergency();
-          if (fallback) setEmergency(fallback);
-        }
+        if (res) setEmergency(res);
       });
     }
-    setJunctions(realtimeService.getJunctions());
+    
+    policeService.getJunctions().then(setJunctions);
 
     const unsubJunctions = realtimeService.on('junctions_updated', (updatedJunctions: Junction[]) => {
       setJunctions(updatedJunctions);
@@ -50,9 +45,7 @@ export function ActiveEmergencyDetails() {
       if (data.position) {
         setAmbulancePos(data.position);
       }
-      if (data.heading !== undefined) {
-        setAmbulanceHeading(data.heading);
-      }
+
       setEmergency(prev => {
         if (!prev) return prev;
         return {
@@ -77,7 +70,6 @@ export function ActiveEmergencyDetails() {
     return <div className="min-h-dvh bg-bg-main flex items-center justify-center text-text-secondary">Loading emergency telemetry details...</div>;
   }
 
-  const ambulance = mockAmbulances.find(a => a.id === emergency.ambulanceId) || mockAmbulances[0];
   const hospital = emergency.hospital;
 
   const handleAccept = () => {
@@ -107,7 +99,7 @@ export function ActiveEmergencyDetails() {
     addToast({ variant: 'success', title: 'Junction Updated', message: `Junction marked ${status}` });
   };
 
-  const activePos: [number, number] = ambulancePos || ambulance.position || [hospital.location.latitude, hospital.location.longitude];
+  const activePos: [number, number] = ambulancePos || emergency.route?.polyline?.[0] || [hospital.location.latitude, hospital.location.longitude];
   const mapCenter: [number, number] = activePos;
 
   return (
@@ -130,14 +122,14 @@ export function ActiveEmergencyDetails() {
                 <h1 className="text-base font-bold text-text-primary">Corridor Dispatch {emergency.id}</h1>
                 <Badge variant="emergency" size="sm">{emergency.priority || 'CODE_RED'}</Badge>
               </div>
-              <p className="text-xs text-text-secondary">{ambulance.name} → {hospital.name}</p>
+              <p className="text-xs text-text-secondary">{emergency.ambulanceDisplayName} → {hospital.name}</p>
             </div>
           </div>
 
           <div className="flex items-center gap-3">
             <div className="text-right">
               <span className="text-[10px] text-text-secondary uppercase block">Vehicle Speed</span>
-              <span className="text-sm font-bold text-[#20D67A] font-mono">{emergency.currentSpeedKmH || 54} km/h</span>
+              <span className="text-sm font-bold text-[#20D67A] font-mono">{emergency.currentSpeedKmH != null ? `${emergency.currentSpeedKmH} km/h` : 'UNAVAILABLE'}</span>
             </div>
           </div>
         </div>
@@ -147,9 +139,8 @@ export function ActiveEmergencyDetails() {
           <MapView center={mapCenter} zoom={15} showLiveLocation={true}>
             <AmbulanceMarker
               position={activePos}
-              heading={ambulanceHeading || ambulance.heading}
-              label={ambulance.name}
-              speedKmH={emergency.currentSpeedKmH || 54}
+              label={emergency.ambulanceDisplayName || 'Ambulance'}
+              speedKmH={emergency.currentSpeedKmH != null ? emergency.currentSpeedKmH : undefined}
               vehicleNumber={emergency.vehicleNumber}
               isSOS
             />
@@ -178,8 +169,10 @@ export function ActiveEmergencyDetails() {
           <div className="absolute top-3 left-3 z-[400]">
             <div className="bg-bg-surface/95 backdrop-blur border border-border-subtle rounded-xl px-4 py-2.5 shadow-2xl">
               <ETADisplay
-                etaSeconds={emergency.route?.etaSeconds || 310}
-                distanceMeters={emergency.route?.distanceMeters || 3800}
+                etaSeconds={emergency.route?.etaSeconds}
+                trafficAwareEtaSeconds={emergency.route?.trafficAwareEtaSeconds}
+                trafficStatus={emergency.route?.trafficStatus}
+                distanceMeters={emergency.route?.distanceMeters}
                 compact
               />
             </div>

@@ -33,11 +33,21 @@ const createMockSupabase = () => {
   } as any;
 };
 
+const getStorageKey = () => {
+  if (typeof window === 'undefined') return 'aero-session';
+  const path = window.location.pathname;
+  if (path.startsWith('/ambulance')) return 'aero-session-ambulance';
+  if (path.startsWith('/police')) return 'aero-session-police';
+  if (path.startsWith('/hospital')) return 'aero-session-hospital';
+  if (path.startsWith('/admin')) return 'aero-session-admin';
+  return 'aero-session-default';
+};
+
 export const supabase = isConfigured 
   ? createClient(supabaseUrl, supabaseAnonKey, {
       auth: {
-        storage: window.sessionStorage,
-        storageKey: 'aero-session', // Isolated key for sessionStorage
+        storage: window.localStorage,
+        storageKey: getStorageKey(), // Unique key per role to prevent overwriting sessions
         autoRefreshToken: true,
         persistSession: true,
         detectSessionInUrl: true

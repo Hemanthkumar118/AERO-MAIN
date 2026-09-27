@@ -1,4 +1,5 @@
 import React, { useEffect, useRef } from 'react';
+import { createPortal } from 'react-dom';
 import { Button } from './Button';
 
 interface DialogProps {
@@ -51,7 +52,7 @@ export function Dialog({
 
   const confirmVariant = variant === 'emergency' ? 'emergency' : variant === 'danger' ? 'danger' : 'primary';
 
-  return (
+  const dialogContent = (
     <div className="fixed inset-0 z-[9000] flex items-center justify-center p-4">
       {/* Backdrop */}
       <div
@@ -104,4 +105,6 @@ export function Dialog({
       </div>
     </div>
   );
+
+  return typeof document !== 'undefined' ? createPortal(dialogContent, document.body) : null;
 }

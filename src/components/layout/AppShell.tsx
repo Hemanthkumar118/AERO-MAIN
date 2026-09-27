@@ -11,6 +11,7 @@ interface AppShellProps {
   connectionState: ConnectionState;
   gpsState?: GPSState;
   gpsAccuracy?: number;
+  gpsTimestamp?: Date | null;
 }
 
 export function AppShell({
@@ -20,6 +21,7 @@ export function AppShell({
   connectionState,
   gpsState,
   gpsAccuracy,
+  gpsTimestamp,
 }: AppShellProps) {
   return (
     <div className="flex flex-col h-dvh overflow-hidden bg-bg-main font-sans">
@@ -29,9 +31,10 @@ export function AppShell({
         connectionState={connectionState}
         gpsState={gpsState}
         gpsAccuracy={gpsAccuracy}
+        gpsTimestamp={gpsTimestamp}
       />
 
-      <GlobalEmergencyBanner />
+      <GlobalEmergencyBanner userRole={userRole} userName={userName} />
 
       {/* Connection Banners */}
       <AnimatePresence>

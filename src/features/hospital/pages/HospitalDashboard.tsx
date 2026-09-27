@@ -5,12 +5,13 @@ import { Badge } from '../../../components/ui/Badge';
 import { useToast } from '../../../components/ui/Toast';
 import { hospitalService } from '../../../services/hospitalService';
 import { realtimeService } from '../../../services/realtimeService';
-import { mockAmbulances } from '../../../mock';
 import type { Emergency, Hospital, HospitalPreparationState } from '../../../types';
 import { motion, AnimatePresence } from 'framer-motion';
+import { useAuth } from '../../../providers/AuthProvider';
 
 export function HospitalDashboard() {
   const { addToast } = useToast();
+  const { profile } = useAuth();
   const [hospital, setHospital] = useState<Hospital | null>(null);
   const [incomingEmergencies, setIncomingEmergencies] = useState<Emergency[]>([]);
   const [selectedEmergency, setSelectedEmergency] = useState<Emergency | null>(null);
@@ -22,55 +23,90 @@ export function HospitalDashboard() {
     specialistAlerted: true,
   });
 
+  const [isEditingCapacity, setIsEditingCapacity] = useState(false);
+  const [editCapacities, setEditCapacities] = useState({ icu: 0, trauma: 0, doctors: 0 });
+
   useEffect(() => {
-    // Load hospital details (Bowring & Lady Curzon / Victoria)
-    hospitalService.getHospitalState('HOSP-002').then(setHospital);
-    hospitalService.getIncomingEmergencies('HOSP-002').then((emergencies) => {
-      setIncomingEmergencies(emergencies);
-      if (emergencies.length > 0) {
-        setSelectedEmergency(emergencies[0]);
-        if (emergencies[0].hospitalPrep) {
-          setPrepState(emergencies[0].hospitalPrep);
+    const initHospital = async () => {
+      let h: Hospital | null = null;
+      if (profile?.full_name) {
+        h = await hospitalService.getHospitalByName(profile.full_name);
+      }
+      
+      if (!h) {
+        const hospitals = await hospitalService.getAllHospitals();
+        if (hospitals.length > 0) {
+          h = hospitals[0];
+        } else {
+          h = {
+            id: 'HOSP-001',
+            name: 'City General ER',
+            address: 'Downtown',
+            location: { latitude: 17.44, longitude: 78.34 },
+            phone: '911',
+            emergencyCapable: true,
+            totalBeds: 50,
+            availableIcuBeds: 5,
+            traumaBaysAvailable: 2,
+            doctorsOnDuty: 4
+          } as Hospital;
         }
       }
-    });
+      
+      setHospital(h);
+      
+      const unsub = realtimeService.on('incidents_updated', (updatedIncidents: any[]) => {
+        const mapped = updatedIncidents
+          .filter(i => i.destination_hospital === h!.name && i.status === 'active')
+          .map(i => ({
+            id: i.id,
+            status: 'ACTIVE',
+            priority: i.priority || 'CODE_RED',
+            ambulanceId: i.ambulance_id || 'AMB-1',
+            ambulanceDisplayName: i.ambulance_id || 'AERO ALS',
+            hospital: h,
+            patient: {
+              name: 'Emergency Patient',
+              age: 45,
+              gender: 'M',
+              category: 'CARDIAC',
+              priority: i.priority || 'CODE_RED',
+              chiefComplaint: 'Emergency dispatch via AERO network.',
+              vitals: {
+                heartRate: 112,
+                bloodPressure: '138/88',
+                spo2: 96,
+                respiratoryRate: 20,
+                gcsScore: 15
+              }
+            },
+            currentSpeedKmH: i.current_speed,
+            route: {
+              etaSeconds: i.route_duration_seconds,
+              polyline: i.route_geometry || [],
+              distanceMeters: i.route_distance_meters
+            },
+            vehicleNumber: i.ambulance_id || 'AMB-1'
+          } as any));
 
-    const unsubscribeEmergency = realtimeService.on('hospital_alert', (emergency: Emergency) => {
-      setIncomingEmergencies(prev => {
-        const filtered = prev.filter(e => e.id !== emergency.id);
-        if (emergency.status === 'ACTIVE' || emergency.status === 'ACCEPTED') {
-          return [emergency, ...filtered];
-        }
-        return filtered;
+        setIncomingEmergencies(mapped);
+        
+        setSelectedEmergency(prev => {
+          if (!prev) return mapped[0] || null;
+          const updated = mapped.find(m => m.id === prev.id);
+          return updated || mapped[0] || null;
+        });
       });
 
-      if (!selectedEmergency || selectedEmergency.id === emergency.id) {
-        setSelectedEmergency(emergency);
-        if (emergency.hospitalPrep) {
-          setPrepState(emergency.hospitalPrep);
-        }
-      }
-    });
-
-    const unsubscribeLocation = realtimeService.on('ambulance_location', (data: { ambulanceId: string; etaSeconds: number; speedKmH: number }) => {
-      setSelectedEmergency(prev => {
-        if (!prev || prev.ambulanceId !== data.ambulanceId) return prev;
-        return {
-          ...prev,
-          currentSpeedKmH: data.speedKmH,
-          route: {
-            ...prev.route!,
-            etaSeconds: data.etaSeconds,
-          },
-        };
-      });
-    });
-
-    return () => {
-      unsubscribeEmergency();
-      unsubscribeLocation();
+      return unsub;
     };
-  }, []);
+
+    let unsubFn: any;
+    if (profile?.full_name) {
+      initHospital().then(fn => { unsubFn = fn; });
+    }
+    return () => { if (unsubFn) unsubFn(); };
+  }, [profile?.full_name]);
 
   const handleTogglePrep = async (key: keyof HospitalPreparationState) => {
     if (!selectedEmergency) return;
@@ -84,26 +120,60 @@ export function HospitalDashboard() {
     });
   };
 
-  const handleAcknowledgeArrival = () => {
+  const handleAcknowledgeArrival = async () => {
     if (!selectedEmergency) return;
-    addToast({
-      variant: 'success',
-      title: 'ER Team Standby',
-      message: 'Trauma Bay 1 illuminated and team alerted for incoming bay handover.',
+    const success = await hospitalService.acknowledgeEmergency(selectedEmergency.id);
+    if (success) {
+      addToast({
+        variant: 'success',
+        title: 'ER Team Standby',
+        message: 'Trauma Bay 1 illuminated and team alerted for incoming bay handover. Ambulance notified.',
+      });
+    } else {
+      addToast({
+        variant: 'error',
+        title: 'Sync Failed',
+        message: 'Could not sync readiness status with ambulance.',
+      });
+    }
+  };
+
+  const handleEditCapacity = () => {
+    setEditCapacities({
+      icu: hospital?.availableIcuBeds || 0,
+      trauma: hospital?.traumaBaysAvailable || 0,
+      doctors: hospital?.doctorsOnDuty || 0
     });
+    setIsEditingCapacity(true);
+  };
+
+  const handleSaveCapacity = async () => {
+    setIsEditingCapacity(false);
+    if (!hospital) return;
+    
+    setHospital(prev => prev ? { 
+      ...prev, 
+      availableIcuBeds: editCapacities.icu, 
+      traumaBaysAvailable: editCapacities.trauma, 
+      doctorsOnDuty: editCapacities.doctors 
+    } : null);
+    
+    await hospitalService.updateHospitalCapacity(hospital.id, {
+      availableIcuBeds: editCapacities.icu,
+      traumaBaysAvailable: editCapacities.trauma
+    });
+    
+    addToast({ variant: 'success', title: 'Capacity Updated', message: 'Hospital capacity metrics have been updated.' });
   };
 
   if (!hospital) {
     return <div className="min-h-dvh bg-bg-main flex items-center justify-center text-text-secondary">Loading Hospital ER Dashboard...</div>;
   }
 
-  const matchingAmbulance = selectedEmergency 
-    ? mockAmbulances.find(a => a.id === selectedEmergency.ambulanceId) || mockAmbulances[0]
-    : mockAmbulances[0];
-
-  const mapCenter: [number, number] = matchingAmbulance?.position || [hospital.location.latitude, hospital.location.longitude];
-  const etaMinutes = selectedEmergency?.route?.etaSeconds ? Math.ceil(selectedEmergency.route.etaSeconds / 60) : 4;
-  const etaSeconds = selectedEmergency?.route?.etaSeconds ? selectedEmergency.route.etaSeconds % 60 : 15;
+  const mapCenter: [number, number] = [hospital.location.latitude, hospital.location.longitude];
+  const activeEtaSeconds = selectedEmergency?.route?.trafficAwareEtaSeconds ?? selectedEmergency?.route?.etaSeconds;
+  const etaMinutes = activeEtaSeconds != null ? Math.floor(activeEtaSeconds / 60) : null;
+  const etaSecondsDisplay = activeEtaSeconds != null ? activeEtaSeconds % 60 : null;
 
   return (
     <AppShell userRole="HOSPITAL" userName={hospital.name} connectionState="connected">
@@ -124,18 +194,40 @@ export function HospitalDashboard() {
 
             {/* Quick Capacity Badges */}
             <div className="hidden sm:flex items-center gap-3">
-              <div className="bg-bg-main border border-border-subtle px-3 py-1.5 rounded-lg text-center shadow-sm">
-                <span className="telemetry-label mb-1">ICU Beds</span>
-                <span className="text-sm font-bold text-[#20D67A]">{hospital.availableIcuBeds} Free</span>
-              </div>
-              <div className="bg-bg-main border border-border-subtle px-3 py-1.5 rounded-lg text-center shadow-sm">
-                <span className="telemetry-label mb-1">Trauma Bays</span>
-                <span className="text-sm font-bold text-[#35C7FF]">{hospital.traumaBaysAvailable} Ready</span>
-              </div>
-              <div className="bg-bg-main border border-border-subtle px-3 py-1.5 rounded-lg text-center shadow-sm">
-                <span className="telemetry-label mb-1">ER Doctors</span>
-                <span className="text-sm font-bold text-[#FFB020]">{hospital.doctorsOnDuty} On Duty</span>
-              </div>
+              {isEditingCapacity ? (
+                <>
+                  <div className="bg-bg-main border border-border-subtle px-3 py-1.5 rounded-lg text-center shadow-sm">
+                    <span className="telemetry-label mb-1">ICU Beds</span>
+                    <input type="number" min="0" value={editCapacities.icu} onChange={e => setEditCapacities(p => ({ ...p, icu: parseInt(e.target.value) || 0 }))} className="w-12 text-sm font-bold text-[#20D67A] bg-transparent border-b border-[#20D67A]/50 focus:outline-none text-center" />
+                  </div>
+                  <div className="bg-bg-main border border-border-subtle px-3 py-1.5 rounded-lg text-center shadow-sm">
+                    <span className="telemetry-label mb-1">Trauma Bays</span>
+                    <input type="number" min="0" value={editCapacities.trauma} onChange={e => setEditCapacities(p => ({ ...p, trauma: parseInt(e.target.value) || 0 }))} className="w-12 text-sm font-bold text-[#35C7FF] bg-transparent border-b border-[#35C7FF]/50 focus:outline-none text-center" />
+                  </div>
+                  <div className="bg-bg-main border border-border-subtle px-3 py-1.5 rounded-lg text-center shadow-sm">
+                    <span className="telemetry-label mb-1">ER Doctors</span>
+                    <input type="number" min="0" value={editCapacities.doctors} onChange={e => setEditCapacities(p => ({ ...p, doctors: parseInt(e.target.value) || 0 }))} className="w-12 text-sm font-bold text-[#FFB020] bg-transparent border-b border-[#FFB020]/50 focus:outline-none text-center" />
+                  </div>
+                  <button onClick={handleSaveCapacity} className="bg-[#20D67A]/20 hover:bg-[#20D67A]/30 text-[#20D67A] px-3 py-1.5 rounded-lg text-xs font-bold transition-colors">
+                    Save
+                  </button>
+                </>
+              ) : (
+                <>
+                  <div className="bg-bg-main border border-border-subtle px-3 py-1.5 rounded-lg text-center shadow-sm cursor-pointer hover:border-border-strong transition-colors" onClick={handleEditCapacity} title="Click to edit capacities">
+                    <span className="telemetry-label mb-1">ICU Beds</span>
+                    <span className="text-sm font-bold text-[#20D67A]">{hospital.availableIcuBeds} Free</span>
+                  </div>
+                  <div className="bg-bg-main border border-border-subtle px-3 py-1.5 rounded-lg text-center shadow-sm cursor-pointer hover:border-border-strong transition-colors" onClick={handleEditCapacity} title="Click to edit capacities">
+                    <span className="telemetry-label mb-1">Trauma Bays</span>
+                    <span className="text-sm font-bold text-[#35C7FF]">{hospital.traumaBaysAvailable} Ready</span>
+                  </div>
+                  <div className="bg-bg-main border border-border-subtle px-3 py-1.5 rounded-lg text-center shadow-sm cursor-pointer hover:border-border-strong transition-colors" onClick={handleEditCapacity} title="Click to edit capacities">
+                    <span className="telemetry-label mb-1">ER Doctors</span>
+                    <span className="text-sm font-bold text-[#FFB020]">{hospital.doctorsOnDuty} On Duty</span>
+                  </div>
+                </>
+              )}
             </div>
           </div>
 
@@ -148,13 +240,15 @@ export function HospitalDashboard() {
                 availableIcuBeds={hospital.availableIcuBeds}
                 traumaBaysAvailable={hospital.traumaBaysAvailable}
               />
-              {selectedEmergency && matchingAmbulance && (
+              {selectedEmergency && (
                 <>
                   <AmbulanceMarker
-                    position={matchingAmbulance.position}
-                    heading={matchingAmbulance.heading}
+                    position={
+                      selectedEmergency.route?.polyline?.[0] || 
+                      [hospital.location.latitude, hospital.location.longitude]
+                    }
                     label={selectedEmergency.ambulanceDisplayName}
-                    speedKmH={selectedEmergency.currentSpeedKmH || 54}
+                    speedKmH={selectedEmergency.currentSpeedKmH != null ? selectedEmergency.currentSpeedKmH : undefined}
                     vehicleNumber={selectedEmergency.vehicleNumber}
                   />
                   <RoutePolyline
@@ -182,11 +276,14 @@ export function HospitalDashboard() {
                       INCOMING PATIENT
                     </span>
                     <span className="w-2 h-2 rounded-full bg-[#FF3B30] animate-ping" />
+                    {selectedEmergency.route?.trafficStatus === 'LIVE' && (
+                      <span className="text-[9px] bg-[#34C759]/20 text-[#34C759] px-1 py-0.5 rounded ml-2 border border-[#34C759]/30 font-bold">LIVE TRAFFIC</span>
+                    )}
                   </div>
                   <div className="text-xl font-bold font-mono text-white tabular-nums">
-                    {etaMinutes}m {etaSeconds.toString().padStart(2, '0')}s
+                    {etaMinutes != null && etaSecondsDisplay != null ? `${etaMinutes}m ${etaSecondsDisplay.toString().padStart(2, '0')}s` : 'ETA UNAVAILABLE'}
                     <span className="text-xs font-medium text-text-secondary ml-2 font-sans">
-                      ({selectedEmergency.currentSpeedKmH || 54} km/h)
+                      ({selectedEmergency.currentSpeedKmH != null ? `${Math.round(selectedEmergency.currentSpeedKmH)} km/h` : 'SPEED UNAVAILABLE'})
                     </span>
                   </div>
                 </div>

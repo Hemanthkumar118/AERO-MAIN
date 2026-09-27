@@ -1,69 +1,103 @@
-import { Marker, Popup } from 'react-leaflet';
-import L from 'leaflet';
 import type { JunctionStatus, IncidentSeverity, AvailabilityStatus } from '../../types';
+import { MapplsMarker } from './MapplsMarker';
 
 /* ── Ambulance Marker ── */
 interface AmbulanceMarkerProps {
   position: [number, number];
-  heading?: number;
   label?: string;
   speedKmH?: number;
   vehicleNumber?: string;
   isSOS?: boolean;
+  emergencyId?: string;
+  status?: string;
+  eta?: string;
+  destination?: string;
+  updatedAt?: string;
 }
 
-function createAmbulanceIcon(heading: number = 0, isSOS: boolean = true) {
+function createAmbulanceHtml(isSOS: boolean = true) {
   const pulseHtml = isSOS ? `<div class="ambulance-pulse-ring"></div>` : '';
-  const svgHtml = `
-    <div class="relative flex items-center justify-center" style="width: 44px; height: 44px;">
+  return `
+    <div class="aero-marker-ambulance relative flex items-center justify-center" style="width: 44px; height: 44px;">
       ${pulseHtml}
-      <div style="transform: rotate(${heading}deg); transition: transform 0.3s ease;">
-        <svg width="40" height="40" viewBox="0 0 40 40" fill="none" xmlns="http://www.w3.org/2000/svg">
-          <circle cx="20" cy="20" r="18" fill="#ffffff" stroke="#ef4444" stroke-width="2.5"/>
-          <circle cx="20" cy="20" r="13" fill="#ef4444" fill-opacity="0.2"/>
-          <path d="M20 7L27 24L20 20L13 24L20 7Z" fill="#ef4444" stroke="#ffffff" stroke-width="1.5"/>
-          <circle cx="20" cy="20" r="3" fill="#ef4444"/>
-        </svg>
+      <div style="width: 38px; height: 38px; background-color: #ffffff; border-radius: 50%; box-shadow: 0 4px 8px rgba(0,0,0,0.3); display: flex; align-items: center; justify-content: center; border: 2.5px solid #ef4444; z-index: 10;">
+        <span style="font-size: 22px; line-height: 1;">🚑</span>
       </div>
     </div>
   `;
-
-  return L.divIcon({
-    html: svgHtml,
-    className: 'aero-marker-ambulance',
-    iconSize: [44, 44],
-    iconAnchor: [22, 22],
-    popupAnchor: [0, -24],
-  });
 }
 
 export function AmbulanceMarker({
   position,
-  heading = 0,
   label = 'Ambulance',
   speedKmH,
   vehicleNumber,
   isSOS = true,
+  emergencyId,
+  status,
+  eta,
+  destination,
+  updatedAt,
 }: AmbulanceMarkerProps) {
-  return (
-    <Marker position={position} icon={createAmbulanceIcon(heading, isSOS)}>
-      <Popup className="aero-custom-popup">
-        <div className="p-1 min-w-[160px]">
-          <div className="flex items-center gap-1.5 text-xs font-bold text-red-500 uppercase tracking-wide">
-            <span className="w-2 h-2 rounded-full bg-red-500 animate-ping" />
-            Emergency Unit
+  const popupContent = (
+    <div className="p-2 min-w-[200px]">
+      <div className="flex items-center gap-1.5 text-[10px] font-bold text-red-500 uppercase tracking-wide">
+        {isSOS && <span className="w-2 h-2 rounded-full bg-red-500 animate-ping" />}
+        {isSOS ? 'Emergency Unit' : 'Ambulance Unit'}
+      </div>
+      <p className="font-bold text-base text-slate-900 mt-1">{label}</p>
+      {vehicleNumber && <p className="text-xs text-slate-500 font-mono">{vehicleNumber}</p>}
+      
+      <div className="mt-3 pt-3 border-t border-slate-200 space-y-2 text-xs">
+        {emergencyId && (
+          <div className="flex justify-between">
+            <span className="text-slate-500">Emergency:</span>
+            <span className="font-mono text-slate-800">{emergencyId.split('-')[0]}...</span>
           </div>
-          <p className="font-bold text-sm text-slate-900 mt-1">{label}</p>
-          {vehicleNumber && <p className="text-xs text-slate-500 font-mono">{vehicleNumber}</p>}
-          {speedKmH !== undefined && (
-            <div className="mt-2 pt-2 border-t border-slate-200 flex justify-between text-xs">
-              <span className="text-slate-500">Live Speed:</span>
-              <span className="font-bold text-slate-800">{speedKmH} km/h</span>
-            </div>
-          )}
+        )}
+        {status && (
+          <div className="flex justify-between">
+            <span className="text-slate-500">Status:</span>
+            <span className="font-bold text-emerald-600">{status.toUpperCase()}</span>
+          </div>
+        )}
+        <div className="flex justify-between">
+          <span className="text-slate-500">Speed:</span>
+          <span className="font-bold text-sky-600">
+            {speedKmH != null ? `${speedKmH.toFixed(1)} km/h` : 'UNAVAILABLE'}
+          </span>
         </div>
-      </Popup>
-    </Marker>
+        {eta && (
+          <div className="flex justify-between">
+            <span className="text-slate-500">ETA:</span>
+            <span className="font-bold text-slate-800">{eta}</span>
+          </div>
+        )}
+        {destination && (
+          <div className="flex justify-between items-start gap-2">
+            <span className="text-slate-500 whitespace-nowrap">Dest:</span>
+            <span className="font-medium text-slate-800 text-right line-clamp-2">{destination}</span>
+          </div>
+        )}
+        {updatedAt && (
+          <div className="flex justify-between">
+            <span className="text-slate-400 text-[10px]">Updated:</span>
+            <span className="text-slate-400 text-[10px]">{new Date(updatedAt).toLocaleTimeString()}</span>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+
+  return (
+    <MapplsMarker 
+      position={position} 
+      html={createAmbulanceHtml(isSOS)}
+      width={44}
+      height={44}
+      offset={[22, 22]}
+      popupContent={popupContent}
+    />
   );
 }
 
@@ -77,9 +111,9 @@ interface HospitalMarkerProps {
   phone?: string;
 }
 
-function createHospitalIcon() {
-  const svg = `
-    <div class="flex items-center justify-center filter drop-shadow-md">
+function createHospitalHtml() {
+  return `
+    <div class="aero-marker-hospital flex items-center justify-center filter drop-shadow-md">
       <svg width="34" height="42" viewBox="0 0 34 42" fill="none" xmlns="http://www.w3.org/2000/svg">
         <path d="M17 41C17 41 32 25 32 15C32 6.71573 25.2843 0 17 0C8.71573 0 2 6.71573 2 15C2 25 17 41 17 41Z" fill="#dc2626" stroke="#ffffff" stroke-width="1.5"/>
         <rect x="11" y="8" width="12" height="14" rx="2" fill="#ffffff"/>
@@ -88,14 +122,6 @@ function createHospitalIcon() {
       </svg>
     </div>
   `;
-
-  return L.divIcon({
-    html: svg,
-    className: 'aero-marker-hospital',
-    iconSize: [34, 42],
-    iconAnchor: [17, 42],
-    popupAnchor: [0, -42],
-  });
 }
 
 export function HospitalMarker({
@@ -106,37 +132,44 @@ export function HospitalMarker({
   traumaBaysAvailable,
   phone,
 }: HospitalMarkerProps) {
-  return (
-    <Marker position={position} icon={createHospitalIcon()}>
-      <Popup className="aero-custom-popup">
-        <div className="p-1 min-w-[180px]">
-          <div className="text-[11px] font-bold text-red-600 uppercase tracking-wider">Hospital ER</div>
-          <p className="font-bold text-sm text-slate-900 mt-0.5">{name}</p>
-          {address && <p className="text-[11px] text-slate-500 mt-0.5 line-clamp-2">{address}</p>}
-          {(availableIcuBeds !== undefined || traumaBaysAvailable !== undefined) && (
-            <div className="mt-2 pt-2 border-t border-slate-200 grid grid-cols-2 gap-1 text-[11px]">
-              {availableIcuBeds !== undefined && (
-                <div className="bg-slate-100 p-1 rounded text-center">
-                  <span className="text-slate-500 block text-[9px]">ICU Beds</span>
-                  <span className="font-bold text-emerald-700">{availableIcuBeds} Open</span>
-                </div>
-              )}
-              {traumaBaysAvailable !== undefined && (
-                <div className="bg-slate-100 p-1 rounded text-center">
-                  <span className="text-slate-500 block text-[9px]">Trauma Bay</span>
-                  <span className="font-bold text-blue-700">{traumaBaysAvailable} Ready</span>
-                </div>
-              )}
+  const popupContent = (
+    <div className="p-1 min-w-[180px]">
+      <div className="text-[11px] font-bold text-red-600 uppercase tracking-wider">Hospital ER</div>
+      <p className="font-bold text-sm text-slate-900 mt-0.5">{name}</p>
+      {address && <p className="text-[11px] text-slate-500 mt-0.5 line-clamp-2">{address}</p>}
+      {(availableIcuBeds !== undefined || traumaBaysAvailable !== undefined) && (
+        <div className="mt-2 pt-2 border-t border-slate-200 grid grid-cols-2 gap-1 text-[11px]">
+          {availableIcuBeds !== undefined && (
+            <div className="bg-slate-100 p-1 rounded text-center">
+              <span className="text-slate-500 block text-[9px]">ICU Beds</span>
+              <span className="font-bold text-emerald-700">{availableIcuBeds} Open</span>
             </div>
           )}
-          {phone && (
-            <div className="mt-1.5 text-[11px] text-slate-600 flex items-center gap-1">
-              <span>📞 {phone}</span>
+          {traumaBaysAvailable !== undefined && (
+            <div className="bg-slate-100 p-1 rounded text-center">
+              <span className="text-slate-500 block text-[9px]">Trauma Bay</span>
+              <span className="font-bold text-blue-700">{traumaBaysAvailable} Ready</span>
             </div>
           )}
         </div>
-      </Popup>
-    </Marker>
+      )}
+      {phone && (
+        <div className="mt-1.5 text-[11px] text-slate-600 flex items-center gap-1">
+          <span>📞 {phone}</span>
+        </div>
+      )}
+    </div>
+  );
+
+  return (
+    <MapplsMarker 
+      position={position}
+      html={createHospitalHtml()}
+      width={34}
+      height={42}
+      offset={[17, 42]}
+      popupContent={popupContent}
+    />
   );
 }
 
@@ -149,7 +182,7 @@ interface JunctionMarkerProps {
   policeName?: string;
 }
 
-function createJunctionIcon(status: JunctionStatus) {
+function createJunctionHtml(status: JunctionStatus) {
   let bgColor = '#64748b'; // Normal (slate)
   let ringColor = '#94a3b8';
   let badgeText = 'NORM';
@@ -168,21 +201,13 @@ function createJunctionIcon(status: JunctionStatus) {
     badgeText = 'DONE';
   }
 
-  const svg = `
-    <div class="relative flex items-center justify-center">
+  return `
+    <div class="aero-marker-junction relative flex items-center justify-center">
       <div style="width: 32px; height: 32px; border-radius: 50%; background-color: ${bgColor}; border: 2.5px solid #ffffff; box-shadow: 0 0 10px ${ringColor}; display: flex; align-items: center; justify-content: center;">
         <span style="color: #ffffff; font-size: 8px; font-weight: 800; font-family: sans-serif; letter-spacing: -0.5px;">${badgeText}</span>
       </div>
     </div>
   `;
-
-  return L.divIcon({
-    html: svg,
-    className: 'aero-marker-junction',
-    iconSize: [32, 32],
-    iconAnchor: [16, 16],
-    popupAnchor: [0, -18],
-  });
 }
 
 export function JunctionMarker({
@@ -199,33 +224,40 @@ export function JunctionMarker({
     PASSED: 'Ambulance Passed',
   }[status];
 
-  return (
-    <Marker position={position} icon={createJunctionIcon(status)}>
-      <Popup className="aero-custom-popup">
-        <div className="p-1 min-w-[170px]">
-          <div className="text-[11px] font-bold text-slate-500 uppercase tracking-wider">Traffic Checkpoint</div>
-          <p className="font-bold text-sm text-slate-900 mt-0.5">{name}</p>
-          <div className="mt-2 pt-2 border-t border-slate-200 space-y-1 text-xs">
-            <div className="flex justify-between">
-              <span className="text-slate-500">Status:</span>
-              <span className="font-bold text-slate-800">{statusLabel}</span>
-            </div>
-            {distanceMeters !== undefined && (
-              <div className="flex justify-between">
-                <span className="text-slate-500">Ambulance Dist:</span>
-                <span className="font-bold text-slate-800">{distanceMeters}m</span>
-              </div>
-            )}
-            {policeName && (
-              <div className="flex justify-between">
-                <span className="text-slate-500">Officer:</span>
-                <span className="font-medium text-slate-700">{policeName}</span>
-              </div>
-            )}
-          </div>
+  const popupContent = (
+    <div className="p-1 min-w-[170px]">
+      <div className="text-[11px] font-bold text-slate-500 uppercase tracking-wider">Traffic Checkpoint</div>
+      <p className="font-bold text-sm text-slate-900 mt-0.5">{name}</p>
+      <div className="mt-2 pt-2 border-t border-slate-200 space-y-1 text-xs">
+        <div className="flex justify-between">
+          <span className="text-slate-500">Status:</span>
+          <span className="font-bold text-slate-800">{statusLabel}</span>
         </div>
-      </Popup>
-    </Marker>
+        {distanceMeters !== undefined && (
+          <div className="flex justify-between">
+            <span className="text-slate-500">Ambulance Dist:</span>
+            <span className="font-bold text-slate-800">{distanceMeters}m</span>
+          </div>
+        )}
+        {policeName && (
+          <div className="flex justify-between">
+            <span className="text-slate-500">Officer:</span>
+            <span className="font-medium text-slate-700">{policeName}</span>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+
+  return (
+    <MapplsMarker 
+      position={position}
+      html={createJunctionHtml(status)}
+      width={32}
+      height={32}
+      offset={[16, 16]}
+      popupContent={popupContent}
+    />
   );
 }
 
@@ -238,26 +270,18 @@ interface PoliceMarkerProps {
   availability?: AvailabilityStatus;
 }
 
-function createPoliceIcon(availability: AvailabilityStatus = 'AVAILABLE') {
+function createPoliceHtml(availability: AvailabilityStatus = 'AVAILABLE') {
   const isAvailable = availability === 'AVAILABLE';
   const color = isAvailable ? '#0284c7' : '#eab308';
 
-  const svg = `
-    <div class="flex items-center justify-center filter drop-shadow-md">
+  return `
+    <div class="aero-marker-police flex items-center justify-center filter drop-shadow-md">
       <svg width="32" height="38" viewBox="0 0 32 38" fill="none" xmlns="http://www.w3.org/2000/svg">
         <path d="M16 38C16 38 30 24 30 14C30 6.26801 23.732 0 16 0C8.26801 0 2 6.26801 2 14C2 24 16 38 16 38Z" fill="${color}" stroke="#ffffff" stroke-width="1.5"/>
         <path d="M16 7L18.5 12L24 12.8L20 16.7L21 22.2L16 19.5L11 22.2L12 16.7L8 12.8L13.5 12L16 7Z" fill="#ffffff"/>
       </svg>
     </div>
   `;
-
-  return L.divIcon({
-    html: svg,
-    className: 'aero-marker-police',
-    iconSize: [32, 38],
-    iconAnchor: [16, 38],
-    popupAnchor: [0, -38],
-  });
 }
 
 export function PoliceMarker({
@@ -267,23 +291,30 @@ export function PoliceMarker({
   badgeNumber,
   availability = 'AVAILABLE',
 }: PoliceMarkerProps) {
+  const popupContent = (
+    <div className="p-1 min-w-[160px]">
+      <div className="text-[11px] font-bold text-sky-700 uppercase tracking-wider">Traffic Police Post</div>
+      <p className="font-bold text-sm text-slate-900 mt-0.5">{name}</p>
+      {badgeNumber && <p className="text-xs text-slate-500 font-mono">Badge: {badgeNumber}</p>}
+      {station && <p className="text-[11px] text-slate-600 mt-1">{station}</p>}
+      <div className="mt-2 pt-1 border-t border-slate-200 flex justify-between text-xs">
+        <span className="text-slate-500">Status:</span>
+        <span className={`font-semibold ${availability === 'AVAILABLE' ? 'text-emerald-600' : 'text-amber-600'}`}>
+          {availability}
+        </span>
+      </div>
+    </div>
+  );
+
   return (
-    <Marker position={position} icon={createPoliceIcon(availability)}>
-      <Popup className="aero-custom-popup">
-        <div className="p-1 min-w-[160px]">
-          <div className="text-[11px] font-bold text-sky-700 uppercase tracking-wider">Traffic Police Post</div>
-          <p className="font-bold text-sm text-slate-900 mt-0.5">{name}</p>
-          {badgeNumber && <p className="text-xs text-slate-500 font-mono">Badge: {badgeNumber}</p>}
-          {station && <p className="text-[11px] text-slate-600 mt-1">{station}</p>}
-          <div className="mt-2 pt-1 border-t border-slate-200 flex justify-between text-xs">
-            <span className="text-slate-500">Status:</span>
-            <span className={`font-semibold ${availability === 'AVAILABLE' ? 'text-emerald-600' : 'text-amber-600'}`}>
-              {availability}
-            </span>
-          </div>
-        </div>
-      </Popup>
-    </Marker>
+    <MapplsMarker 
+      position={position}
+      html={createPoliceHtml(availability)}
+      width={32}
+      height={38}
+      offset={[16, 38]}
+      popupContent={popupContent}
+    />
   );
 }
 
@@ -297,22 +328,14 @@ interface IncidentMarkerProps {
   reportedBy?: string;
 }
 
-function createIncidentIcon() {
-  const svg = `
-    <div class="flex items-center justify-center filter drop-shadow-md">
+function createIncidentHtml() {
+  return `
+    <div class="aero-marker-incident flex items-center justify-center filter drop-shadow-md">
       <div style="width: 28px; height: 28px; border-radius: 6px; background-color: #f97316; border: 2px solid #ffffff; display: flex; align-items: center; justify-content: center;">
         <span style="color: #ffffff; font-size: 14px;">⚠️</span>
       </div>
     </div>
   `;
-
-  return L.divIcon({
-    html: svg,
-    className: 'aero-marker-incident',
-    iconSize: [28, 28],
-    iconAnchor: [14, 14],
-    popupAnchor: [0, -16],
-  });
 }
 
 export function IncidentMarker({
@@ -323,21 +346,29 @@ export function IncidentMarker({
   severity,
   reportedBy,
 }: IncidentMarkerProps) {
+  const popupContent = (
+    <div className="p-1 min-w-[180px]">
+      <div className="flex items-center justify-between">
+        <span className="text-[10px] font-bold text-orange-600 uppercase tracking-wider">{type}</span>
+        <span className="text-[10px] bg-orange-100 text-orange-800 px-1.5 py-0.5 rounded font-bold">{severity}</span>
+      </div>
+      <p className="font-bold text-sm text-slate-900 mt-1">{title}</p>
+      <p className="text-xs text-slate-600 mt-1">{description}</p>
+      {reportedBy && (
+        <p className="text-[10px] text-slate-400 mt-2 italic">Reported by: {reportedBy}</p>
+      )}
+    </div>
+  );
+
   return (
-    <Marker position={position} icon={createIncidentIcon()}>
-      <Popup className="aero-custom-popup">
-        <div className="p-1 min-w-[180px]">
-          <div className="flex items-center justify-between">
-            <span className="text-[10px] font-bold text-orange-600 uppercase tracking-wider">{type}</span>
-            <span className="text-[10px] bg-orange-100 text-orange-800 px-1.5 py-0.5 rounded font-bold">{severity}</span>
-          </div>
-          <p className="font-bold text-sm text-slate-900 mt-1">{title}</p>
-          <p className="text-xs text-slate-600 mt-1">{description}</p>
-          {reportedBy && (
-            <p className="text-[10px] text-slate-400 mt-2 italic">Reported by: {reportedBy}</p>
-          )}
-        </div>
-      </Popup>
-    </Marker>
+    <MapplsMarker 
+      position={position}
+      html={createIncidentHtml()}
+      width={28}
+      height={28}
+      offset={[14, 14]}
+      popupContent={popupContent}
+    />
   );
 }
+

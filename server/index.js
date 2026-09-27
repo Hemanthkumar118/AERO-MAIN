@@ -4,12 +4,15 @@ import dotenv from 'dotenv';
 import { createClient } from '@supabase/supabase-js';
 import Groq from 'groq-sdk';
 import crypto from 'crypto';
+import routingRoutes from './api/routes.js';
 
 dotenv.config();
 
 const app = express();
 app.use(cors({ origin: true }));
 app.use(express.json());
+
+app.use('/api/route', routingRoutes);
 
 const PORT = process.env.PORT || 3001;
 
@@ -222,8 +225,8 @@ app.post('/api/ai/chat', authenticateUser, async (req, res) => {
   }
 });
 
-// Google Places API (New) Proxy Endpoint
-app.post('/api/places/hospitals', authenticateUser, async (req, res) => {
+// Google Places API (New) Proxy Endpoint - Nearby Search
+app.post('/api/places/nearby', authenticateUser, async (req, res) => {
   try {
     const apiKey = process.env.GOOGLE_MAPS_API_KEY;
     if (!apiKey) {
@@ -240,7 +243,7 @@ app.post('/api/places/hospitals', authenticateUser, async (req, res) => {
       headers: {
         'Content-Type': 'application/json',
         'X-Goog-Api-Key': apiKey,
-        'X-Goog-FieldMask': 'places.id,places.displayName,places.formattedAddress,places.location,places.primaryType,places.types,places.businessStatus,places.googleMapsUri'
+        'X-Goog-FieldMask': 'places.id,places.displayName,places.formattedAddress,places.location,places.primaryType,places.types,places.businessStatus,places.googleMapsUri,places.rating,places.userRatingCount,places.regularOpeningHours'
       },
       body: JSON.stringify({
         includedTypes: ['hospital', 'general_hospital'],
@@ -256,14 +259,69 @@ app.post('/api/places/hospitals', authenticateUser, async (req, res) => {
 
     if (!response.ok) {
       const errorText = await response.text();
-      console.error('Google Places API Error:', errorText);
-      return res.status(response.status).json({ error: 'Failed to fetch nearby hospitals from Google Places API.' });
+      console.error('Google Places Nearby Error:', errorText);
+      return res.status(response.status).json({ error: 'Failed to fetch nearby hospitals.' });
     }
 
     const data = await response.json();
-    res.json(data);
+    res.json({ results: data.places || [] });
   } catch (error) {
-    console.error('Places Proxy Endpoint Error:', error.message || error);
+    console.error('Places Nearby Endpoint Error:', error.message || error);
+    res.status(500).json({ error: 'Failed to fetch places data.' });
+  }
+});
+
+// Google Places API (New) Proxy Endpoint - Text Search (supports pagination)
+app.post('/api/places/textsearch', authenticateUser, async (req, res) => {
+  try {
+    const apiKey = process.env.GOOGLE_MAPS_API_KEY;
+    if (!apiKey) {
+      return res.status(503).json({ error: 'Google Maps API Key is not configured on the server.' });
+    }
+
+    const { latitude, longitude, radius = 15000, query, pageToken } = req.body;
+    if (!latitude || !longitude || !query) {
+      return res.status(400).json({ error: 'Latitude, longitude, and query are required.' });
+    }
+
+    const requestBody = {
+      textQuery: query,
+      pageSize: 20,
+      locationBias: {
+        circle: {
+          center: { latitude, longitude },
+          radius: radius
+        }
+      }
+    };
+    
+    if (pageToken) {
+      requestBody.pageToken = pageToken;
+    }
+
+    const response = await fetch('https://places.googleapis.com/v1/places:searchText', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-Goog-Api-Key': apiKey,
+        'X-Goog-FieldMask': 'places.id,places.displayName,places.formattedAddress,places.location,places.primaryType,places.types,places.businessStatus,places.googleMapsUri,places.rating,places.userRatingCount,places.regularOpeningHours,nextPageToken'
+      },
+      body: JSON.stringify(requestBody)
+    });
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      console.error('Google Places Text Search Error:', errorText);
+      return res.status(response.status).json({ error: 'Failed to fetch text search hospitals.' });
+    }
+
+    const data = await response.json();
+    res.json({ 
+      results: data.places || [],
+      next_page_token: data.nextPageToken 
+    });
+  } catch (error) {
+    console.error('Places Text Search Endpoint Error:', error.message || error);
     res.status(500).json({ error: 'Failed to fetch places data.' });
   }
 });

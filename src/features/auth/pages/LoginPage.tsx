@@ -2,6 +2,8 @@ import { useState } from 'react';
 import type { UserRole } from '../../../types';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useNavigate } from 'react-router-dom';
+import { supabase } from '../../../lib/supabase';
+
 
 interface LoginPageProps {
   onLogin: (role: string) => void;
@@ -81,17 +83,82 @@ export function LoginPage({ onLogin }: LoginPageProps) {
   const [showPassword, setShowPassword] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState('');
-
+  // Auth context available via useAuth() if needed
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    setIsLoading(true);
+    if (!identifier || !password) {
+      setError('Please enter both email and password.');
+      return;
+    }
     
-    // DEMO MODE: Bypass Supabase Auth completely
-    setTimeout(() => {
-      onLogin(selectedRole);
+    setIsLoading(true);
+    setError('');
+    
+    const timeoutPromise = new Promise((_, reject) => 
+      setTimeout(() => reject(new Error('TIMEOUT')), 15000)
+    );
+
+    try {
+      const signInPromise = supabase.auth.signInWithPassword({
+        email: identifier,
+        password: password,
+      });
+
+      const { data, error } = await Promise.race([signInPromise, timeoutPromise]) as any;
+
+      if (error) {
+        throw error;
+      }
+
+      if (!data?.session || !data?.user) {
+        throw new Error("Authentication succeeded but no session was returned.");
+      }
+
+      const { data: profileData, error: profileError } = await supabase
+        .from('profiles')
+        .select('id, role, full_name, status')
+        .eq('id', data.user.id)
+        .maybeSingle();
+
+      if (profileError) {
+        console.error('[Login] Profile query error:', profileError);
+        throw new Error('Authentication successful, but failed to load your AERO profile.');
+      }
+
+      if (!profileData) {
+        // No profile exists yet — auto-create one
+        const { data: newProfile, error: createError } = await supabase
+          .from('profiles')
+          .insert({
+            id: data.user.id,
+            role: selectedRole.toLowerCase(),
+            full_name: data.user.user_metadata?.full_name || data.user.email?.split('@')[0] || 'AERO Operator',
+          })
+          .select('id, role, full_name, status')
+          .single();
+
+        if (createError) {
+          console.error('[Login] Profile creation error:', createError);
+          throw new Error('Authentication successful, but your AERO operator profile could not be created.');
+        }
+
+        onLogin(newProfile.role);
+      } else {
+        onLogin(profileData.role);
+      }
+    } catch (err: any) {
+      console.error('Login error:', err);
+      if (err.message === 'TIMEOUT') {
+        setError("Authentication request timed out. Please try again.");
+      } else if (err.message === 'Failed to fetch' || err.message === 'NetworkError') {
+        setError("Unable to connect to authentication service.");
+      } else {
+        setError(err.message || 'Invalid email or password.');
+      }
+    } finally {
       setIsLoading(false);
-    }, 600); // Small fake delay for UX
+    }
   };
 
   return (

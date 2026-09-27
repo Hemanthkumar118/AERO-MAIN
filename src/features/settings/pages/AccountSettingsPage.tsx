@@ -1,89 +1,139 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { supabase } from '../../../lib/supabase';
 import { PageHeader as Header } from '../../../components/layout/PageHeader';
 import { Button } from '../../../components/ui/Button';
 import { Input } from '../../../components/ui/Input';
-
-interface ProfileData {
-  id: string;
-  full_name: string;
-  email: string;
-  role: string;
-  created_at: string;
-}
+import { useAuth, type AeroProfile } from '../../../providers/AuthProvider';
+import { hospitalService } from '../../../services/hospitalService';
+import { discoverHospitals } from '../../../services/hospitalSearch';
+import { geolocationService } from '../../../services/geolocationService';
+import type { Hospital } from '../../../types';
+import type { NormalizedHospital } from '../../../services/hospitalSearch/types';
+import { AnimatePresence, motion } from 'framer-motion';
 
 export function AccountSettingsPage() {
-  const [loading, setLoading] = useState(true);
+  const { user, profile: authProfile, profileLoading, profileError, refreshProfile } = useAuth();
   const [saving, setSaving] = useState(false);
-  const [profile, setProfile] = useState<ProfileData | null>(null);
+  const [localProfile, setLocalProfile] = useState<AeroProfile | null>(null);
   
-  // Unified error handling state instead of multiple toasts
   const [bannerState, setBannerState] = useState<{ type: 'error' | 'success', message: string } | null>(null);
 
+  const [hospitals, setHospitals] = useState<Hospital[]>([]);
+  const [mapHospitals, setMapHospitals] = useState<NormalizedHospital[]>([]);
+  const [hospitalSearchTerm, setHospitalSearchTerm] = useState('');
+  const [isDropdownOpen, setIsDropdownOpen] = useState(false);
   useEffect(() => {
-    fetchProfile();
-  }, []);
+    if (authProfile) {
+      setLocalProfile({ ...authProfile });
+    }
+  }, [authProfile]);
+
+  useEffect(() => {
+    if (profileError) {
+      setBannerState({ type: 'error', message: profileError });
+    }
+  }, [profileError]);
+
+  useEffect(() => {
+    if (!['hospital', 'ambulance'].includes(authProfile?.role || '')) return;
+
+    const loadMapHospitals = (lat: number, lng: number) => {
+      const abortCtrl = new AbortController();
+      discoverHospitals(lat, lng, 15000, undefined, abortCtrl.signal)
+        .then(data => setMapHospitals(data))
+        .catch(console.error);
+    };
+
+    hospitalService.getAllHospitals().then(setHospitals);
+
+    geolocationService.getCurrentPosition()
+      .then(pos => loadMapHospitals(pos.latitude, pos.longitude))
+      .catch(() => loadMapHospitals(17.44, 78.34));
+  }, [authProfile?.role]);
+
+  const activeHospitals = useMemo(() => {
+    const combinedMap = new Map<string, typeof hospitals[0] | NormalizedHospital>();
+    mapHospitals.forEach(h => combinedMap.set(h.name.toLowerCase().trim(), h as any));
+    hospitals.forEach(h => {
+      const key = h.name.toLowerCase().trim();
+      if (!combinedMap.has(key)) combinedMap.set(key, h);
+    });
+    return Array.from(combinedMap.values()).sort((a, b) => {
+      const distA = 'distanceMeters' in a ? (a as NormalizedHospital).distanceMeters : 999999;
+      const distB = 'distanceMeters' in b ? (b as NormalizedHospital).distanceMeters : 999999;
+      return distA - distB;
+    });
+  }, [hospitals, mapHospitals]);
+
+  const filteredHospitals = activeHospitals.filter(h => 
+    h.name.toLowerCase().includes(hospitalSearchTerm.toLowerCase()) || 
+    (h.address && h.address.toLowerCase().includes(hospitalSearchTerm.toLowerCase()))
+  );
+  
+  const selectedHospitalName = activeHospitals.find(h => h.id === localProfile?.hospital_id)?.name || '';
 
   const fetchProfile = async () => {
-    setLoading(true);
     setBannerState(null);
-    try {
-      const { data: { user }, error: authError } = await supabase.auth.getUser();
-      if (authError || !user) throw new Error('Not authenticated');
-
-      let { data, error } = await supabase
-        .from('profiles')
-        .select('id, full_name, email, role, created_at')
-        .eq('id', user.id)
-        .single();
-
-      // If the profile does not exist (perhaps trigger failed), gracefully upsert it.
-      if (error && error.code === 'PGRST116') {
-        const fallbackName = user.user_metadata?.full_name || 'Operator';
-        const { data: newData, error: insertError } = await supabase
-          .from('profiles')
-          .insert({
-            id: user.id,
-            email: user.email,
-            full_name: fallbackName,
-            role: user.user_metadata?.role || 'user'
-          })
-          .select('id, full_name, email, role, created_at')
-          .single();
-          
-        if (insertError) throw insertError;
-        data = newData;
-      } else if (error) {
-        throw error;
-      }
-
-      setProfile(data as ProfileData);
-    } catch (error: any) {
-      console.error(error);
-      setBannerState({
-        type: 'error',
-        message: 'Unable to load operator profile. We couldn\'t retrieve your AERO profile from the database.'
-      });
-    } finally {
-      setLoading(false);
-    }
+    await refreshProfile();
   };
 
   const handleSave = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!profile) return;
+    if (!localProfile) return;
     setSaving(true);
     setBannerState(null);
 
     try {
+      let finalHospitalId = localProfile.hospital_id;
+      const isUuid = /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/.test(finalHospitalId || '');
+      
+      if (!isUuid && ['hospital', 'ambulance'].includes(localProfile.role) && finalHospitalId) {
+        const selectedMapHosp = mapHospitals.find(h => h.id === finalHospitalId);
+        if (selectedMapHosp) {
+          const { data, error: rpcError } = await supabase.rpc('get_or_create_hospital', {
+            p_name: selectedMapHosp.name,
+            p_address: selectedMapHosp.address || '',
+            p_lat: selectedMapHosp.lat,
+            p_lng: selectedMapHosp.lng,
+            p_phone: selectedMapHosp.phone || ''
+          });
+
+          if (rpcError && rpcError.code === 'PGRST202') {
+            console.warn("RPC missing, falling back to manual insert");
+            const { data: existing } = await supabase.from('hospitals').select('id').eq('name', selectedMapHosp.name).single();
+            if (existing) {
+               finalHospitalId = existing.id;
+            } else {
+               const { data: inserted, error: insErr } = await supabase.from('hospitals').insert({
+                  name: selectedMapHosp.name,
+                  address: selectedMapHosp.address || '',
+                  location: `POINT(${selectedMapHosp.lng} ${selectedMapHosp.lat})`,
+                  phone: selectedMapHosp.phone || '',
+                  emergency_capable: true
+               }).select('id').single();
+               
+               if (insErr) throw insErr;
+               finalHospitalId = inserted.id;
+            }
+          } else if (rpcError) {
+             throw rpcError;
+          } else if (data) {
+             finalHospitalId = data;
+          }
+        }
+      }
+
       const { error } = await supabase
         .from('profiles')
         .update({
-          full_name: profile.full_name,
+          full_name: localProfile.full_name,
+          hospital_id: finalHospitalId || null
         })
-        .eq('id', profile.id);
+        .eq('id', localProfile.id);
 
       if (error) throw error;
+      
+      await refreshProfile();
 
       setBannerState({
         type: 'success',
@@ -99,14 +149,14 @@ export function AccountSettingsPage() {
       console.error(error);
       setBannerState({
         type: 'error',
-        message: 'Unable to update your profile. Please try again.'
+        message: `Unable to update your profile: ${error.message || 'Unknown error'}`
       });
     } finally {
       setSaving(false);
     }
   };
 
-  if (loading) {
+  if (profileLoading) {
     return (
       <div className="min-h-dvh bg-bg-main flex flex-col">
         <Header title="AERO OPERATOR PROFILE" subtitle="Manage your AERO operational identity and profile." />
@@ -152,11 +202,11 @@ export function AccountSettingsPage() {
           <div className="lg:col-span-1">
             <div className="bg-bg-surface/60 border border-cyan-900/30 rounded-2xl p-6 flex flex-col items-center text-center sticky top-6 shadow-2xl backdrop-blur-sm">
               <div className="w-24 h-24 bg-cyan-950 border border-cyan-700/50 rounded-full flex items-center justify-center text-3xl font-bold text-cyan-400 mb-4 shadow-[0_0_20px_rgba(8,145,178,0.2)]">
-                {profile?.full_name.substring(0, 2).toUpperCase() || 'OP'}
+                {localProfile?.full_name?.substring(0, 2).toUpperCase() || 'OP'}
               </div>
-              <h2 className="text-xl font-bold text-white mb-1">{profile?.full_name.toUpperCase()}</h2>
+              <h2 className="text-xl font-bold text-white mb-1">{localProfile?.full_name?.toUpperCase()}</h2>
               <p className="text-sm text-cyan-500 font-medium tracking-wide mb-6">
-                {(profile?.role || 'Operator').replace('_', ' ').toUpperCase()}
+                {(localProfile?.role || 'Operator').replace('_', ' ').toUpperCase()}
               </p>
               
               <div className="w-full bg-bg-main/80 rounded-xl p-4 border border-border-subtle text-left">
@@ -175,22 +225,22 @@ export function AccountSettingsPage() {
           <div className="lg:col-span-2 space-y-6">
             <form onSubmit={handleSave} className="space-y-6">
               
-              <div className="bg-bg-surface/40 border border-border-subtle rounded-2xl overflow-hidden shadow-xl">
-                <div className="bg-bg-surface/80 px-6 py-4 border-b border-border-subtle">
+              <div className="bg-bg-surface/40 border border-border-subtle rounded-2xl shadow-xl relative z-50">
+                <div className="bg-bg-surface/80 px-6 py-4 border-b border-border-subtle rounded-t-2xl">
                   <h3 className="text-xs font-bold text-cyan-500 uppercase tracking-widest">Operator Identity</h3>
                 </div>
                 <div className="p-6 grid gap-5">
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-5">
                     <Input
                       label="Full Name"
-                      value={profile?.full_name || ''}
-                      onChange={(e: React.ChangeEvent<HTMLInputElement>) => setProfile(prev => prev ? { ...prev, full_name: e.target.value } : null)}
+                      value={localProfile?.full_name || ''}
+                      onChange={(e: React.ChangeEvent<HTMLInputElement>) => setLocalProfile(prev => prev ? { ...prev, full_name: e.target.value } : null)}
                       required
                       placeholder="e.g. John Doe"
                     />
                     <Input
                       label="Operational Role"
-                      value={(profile?.role || '').replace('_', ' ').toUpperCase()}
+                      value={(localProfile?.role || '').replace('_', ' ').toUpperCase()}
                       disabled
                       className="bg-bg-main/50 opacity-80"
                     />
@@ -198,17 +248,81 @@ export function AccountSettingsPage() {
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-5">
                     <Input
                       label="Email Address"
-                      value={profile?.email || ''}
+                      value={user?.email || ''}
                       disabled
                       className="bg-bg-main/50 opacity-80"
                     />
                     <Input
                       label="User ID"
-                      value={profile?.id || ''}
+                      value={localProfile?.id || ''}
                       disabled
                       className="bg-bg-main/50 opacity-80 font-mono text-[11px]"
                     />
                   </div>
+                  
+                  {['hospital', 'ambulance'].includes(localProfile?.role || '') && (
+                    <div className="grid grid-cols-1 gap-5">
+                      <div className="group relative z-20">
+                        <label className="block text-[10px] font-bold text-text-secondary uppercase tracking-widest mb-2 transition-colors group-focus-within:text-white">Assigned Hospital Facility</label>
+                        <div className="relative">
+                          <input
+                            type="text"
+                            placeholder="Search hospital..."
+                            value={isDropdownOpen ? hospitalSearchTerm : (selectedHospitalName || hospitalSearchTerm)}
+                            onChange={(e) => {
+                              setHospitalSearchTerm(e.target.value);
+                              setIsDropdownOpen(true);
+                            }}
+                            onFocus={() => {
+                              setHospitalSearchTerm('');
+                              setIsDropdownOpen(true);
+                            }}
+                            onBlur={() => setTimeout(() => setIsDropdownOpen(false), 200)}
+                            className="w-full bg-bg-main/50 border border-border-subtle rounded-lg px-4 py-3 text-sm text-white placeholder-text-secondary focus:outline-none focus:border-cyan-500 focus:ring-1 focus:ring-cyan-500/30 transition-all duration-200"
+                          />
+                          <AnimatePresence>
+                            {isDropdownOpen && (
+                              <motion.div 
+                                initial={{ opacity: 0, y: 5 }}
+                                animate={{ opacity: 1, y: 0 }}
+                                exit={{ opacity: 0, y: 5 }}
+                                className="absolute z-[100] w-full mt-2 max-h-60 overflow-y-auto bg-bg-surface border border-border-subtle rounded-xl shadow-2xl custom-scrollbar"
+                              >
+                                {filteredHospitals.length === 0 ? (
+                                  <div className="p-4 text-sm text-text-secondary text-center">No hospitals found</div>
+                                ) : (
+                                  filteredHospitals.map(h => (
+                                    <div
+                                      key={h.id}
+                                      onClick={() => {
+                                        setLocalProfile(prev => prev ? { ...prev, hospital_id: h.id } : null);
+                                        setHospitalSearchTerm('');
+                                        setIsDropdownOpen(false);
+                                      }}
+                                      className="p-3 hover:bg-white/5 cursor-pointer border-b border-border-subtle last:border-0 transition-colors flex justify-between items-start gap-4"
+                                    >
+                                      <div>
+                                        <div className="text-white text-sm font-medium">{h.name}</div>
+                                        {h.address && <div className="text-text-secondary text-[10px] mt-0.5 line-clamp-1">{h.address}</div>}
+                                      </div>
+                                      {('distanceMeters' in h) && (
+                                        <div className="text-xs font-bold text-emerald-400 shrink-0 bg-emerald-500/10 px-2 py-0.5 rounded-full">
+                                          {((h as NormalizedHospital).distanceMeters / 1000).toFixed(1)} km
+                                        </div>
+                                      )}
+                                    </div>
+                                  ))
+                                )}
+                              </motion.div>
+                            )}
+                          </AnimatePresence>
+                        </div>
+                        {mapHospitals.length > 0 && (
+                          <p className="text-[10px] text-emerald-400 mt-1.5 font-bold">📡 Loaded from Live Map Data</p>
+                        )}
+                      </div>
+                    </div>
+                  )}
                 </div>
               </div>
 
@@ -220,7 +334,7 @@ export function AccountSettingsPage() {
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-5">
                     <Input
                       label="Account Created"
-                      value={profile?.created_at ? new Date(profile.created_at).toLocaleDateString(undefined, { year: 'numeric', month: 'long', day: 'numeric' }) : 'Unknown'}
+                      value={user?.created_at ? new Date(user.created_at).toLocaleDateString(undefined, { year: 'numeric', month: 'long', day: 'numeric' }) : 'Unknown'}
                       disabled
                       className="bg-bg-main/50 opacity-80"
                     />

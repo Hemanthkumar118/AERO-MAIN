@@ -95,6 +95,12 @@ export interface EmergencyIncident {
   route_geometry?: any;
   route_distance_meters?: number;
   route_duration_seconds?: number;
+  traffic_duration_seconds?: number;
+  traffic_status?: string;
+  route_provider?: string;
+  route_version?: number;
+  last_reroute_at?: string;
+  route_updated_at?: string;
   current_latitude?: number;
   current_longitude?: number;
   current_accuracy?: number;
@@ -103,9 +109,32 @@ export interface EmergencyIncident {
   corridor_status?: CorridorStatus;
   police_acknowledged_at?: string;
   police_id?: string;
+  hospital_status?: string;
   resolved_at?: string;
   created_at: string;
   updated_at: string;
+}
+
+export type SOSStatus = 'IDLE' | 'VALIDATING' | 'CALCULATING_ROUTE' | 'CREATING_EMERGENCY' | 'BROADCASTING' | 'ACTIVE' | 'ARRIVED' | 'COMPLETED' | 'ABORTED' | 'ERROR';
+export type CommunicationStatus = 'PENDING' | 'SENT' | 'DELIVERED' | 'FAILED';
+
+export interface SOSState {
+  status: SOSStatus;
+  emergencyId?: string;
+  routeStatus?: 'PENDING' | 'SUCCESS' | 'ERROR';
+  policeStatus?: CommunicationStatus;
+  hospitalStatus?: CommunicationStatus;
+  ambulanceLocation?: LatLng;
+  destination?: Hospital;
+  distanceMeters?: number;
+  etaSeconds?: number;
+  trafficAwareEtaSeconds?: number;
+  trafficStatus?: 'LIVE' | 'UNAVAILABLE';
+  routeProvider?: 'google' | 'mapbox' | 'osrm';
+  speedKmH?: number;
+  startedAt?: string;
+  updatedAt?: string;
+  error?: string;
 }
 
 // ── Hospital ──
@@ -184,9 +213,13 @@ export interface RouteInfo {
   polyline: [number, number][];
   distanceMeters: number;
   etaSeconds: number;
+  trafficAwareEtaSeconds?: number;
+  trafficStatus?: 'LIVE' | 'UNAVAILABLE' | 'MODERATE' | 'HEAVY' | 'SEVERE';
+  routeProvider?: string;
   waypoints?: LatLng[];
   junctions?: Junction[];
   congestionSegments?: CongestionSegment[];
+  steps?: any[];
 }
 
 // ── Police Handover / Coordination Note ──

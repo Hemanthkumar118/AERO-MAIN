@@ -1,5 +1,5 @@
-import { Routes, Route, useNavigate } from 'react-router-dom';
-
+import { Routes, Route, useNavigate, Navigate, useLocation } from 'react-router-dom';
+import { useAuth } from '../providers/AuthProvider';
 import { LandingPage } from '../features/public/pages/LandingPage';
 import { LoginPage } from '../features/auth/pages/LoginPage';
 import { RegisterPage } from '../features/auth/pages/RegisterPage';
@@ -45,8 +45,63 @@ export function AppRoutes() {
     }
   };
 
-  const ProtectedRoute = ({ allowedRoles: _allowedRoles, children }: { allowedRoles?: string[]; children: React.ReactNode }) => {
-    // DEMO MODE: Bypass all authentication and role checks
+  const ProtectedRoute = ({ allowedRoles, children }: { allowedRoles?: string[]; children: React.ReactNode }) => {
+    const { user, profile, authLoading, profileLoading, profileError, refreshProfile } = useAuth();
+    const location = useLocation();
+
+    if (authLoading || profileLoading) {
+      return (
+        <div className="min-h-dvh flex flex-col items-center justify-center bg-bg-main p-4">
+          <div className="w-16 h-16 rounded-full border-4 border-border-subtle border-t-[#35C7FF] animate-spin mb-4"></div>
+          <h2 className="text-xl font-bold text-white">LOADING AERO ACCOUNT...</h2>
+          <p className="text-text-secondary mt-2">Authenticating secure session</p>
+        </div>
+      );
+    }
+
+    if (profileError && !profile) {
+      return (
+        <div className="min-h-dvh flex flex-col items-center justify-center bg-bg-main p-4">
+          <div className="bg-red-500/10 border border-red-500/30 rounded-xl p-6 max-w-md text-center">
+            <h2 className="text-xl font-bold text-red-500 mb-2">AERO ACCOUNT ERROR</h2>
+            <p className="text-text-secondary mb-6">{profileError || "Authentication could not be initialized."}</p>
+            <button 
+              onClick={() => refreshProfile()}
+              className="bg-bg-surface hover:bg-bg-elevated text-white px-6 py-2 rounded-lg border border-border-subtle transition-colors"
+            >
+              Retry
+            </button>
+          </div>
+        </div>
+      );
+    }
+
+    if (!user) {
+      return <Navigate to="/login" state={{ from: location }} replace />;
+    }
+
+    if (allowedRoles && allowedRoles.length > 0) {
+      const userRole = profile?.role?.toUpperCase();
+      if (!userRole || !allowedRoles.includes(userRole)) {
+        if (userRole === 'POLICE' || userRole === 'TRAFFIC_OPERATOR') {
+          if (location.pathname !== '/police') return <Navigate to="/police" replace />;
+        } else if (userRole === 'HOSPITAL' || userRole === 'HOSPITAL_OPERATOR') {
+          if (location.pathname !== '/hospital') return <Navigate to="/hospital" replace />;
+        } else if (userRole === 'ADMIN') {
+          if (location.pathname !== '/admin') return <Navigate to="/admin" replace />;
+        } else {
+          if (location.pathname !== '/ambulance') return <Navigate to="/ambulance" replace />;
+        }
+        
+        return (
+          <div className="min-h-dvh flex flex-col items-center justify-center bg-bg-main p-4 text-center">
+            <h2 className="text-xl font-bold text-red-500 mb-2">UNAUTHORIZED</h2>
+            <p className="text-text-secondary">Your account role ({userRole || 'UNKNOWN'}) does not have access to this page.</p>
+          </div>
+        );
+      }
+    }
+
     return (
       <>
         {children}
@@ -77,6 +132,10 @@ export function AppRoutes() {
             <AmbulanceDashboard />
           </ProtectedRoute>
         }
+      />
+      <Route
+        path="/ambulance/sos"
+        element={<Navigate to="/ambulance" replace />}
       />
       <Route
         path="/ambulance/emergency"

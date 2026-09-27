@@ -340,7 +340,7 @@ export function ComponentShowcase() {
         <Section title="SOS Button">
           <div className="flex flex-wrap gap-8 items-start">
             <div className="text-center">
-              <SOSButton onConfirm={() => addToast({ variant: 'success', message: 'SOS Sent!' })} hospitalName="City General Hospital" />
+              <SOSButton onConfirm={() => addToast({ variant: 'success', message: 'SOS Sent!' })} />
               <p className="text-[11px] text-text-primary0 mt-2">Enabled</p>
             </div>
             <div className="text-center">
