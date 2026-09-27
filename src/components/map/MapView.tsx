@@ -81,7 +81,7 @@ export function MapView({
         const newMap = mapplsClassObject.current.Map({
           id: uniqueId.current,
           properties: {
-            center: safeCenter,
+            center: { lat: safeCenter[0], lng: safeCenter[1] },
             zoom: zoom,
             zoomControl: false,
             location: false
@@ -92,6 +92,11 @@ export function MapView({
 
         newMap.on("load", () => {
           console.log("[MapView] Map 'load' event fired!");
+          setTimeout(() => {
+            if (newMap && typeof newMap.resize === 'function') {
+              newMap.resize();
+            }
+          }, 100);
           if (isMounted) setIsMapLoaded(true);
         });
         
@@ -117,7 +122,7 @@ export function MapView({
   // Update center when prop changes
   useEffect(() => {
     if (isMapLoaded && mapRef.current) {
-      mapRef.current.setCenter([center[0], center[1]]);
+      mapRef.current.setCenter({ lat: center[0], lng: center[1] });
     }
   }, [center[0], center[1], isMapLoaded]);
 
@@ -147,11 +152,11 @@ export function MapView({
         }
 
         if (followLiveLocation && !hasInitialCentered.current) {
-          mapRef.current.setCenter([newPos[0], newPos[1]]);
+          mapRef.current.setCenter({ lat: newPos[0], lng: newPos[1] });
           mapRef.current.setZoom(Math.max(mapRef.current.getZoom(), 16));
           hasInitialCentered.current = true;
         } else if (followLiveLocation) {
-          mapRef.current.setCenter([newPos[0], newPos[1]]);
+          mapRef.current.setCenter({ lat: newPos[0], lng: newPos[1] });
         }
       },
       () => {},
@@ -221,7 +226,7 @@ export function MapView({
           <button
             onClick={() => {
               if (mapRef.current) {
-                mapRef.current.setCenter([center[0], center[1]]);
+                mapRef.current.setCenter({ lat: center[0], lng: center[1] });
               }
             }}
             className="w-9 h-9 bg-white/90 backdrop-blur border border-gray-200 rounded-lg flex items-center justify-center text-gray-600 hover:text-gray-900 hover:bg-white transition-colors shadow-md cursor-pointer pointer-events-auto"
