@@ -4,15 +4,12 @@ import dotenv from 'dotenv';
 import { createClient } from '@supabase/supabase-js';
 import Groq from 'groq-sdk';
 import crypto from 'crypto';
-import routingRoutes from './api/routes.js';
 
 dotenv.config();
 
 const app = express();
 app.use(cors({ origin: true }));
 app.use(express.json());
-
-app.use('/api/route', routingRoutes);
 
 const PORT = process.env.PORT || 3001;
 

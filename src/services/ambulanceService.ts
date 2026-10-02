@@ -1,6 +1,7 @@
 import { supabase } from '../lib/supabase';
 import { realtimeService } from './realtimeService';
-import { routingService } from './routingService';
+
+import { TrafficAwareRoutingProvider } from './TrafficAwareRoutingProvider';
 import type { Emergency, Hospital, PatientInfo, TrafficIncident } from '../types';
 
 export const ambulanceService = {
@@ -47,8 +48,8 @@ export const ambulanceService = {
       throw new Error("Live GPS location is missing or inaccurate. Cannot activate SOS corridor without fresh coordinates.");
     }
 
-    // Compute live OSRM driving route from current GPS to chosen hospital
-    const routeInfo = await routingService.getLiveRoute(startPos as [number, number], [
+    // Compute live driving route from current GPS to chosen hospital
+    const routeInfo = await TrafficAwareRoutingProvider.getFastestRoute(startPos as [number, number], [
       hospital.location.latitude,
       hospital.location.longitude,
     ]);
@@ -119,11 +120,16 @@ export const ambulanceService = {
     };
     const pgPriority = priorityMapping[newEmergency.priority as string] || 'critical';
     
-    // Auto-cancel any previous active incidents for this ambulance to avoid duplicates in Police Dashboard
-    await supabase.from('emergency_incidents')
-      .update({ status: 'cancelled' })
+    // 14. DUPLICATE SOS PROTECTION: Check if ambulance already has an active emergency
+    const { data: existingActive } = await supabase.from('emergency_incidents')
+      .select('id')
       .eq('user_id', userId)
-      .in('status', ['active', 'dispatched', 'en_route', 'arrived', 'rerouting']);
+      .in('status', ['active', 'dispatched', 'en_route', 'arrived', 'rerouting'])
+      .maybeSingle();
+      
+    if (existingActive) {
+      throw new Error("EMERGENCY ALREADY ACTIVE: Please complete or cancel your current emergency before starting a new one.");
+    }
 
     const { data, error } = await supabase.from('emergency_incidents').insert({
       user_id: userId,
@@ -140,6 +146,9 @@ export const ambulanceService = {
       route_geometry: routeInfo.polyline,
       route_distance_meters: routeInfo.distanceMeters,
       route_duration_seconds: routeInfo.etaSeconds,
+      traffic_duration_seconds: routeInfo.trafficAwareEtaSeconds || routeInfo.etaSeconds,
+      traffic_status: routeInfo.trafficStatus || 'UNAVAILABLE',
+      route_version: 1,
       current_latitude: startPos[0],
       current_longitude: startPos[1],
       current_speed: 0,
@@ -148,6 +157,9 @@ export const ambulanceService = {
     
     if (error || !data) {
       console.error('Supabase insert failed:', error);
+      if (error?.message?.includes('schema cache') || error?.code === 'PGRST204') {
+        throw new Error(`DATABASE CONFIGURATION ERROR: Schema mismatch. Please run "NOTIFY pgrst, 'reload schema';" in Supabase SQL Editor. Details: ${error?.message}`);
+      }
       throw new Error(`Failed to create emergency incident: ${error?.message}`);
     }
 

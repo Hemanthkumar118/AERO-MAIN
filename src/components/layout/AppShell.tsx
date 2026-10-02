@@ -69,7 +69,7 @@ export function AppShell({
       </AnimatePresence>
 
       {/* Main content */}
-      <main className="flex-1 overflow-hidden relative min-h-0 bg-bg-main">
+      <main className="flex-1 overflow-hidden relative z-0 min-h-0 bg-bg-main">
         <motion.div 
           initial={{ opacity: 0, y: 10 }}
           animate={{ opacity: 1, y: 0 }}

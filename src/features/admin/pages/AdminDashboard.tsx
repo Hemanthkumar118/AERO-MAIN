@@ -35,8 +35,14 @@ export function AdminDashboard() {
       analyticsService.getEmergencyHistory().then(setEmergencies);
     });
 
+    const unsubConnection = realtimeService.on('connection_change', () => {
+      // Just to trigger a re-render so we get the latest connection state
+      setSearchTerm(prev => prev);
+    });
+
     return () => {
       unsubEmergency();
+      unsubConnection();
     };
   }, []);
 
@@ -120,7 +126,7 @@ export function AdminDashboard() {
   );
 
   return (
-    <AppShell userRole="ADMIN" userName="Central Command Admin" connectionState="connected">
+    <AppShell userRole="ADMIN" userName="Central Command Admin" connectionState={realtimeService.getConnectionState()}>
       <div className="h-full overflow-y-auto pb-10 bg-bg-main">
         <div className="px-4 sm:px-6 pt-6 pb-4 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 border-b border-border-subtle mb-6">
           <PageHeader

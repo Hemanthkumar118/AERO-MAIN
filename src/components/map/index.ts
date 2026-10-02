@@ -1,4 +1,6 @@
 export { MapView } from './MapView';
+export { GoogleMapMarker } from './GoogleMapMarker';
+export { GoogleMapContext, useGoogleMap } from './GoogleMapContext';
 export {
   AmbulanceMarker,
   HospitalMarker,
@@ -7,3 +9,4 @@ export {
   IncidentMarker,
 } from './Markers';
 export { RoutePolyline } from './RoutePolyline';
+export { RadiusCircle } from './RadiusCircle';

@@ -8,6 +8,7 @@ import { realtimeService } from '../../../services/realtimeService';
 import type { Emergency, Hospital, HospitalPreparationState } from '../../../types';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useAuth } from '../../../providers/AuthProvider';
+import type { ConnectionState } from '../../../types';
 
 export function HospitalDashboard() {
   const { addToast } = useToast();
@@ -25,6 +26,13 @@ export function HospitalDashboard() {
 
   const [isEditingCapacity, setIsEditingCapacity] = useState(false);
   const [editCapacities, setEditCapacities] = useState({ icu: 0, trauma: 0, doctors: 0 });
+  const [connectionState, setConnectionState] = useState<ConnectionState>(realtimeService.getConnectionState());
+
+  useEffect(() => {
+    return realtimeService.on('connection_change', (state) => {
+      setConnectionState(state);
+    });
+  }, []);
 
   useEffect(() => {
     const initHospital = async () => {
@@ -62,7 +70,7 @@ export function HospitalDashboard() {
             id: i.id,
             status: 'ACTIVE',
             priority: i.priority || 'CODE_RED',
-            ambulanceId: i.ambulance_id || 'AMB-1',
+            ambulanceId: i.ambulance_id || 'UNAVAILABLE',
             ambulanceDisplayName: i.ambulance_id || 'AERO ALS',
             hospital: h,
             patient: {
@@ -86,7 +94,7 @@ export function HospitalDashboard() {
               polyline: i.route_geometry || [],
               distanceMeters: i.route_distance_meters
             },
-            vehicleNumber: i.ambulance_id || 'AMB-1'
+            vehicleNumber: i.ambulance_id || 'UNAVAILABLE'
           } as any));
 
         setIncomingEmergencies(mapped);
@@ -176,14 +184,14 @@ export function HospitalDashboard() {
   const etaSecondsDisplay = activeEtaSeconds != null ? activeEtaSeconds % 60 : null;
 
   return (
-    <AppShell userRole="HOSPITAL" userName={hospital.name} connectionState="connected">
+    <AppShell userRole="HOSPITAL" userName={hospital.name} connectionState={connectionState}>
       <div className="flex flex-col lg:flex-row h-full overflow-hidden">
         
         {/* Left Side: Map & Incoming Ambulances Stream */}
         <div className="flex-1 flex flex-col min-h-0 border-r border-border-subtle">
           
           {/* Top ER Header Status Bar */}
-          <div className="bg-bg-surface px-4 py-3 border-b border-border-subtle flex items-center justify-between shrink-0 shadow-sm z-10">
+          <div className="relative z-30 bg-bg-surface px-4 py-3 border-b border-border-subtle flex items-center justify-between shrink-0 shadow-sm">
             <div>
               <div className="flex items-center gap-2">
                 <h1 className="text-base font-bold text-white">{hospital.name}</h1>
@@ -265,7 +273,7 @@ export function HospitalDashboard() {
               <motion.div 
                 initial={{ scale: 0.9, opacity: 0 }}
                 animate={{ scale: 1, opacity: 1 }}
-                className="absolute top-4 left-4 z-[400] bg-bg-surface/95 backdrop-blur-md border border-[#FF3B30]/30 rounded-xl p-3 shadow-lg flex items-center gap-4"
+                className="absolute top-4 left-4 z-30 bg-bg-surface/95 backdrop-blur-md border border-[#FF3B30]/30 rounded-xl p-3 shadow-lg flex items-center gap-4"
               >
                 <div className="w-10 h-10 rounded-lg bg-[#FF3B30]/10 border border-[#FF3B30]/20 flex items-center justify-center text-xl">
                   🚑

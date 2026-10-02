@@ -120,7 +120,7 @@ export function OfflineOverlay({
   if (!show) return null;
 
   return (
-    <div className="fixed inset-0 z-[9500] bg-bg-main/95 flex flex-col items-center justify-center p-6 animate-fade-in">
+    <div className="fixed inset-0 z-[80] bg-bg-main/95 flex flex-col items-center justify-center p-6 animate-fade-in">
       <svg className="text-[#FFB020] mb-4 animate-pulse-soft" width="64" height="64" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" aria-hidden="true">
         <line x1="1" y1="1" x2="23" y2="23" />
         <path d="M16.72 11.06A10.94 10.94 0 0119 12.55" />

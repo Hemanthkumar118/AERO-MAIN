@@ -44,7 +44,7 @@ export function StatusBar({
   const userName = propUserName || profile?.full_name || 'Operator';
 
   return (
-    <header className="h-14 bg-bg-surface border-b border-border-subtle flex items-center justify-between px-4 sm:px-6 shrink-0 z-50">
+    <header className="relative z-40 h-14 bg-bg-surface border-b border-border-subtle flex items-center justify-between px-4 sm:px-6 shrink-0">
       {/* Left: Brand & Role */}
       <div className="flex items-center gap-3 sm:gap-4">
         <div

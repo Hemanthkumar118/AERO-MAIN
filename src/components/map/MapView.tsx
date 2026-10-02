@@ -1,6 +1,5 @@
-import { useState, useEffect, useRef } from 'react';
-import { mappls } from 'mappls-web-maps';
-import { MapplsContext } from './MapplsContext';
+import { useState, useEffect, useRef, useCallback } from 'react';
+import { GoogleMapContext } from './GoogleMapContext';
 
 interface MapViewProps {
   center: [number, number];
@@ -12,6 +11,42 @@ interface MapViewProps {
   followLiveLocation?: boolean;
 }
 
+// Google Maps loader singleton
+let googleMapsLoadPromise: Promise<void> | null = null;
+let googleMapsLoaded = false;
+
+function loadGoogleMapsScript(apiKey: string): Promise<void> {
+  if (googleMapsLoaded) return Promise.resolve();
+  if (googleMapsLoadPromise) return googleMapsLoadPromise;
+
+  googleMapsLoadPromise = new Promise((resolve, reject) => {
+    // Check if already loaded
+    if (window.google?.maps?.Map) {
+      googleMapsLoaded = true;
+      resolve();
+      return;
+    }
+
+    const script = document.createElement('script');
+    script.src = `https://maps.googleapis.com/maps/api/js?key=${apiKey}&libraries=places,marker&v=weekly`;
+    script.async = true;
+    script.defer = true;
+
+    script.onload = () => {
+      googleMapsLoaded = true;
+      resolve();
+    };
+    script.onerror = () => {
+      googleMapsLoadPromise = null;
+      reject(new Error('Failed to load Google Maps script'));
+    };
+
+    document.head.appendChild(script);
+  });
+
+  return googleMapsLoadPromise;
+}
+
 export function MapView({
   center,
   zoom = 14,
@@ -21,142 +56,151 @@ export function MapView({
   showLiveLocation = true,
   followLiveLocation = false,
 }: MapViewProps) {
-  console.log("[MapView] COMPONENT MOUNTED", Date.now());
+  console.log("[MapView] COMPONENT MOUNTED (Google Maps)", Date.now());
 
   const mapContainerRef = useRef<HTMLDivElement>(null);
-  const mapRef = useRef<any>(null);
-  const mapplsClassObject = useRef(new mappls());
-  const uniqueId = useRef(`mappls-map-${Math.random().toString(36).substr(2, 9)}`);
+  const mapRef = useRef<google.maps.Map | null>(null);
+  const uniqueId = useRef(`gmap-${Math.random().toString(36).substr(2, 9)}`);
   const [isMapLoaded, setIsMapLoaded] = useState(false);
   const [showLegend, setShowLegend] = useState(false);
 
   // Live location tracker marker
-  const liveLocationMarker = useRef<any>(null);
+  const liveLocationMarker = useRef<google.maps.marker.AdvancedMarkerElement | null>(null);
   const hasInitialCentered = useRef(false);
+  const isInitializing = useRef(false);
 
   useEffect(() => {
-    const mapplsKey = import.meta.env.VITE_MAPPLS_KEY?.trim();
-    console.log("[MapView] MAPPLS KEY:", mapplsKey ? "CONFIGURED" : "MISSING");
-    if (!mapplsKey) {
-      console.error("VITE_MAPPLS_KEY is not defined");
+    const apiKey = import.meta.env.VITE_GOOGLE_MAPS_API_KEY;
+    console.log("[MapView] GOOGLE MAPS API KEY:", apiKey ? "CONFIGURED" : "MISSING");
+    if (!apiKey) {
+      console.error("VITE_GOOGLE_MAPS_API_KEY is not defined");
       return;
     }
 
+    if (isInitializing.current || isMapLoaded) {
+      console.log("[MapView] Already initializing or loaded. Skipping.");
+      return;
+    }
+    isInitializing.current = true;
+
     let isMounted = true;
-    
-    // Clear any existing map instance to be safe
-    if (mapRef.current) {
-      mapRef.current.remove();
-      mapRef.current = null;
-    }
 
-    const loadObject = {
-      map: true,
-      version: '3.0'
-    };
+    loadGoogleMapsScript(apiKey).then(() => {
+      if (!isMounted) return;
 
-    try {
-      console.log("[MapView] Attempting to initialize Mappls with key:", mapplsKey.substring(0, 5) + "...");
-      mapplsClassObject.current.initialize(mapplsKey, loadObject, () => {
-        console.log("[MapView] Mappls initialize callback executed.");
-        if (!isMounted) {
-            console.log("[MapView] Component unmounted before map could initialize.");
-            return;
-        }
-        const mapContainer = document.getElementById(uniqueId.current);
-        if (!mapContainer) {
-            console.error("[MapView] mapContainer not found in DOM!");
-            return;
-        }
-        
-        console.log("[MapView] mapContainer found. Instantiating map...");
-        // Clear container just in case
-        mapContainer.innerHTML = '';
+      const mapContainer = document.getElementById(uniqueId.current);
+      if (!mapContainer) {
+        console.error("[MapView] mapContainer not found in DOM!");
+        return;
+      }
 
-        // If center is exactly 0,0, default to India's center (Nagpur) to avoid black ocean tiles
-        const safeCenter = (center[0] === 0 && center[1] === 0) 
-            ? [28.6139, 77.2090] // New Delhi fallback
-            : [center[0], center[1]];
+      console.log("[MapView] Google Maps script loaded. Instantiating map...");
 
-        const newMap = mapplsClassObject.current.Map({
-          id: uniqueId.current,
-          properties: {
-            center: [safeCenter[0], safeCenter[1]],
-            zoom: zoom,
-            zoomControl: false,
-            location: false
-          },
-        });
+      // If center is exactly 0,0, default to India's center
+      const safeCenter = (center[0] === 0 && center[1] === 0)
+        ? { lat: 28.6139, lng: 77.2090 } // New Delhi fallback
+        : { lat: center[0], lng: center[1] };
 
-        console.log("[MapView] Map instance created. Waiting for 'load' event...");
-
-        newMap.on("load", () => {
-          console.log("[MapView] Map 'load' event fired!");
-          setTimeout(() => {
-            if (newMap && typeof newMap.resize === 'function') {
-              newMap.resize();
-            }
-          }, 100);
-          if (isMounted) setIsMapLoaded(true);
-        });
-        
-        newMap.on("error", (err: any) => {
-            console.error("[MapView] Map SDK threw an error:", err);
-        });
-
-        mapRef.current = newMap;
+      const newMap = new google.maps.Map(mapContainer, {
+        center: safeCenter,
+        zoom: zoom || 15,
+        zoomControl: false,
+        mapTypeControl: false,
+        streetViewControl: false,
+        fullscreenControl: false,
+        styles: [
+          // Dark emergency dashboard style
+          { elementType: 'geometry', stylers: [{ color: '#0a0e1a' }] },
+          { elementType: 'labels.text.stroke', stylers: [{ color: '#0a0e1a' }] },
+          { elementType: 'labels.text.fill', stylers: [{ color: '#746855' }] },
+          { featureType: 'administrative.locality', elementType: 'labels.text.fill', stylers: [{ color: '#d59563' }] },
+          { featureType: 'poi', elementType: 'labels.text.fill', stylers: [{ color: '#d59563' }] },
+          { featureType: 'poi.park', elementType: 'geometry', stylers: [{ color: '#0f1a12' }] },
+          { featureType: 'poi.park', elementType: 'labels.text.fill', stylers: [{ color: '#6b9a76' }] },
+          { featureType: 'road', elementType: 'geometry', stylers: [{ color: '#1a2235' }] },
+          { featureType: 'road', elementType: 'geometry.stroke', stylers: [{ color: '#1a2235' }] },
+          { featureType: 'road', elementType: 'labels.text.fill', stylers: [{ color: '#9ca5b3' }] },
+          { featureType: 'road.highway', elementType: 'geometry', stylers: [{ color: '#2c3a5a' }] },
+          { featureType: 'road.highway', elementType: 'geometry.stroke', stylers: [{ color: '#1f2835' }] },
+          { featureType: 'road.highway', elementType: 'labels.text.fill', stylers: [{ color: '#f3d19c' }] },
+          { featureType: 'transit', elementType: 'geometry', stylers: [{ color: '#111927' }] },
+          { featureType: 'transit.station', elementType: 'labels.text.fill', stylers: [{ color: '#d59563' }] },
+          { featureType: 'water', elementType: 'geometry', stylers: [{ color: '#0d1117' }] },
+          { featureType: 'water', elementType: 'labels.text.fill', stylers: [{ color: '#515c6d' }] },
+          { featureType: 'water', elementType: 'labels.text.stroke', stylers: [{ color: '#0d1117' }] },
+        ],
+        mapId: 'AERO_EMERGENCY_MAP', // Required for AdvancedMarkerElement
       });
-    } catch (err) {
-      console.error("Failed to initialize Mappls map:", err);
-    }
+
+      console.log("[MapView] Map instance created.");
+      mapRef.current = newMap;
+
+      google.maps.event.addListenerOnce(newMap, 'tilesloaded', () => {
+        if (!isMounted) return;
+        console.log("[MapView] Map tiles loaded.");
+        setIsMapLoaded(true);
+      });
+
+      // Fallback in case 'tilesloaded' doesn't fire
+      setTimeout(() => {
+        if (isMounted && !isMapLoaded) {
+          console.log("[MapView] Fallback timeout reached, setting map loaded.");
+          setIsMapLoaded(true);
+        }
+      }, 2000);
+    }).catch(err => {
+      console.error("Failed to load Google Maps:", err);
+    });
 
     return () => {
       isMounted = false;
-      if (mapRef.current) {
-        mapRef.current.remove();
-        mapRef.current = null;
-      }
+      isInitializing.current = false;
+      mapRef.current = null;
     };
   }, []);
 
   // Update center when prop changes
   useEffect(() => {
     if (isMapLoaded && mapRef.current) {
-      mapRef.current.setCenter([center[0], center[1]]);
+      const safeCenter = (center[0] === 0 && center[1] === 0)
+        ? { lat: 28.6139, lng: 77.2090 }
+        : { lat: center[0], lng: center[1] };
+      mapRef.current.setCenter(safeCenter);
     }
   }, [center[0], center[1], isMapLoaded]);
 
   // Live Location Tracker
   useEffect(() => {
-    if (!showLiveLocation || !isMapLoaded || !('geolocation' in navigator)) return;
+    if (!showLiveLocation || !isMapLoaded || !('geolocation' in navigator) || !mapRef.current) return;
 
     const watchId = navigator.geolocation.watchPosition(
       (pos) => {
-        const newPos = [pos.coords.latitude, pos.coords.longitude];
+        const newPos = { lat: pos.coords.latitude, lng: pos.coords.longitude };
 
         if (!liveLocationMarker.current) {
-          liveLocationMarker.current = new (mapplsClassObject.current as any).Marker({
+          // Create a blue dot marker for live location
+          const dotEl = document.createElement('div');
+          dotEl.innerHTML = `
+            <div style="display: flex; align-items: center; justify-content: center; width: 24px; height: 24px;">
+              <div style="width: 14px; height: 14px; background-color: #4285F4; border-radius: 50%; border: 2.5px solid #ffffff; box-shadow: 0 0 10px rgba(66, 133, 244, 0.6);"></div>
+            </div>
+          `;
+
+          liveLocationMarker.current = new google.maps.marker.AdvancedMarkerElement({
             map: mapRef.current,
-            position: { lat: newPos[0], lng: newPos[1] },
-            html: `
-              <div style="display: flex; align-items: center; justify-content: center; width: 24px; height: 24px;">
-                <div style="width: 14px; height: 14px; background-color: #4285F4; border-radius: 50%; border: 2.5px solid #ffffff; box-shadow: 0 0 10px rgba(66, 133, 244, 0.6);"></div>
-              </div>
-            `,
-            width: 24,
-            height: 24,
-            offset: [12, 12]
+            position: newPos,
+            content: dotEl,
           });
         } else {
-          liveLocationMarker.current.setPosition({ lat: newPos[0], lng: newPos[1] });
+          liveLocationMarker.current.position = newPos;
         }
 
         if (followLiveLocation && !hasInitialCentered.current) {
-          mapRef.current.setCenter([newPos[0], newPos[1]]);
-          mapRef.current.setZoom(Math.max(mapRef.current.getZoom(), 16));
+          mapRef.current!.setCenter(newPos);
+          mapRef.current!.setZoom(Math.max(mapRef.current!.getZoom() || 14, 16));
           hasInitialCentered.current = true;
         } else if (followLiveLocation) {
-          mapRef.current.setCenter([newPos[0], newPos[1]]);
+          mapRef.current!.setCenter(newPos);
         }
       },
       () => {},
@@ -166,69 +210,42 @@ export function MapView({
     return () => {
       navigator.geolocation.clearWatch(watchId);
       if (liveLocationMarker.current) {
-        liveLocationMarker.current.remove();
+        liveLocationMarker.current.map = null;
         liveLocationMarker.current = null;
       }
     };
   }, [isMapLoaded, showLiveLocation, followLiveLocation]);
 
-  const [childCount, setChildCount] = useState(0);
-  const [networkStatus, setNetworkStatus] = useState<string>("TESTING...");
-  
-  useEffect(() => {
-    const interval = setInterval(() => {
-      const el = document.getElementById(uniqueId.current);
-      if (el) setChildCount(el.childNodes.length);
-    }, 1000);
-    return () => clearInterval(interval);
+  const handleRecenter = useCallback(() => {
+    if (mapRef.current) {
+      mapRef.current.setCenter({ lat: center[0], lng: center[1] });
+    }
+  }, [center[0], center[1]]);
+
+  const handleZoomIn = useCallback(() => {
+    if (mapRef.current) mapRef.current.setZoom((mapRef.current.getZoom() || 14) + 1);
   }, []);
 
-  useEffect(() => {
-    // Explicitly test the Mappls script URL to see if it's returning 403 Forbidden
-    const testUrl = `https://apis.mappls.com/advancedmaps/api/${import.meta.env.VITE_MAPPLS_KEY?.trim()}/map_sdk?layer=vector&v=3.0`;
-    fetch(testUrl)
-      .then(res => setNetworkStatus(`HTTP ${res.status} ${res.statusText}`))
-      .catch(err => setNetworkStatus(`FAILED TO FETCH: ${err.message}`));
+  const handleZoomOut = useCallback(() => {
+    if (mapRef.current) mapRef.current.setZoom((mapRef.current.getZoom() || 14) - 1);
   }, []);
 
   return (
     <div className={`relative w-full h-full min-h-[300px] bg-bg-main overflow-hidden ${className}`}>
-      
-      {/* EXTREMELY VISIBLE DEBUG TEXT FOR USER TO VERIFY CODE IS UPDATED */}
-      {!isMapLoaded && (
-        <div className="absolute top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2 z-[9999] bg-white p-4 text-black font-black text-lg border-4 border-red-500 shadow-2xl pointer-events-none w-3/4 max-w-lg text-left">
-          <div>1. COMPONENT MOUNTED: YES</div>
-          <div>2. VITE_MAPPLS_KEY: {import.meta.env.VITE_MAPPLS_KEY ? `FOUND (${import.meta.env.VITE_MAPPLS_KEY.substring(0, 8)}...)` : "MISSING"}</div>
-          <div>3. IS_MAP_LOADED: FALSE</div>
-          <div>4. MAP_REF_EXISTS: {mapRef.current ? "YES" : "NO"}</div>
-          <div>5. CONTAINER_CHILDREN: {childCount} nodes</div>
-          <div className="mt-2 text-red-600">6. NETWORK TEST: {networkStatus}</div>
-          {networkStatus.includes("401") || networkStatus.includes("403") ? (
-            <div className="mt-2 text-sm text-red-700 bg-red-100 p-2">
-              ERROR: Mappls is rejecting your API Key or Domain (401/403). 
-              Check your Mappls Dashboard for domain restrictions. Ensure you whitelisted https://aero-ambulance.netlify.app
-            </div>
-          ) : null}
-        </div>
-      )}
 
-      <div id={uniqueId.current} ref={mapContainerRef} className="w-full h-full z-0 bg-[#0a0e1a]" />
+      <div id={uniqueId.current} ref={mapContainerRef} className="w-full h-full z-10 bg-[#0a0e1a]" />
 
       {isMapLoaded && (
-        <MapplsContext.Provider value={{ map: mapRef.current, mapplsClassObject: mapplsClassObject.current }}>
+        <GoogleMapContext.Provider value={{ map: mapRef.current }}>
           {children}
-        </MapplsContext.Provider>
+        </GoogleMapContext.Provider>
       )}
 
       {/* Bottom Left Floating Controls */}
       {showControls && (
-        <div className="absolute bottom-4 left-4 z-[400] flex flex-col gap-2 pointer-events-auto">
+        <div className="absolute bottom-4 left-4 z-20 flex flex-col gap-2 pointer-events-auto">
           <button
-            onClick={() => {
-              if (mapRef.current) {
-                mapRef.current.setCenter([center[0], center[1]]);
-              }
-            }}
+            onClick={handleRecenter}
             className="w-9 h-9 bg-white/90 backdrop-blur border border-gray-200 rounded-lg flex items-center justify-center text-gray-600 hover:text-gray-900 hover:bg-white transition-colors shadow-md cursor-pointer pointer-events-auto"
             title="Recenter Map"
           >
@@ -237,29 +254,29 @@ export function MapView({
               <path d="M12 2v4M12 18v4M2 12h4M18 12h4" />
             </svg>
           </button>
-          
+
           <div className="flex flex-col gap-1">
             <button
-              onClick={() => mapRef.current && mapRef.current.setZoom(mapRef.current.getZoom() + 1)}
+              onClick={handleZoomIn}
               className="w-9 h-9 bg-white/90 backdrop-blur border border-gray-200 rounded-lg flex items-center justify-center text-gray-600 hover:text-gray-900 hover:bg-white transition-colors shadow-md cursor-pointer font-bold text-lg"
               title="Zoom In"
             >
               +
             </button>
             <button
-              onClick={() => mapRef.current && mapRef.current.setZoom(mapRef.current.getZoom() - 1)}
+              onClick={handleZoomOut}
               className="w-9 h-9 bg-white/90 backdrop-blur border border-gray-200 rounded-lg flex items-center justify-center text-gray-600 hover:text-gray-900 hover:bg-white transition-colors shadow-md cursor-pointer font-bold text-lg"
               title="Zoom Out"
             >
               −
             </button>
           </div>
-          
+
           <button
             onClick={() => setShowLegend(!showLegend)}
             className={`w-9 h-9 rounded-lg border flex items-center justify-center transition-colors shadow-md cursor-pointer text-xs font-bold ${
-              showLegend 
-                ? 'bg-primary-600 text-white border-primary-500' 
+              showLegend
+                ? 'bg-primary-600 text-white border-primary-500'
                 : 'bg-white/90 backdrop-blur border-gray-200 text-gray-500 hover:text-gray-900'
             }`}
             title="Toggle Map Legend"
@@ -271,7 +288,7 @@ export function MapView({
 
       {/* Map Legend Overlay */}
       {showLegend && (
-        <div className="absolute bottom-16 left-16 z-[400] bg-white/95 backdrop-blur border border-gray-200 rounded-xl p-3.5 shadow-lg text-xs max-w-xs animate-fade-in">
+        <div className="absolute bottom-16 left-16 z-20 bg-white/95 backdrop-blur border border-gray-200 rounded-xl p-3.5 shadow-lg text-xs max-w-xs animate-fade-in">
           <div className="flex items-center justify-between mb-2 pb-1.5 border-b border-gray-200">
             <span className="font-bold text-gray-800 uppercase tracking-wider text-[11px]">Map Legend</span>
             <button onClick={() => setShowLegend(false)} className="text-gray-400 hover:text-gray-600">✕</button>
@@ -312,13 +329,11 @@ export function MapView({
       )}
 
       {/* Police-Assisted System Notice */}
-      <div className="absolute bottom-2 right-4 z-[400] pointer-events-none">
+      <div className="absolute bottom-2 right-4 z-20 pointer-events-none">
         <span className="text-[10px] text-gray-400 bg-white/80 px-2 py-0.5 rounded border border-gray-200 font-mono">
-          Police-Assisted Traffic Clearance • Mappls
+          Police-Assisted Traffic Clearance • Google Maps
         </span>
       </div>
     </div>
   );
 }
-
-

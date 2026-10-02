@@ -1,10 +1,17 @@
-import type { RawHospitalResult, NormalizedHospital } from './types';
-import { searchGooglePlacesSingle } from './googleProvider';
+import type { NormalizedHospital } from './types';
+import { searchMappls } from './mapplsProvider';
 import { searchOSMOverpass } from './osmProvider';
 import { hospitalService } from '../hospitalService';
+import { searchGooglePlacesSingle, searchGooglePlacesByText } from './googleProvider';
+export { autocompleteGooglePlaces, getGooglePlaceDetails } from './googleProvider';
 
 // Haversine distance formula
-function getDistanceMeters(lat1: number, lon1: number, lat2: number, lon2: number): number {
+export function getDistanceMeters(lat1: number, lon1: number, lat2: number, lon2: number): number {
+  if (window.google?.maps?.geometry?.spherical?.computeDistanceBetween) {
+    const p1 = new window.google.maps.LatLng(lat1, lon1);
+    const p2 = new window.google.maps.LatLng(lat2, lon2);
+    return window.google.maps.geometry.spherical.computeDistanceBetween(p1, p2);
+  }
   const R = 6371e3; // metres
   const φ1 = lat1 * Math.PI/180;
   const φ2 = lat2 * Math.PI/180;
@@ -21,50 +28,63 @@ function getDistanceMeters(lat1: number, lon1: number, lat2: number, lon2: numbe
 
 const searchCache = new Map<string, { data: NormalizedHospital[], timestamp: number }>();
 
+
+export function clearHospitalCache() {
+  searchCache.clear();
+}
+
+
+const INVALID_KEYWORDS = [
+  'ayurveda', 'ayurvedic', 'physiotherapy', 'pharmacy', 'pharmacies',
+  'medical & general', 'medical and general', 'medical store',
+  'generic', 'clinic', 'diagnostic', 'veterinary', 'blood bank', 'dentist',
+  'dental', 'eye center', 'eye care', 'optical', 'primary health',
+  'phc ', 'homeopathy', 'homeopathic'
+];
+
+function isActualHospital(name: string): boolean {
+  const lowerName = name.toLowerCase();
+  for (const kw of INVALID_KEYWORDS) {
+    if (lowerName.includes(kw)) return false;
+  }
+  return true;
+}
+
 export async function discoverHospitals(
   centerLat: number,
   centerLng: number,
   radiusMeters: number,
-  query: string | undefined,
-  signal: AbortSignal
-): Promise<NormalizedHospital[]> {
+  _autoExpand: boolean = false
+): Promise<{ radius: number, results: NormalizedHospital[] }> {
+  
+    
   console.log(`\n--- AERO HOSPITAL DEBUG ---`);
   console.log(`GPS: ${centerLat.toFixed(6)}, ${centerLng.toFixed(6)}`);
   console.log(`Radius: ${radiusMeters / 1000} km`);
   
   const latBucket = centerLat.toFixed(3);
   const lngBucket = centerLng.toFixed(3);
-  const cacheKey = `${latBucket}_${lngBucket}_${radiusMeters}_${query || ''}`;
+  const cacheKey = `${latBucket}_${lngBucket}_${radiusMeters}`;
   
   const cached = searchCache.get(cacheKey);
   if (cached && Date.now() - cached.timestamp < 1000 * 60 * 5) { // 5 min TTL
     console.log(`[HospitalSearch] Serving from cache: ${cacheKey}`);
-    return cached.data;
+    return { radius: radiusMeters, results: cached.data };
   }
 
-  let googleRawCount = 0;
-  let googleRequests = 0;
-  let osmRawCount = 0;
-  let osmRequests = 0;
-
-  const rawResults: RawHospitalResult[] = [];
+  const rawResults: NormalizedHospital[] = [];
 
   try {
-    // 1. Google Places
-    const googlePromise = searchGooglePlacesSingle(centerLat, centerLng, radiusMeters, query, signal).catch(err => {
-      if (err.name !== 'AbortError') console.error("[GoogleProvider] Discovery failed:", err);
-      return [];
-    });
-    
-    // Start OSM search concurrently (fallback)
-    const osmPromise = searchOSMOverpass(centerLat, centerLng, radiusMeters, signal).catch(err => {
-      if (err.name !== 'AbortError') console.error("[OSMProvider] Discovery failed:", err);
+    // 1. Mappls Nearby Search
+    const mapplsPromise = searchMappls(centerLat, centerLng, radiusMeters).catch(err => {
+      console.error("[MapplsProvider] Discovery failed:", err);
       return [];
     });
 
     // Start DB search concurrently
     const dbPromise = hospitalService.getAllHospitals().then(dbHospitals => {
       return dbHospitals.map(h => ({
+        id: `db_${h.id}`,
         providerId: h.id,
         provider: 'db' as const,
         name: h.name,
@@ -72,35 +92,71 @@ export async function discoverHospitals(
         lng: h.location.longitude,
         address: h.address,
         phone: h.phone,
-        types: ['hospital']
+        types: ['hospital'],
+        distanceMeters: getDistanceMeters(centerLat, centerLng, h.location.latitude, h.location.longitude)
       }));
     }).catch(err => {
       console.error("[DBProvider] Discovery failed:", err);
       return [];
     });
+    // Start Google Places search concurrently
+    const googlePromise = searchGooglePlacesSingle(centerLat, centerLng, radiusMeters, undefined, new AbortController().signal).catch(err => {
+      console.error("[GoogleProvider] Discovery failed:", err);
+      return [];
+    });
     
-    const [googleResults, osmResults, dbResults] = await Promise.all([googlePromise, osmPromise, dbPromise]);
+    // Start OSM search concurrently
+    const osmPromise = searchOSMOverpass(centerLat, centerLng, radiusMeters, new AbortController().signal).catch(err => {
+      console.error("[OSMProvider] Discovery failed:", err);
+      return [];
+    });
     
-    if (googleResults) {
-      googleRawCount = googleResults.length;
+    const [googleRawResults, mapplsResults, dbResults, osmRawResults] = await Promise.all([googlePromise, mapplsPromise, dbPromise, osmPromise]);
+
+    const googleResults = googleRawResults.map(raw => ({
+      id: raw.providerId,
+      providerId: raw.providerId,
+      provider: 'google' as const,
+      name: raw.name,
+      lat: raw.lat,
+      lng: raw.lng,
+      address: raw.address,
+      phone: raw.phone,
+      types: raw.types,
+      distanceMeters: getDistanceMeters(centerLat, centerLng, raw.lat, raw.lng)
+    }));
+
+    const osmResults = osmRawResults.map(raw => ({
+      id: raw.providerId,
+      providerId: raw.providerId,
+      provider: 'osm' as const,
+      name: raw.name,
+      lat: raw.lat,
+      lng: raw.lng,
+      address: raw.address,
+      phone: raw.phone,
+      types: raw.types,
+      distanceMeters: getDistanceMeters(centerLat, centerLng, raw.lat, raw.lng)
+    }));
+    
+    if (googleResults.length > 0) {
       rawResults.push(...googleResults);
     }
     
-    if (osmResults) {
-      osmRawCount = osmResults.length;
-      rawResults.push(...osmResults);
+    if (mapplsResults) {
+      rawResults.push(...mapplsResults);
     }
 
     if (dbResults) {
-      rawResults.push(...dbResults);
+      rawResults.push(...dbResults as NormalizedHospital[]);
+    }
+
+    if (osmResults) {
+      rawResults.push(...osmResults as NormalizedHospital[]);
     }
   } catch (err: any) {
-    if (err.name !== 'AbortError') {
-      console.error("[HospitalSearch] Discovery failed:", err);
-      throw err; // bubble up the error to display
-    } else {
-      throw err;
-    }
+    console.error("[HospitalSearch] Discovery failed:", err);
+    throw err; // bubble up the error to display
   }
 
   const mergedCount = rawResults.length;
@@ -109,16 +165,17 @@ export async function discoverHospitals(
   const normalizedMap = new Map<string, NormalizedHospital>();
   
   for (const raw of rawResults) {
-    const dist = getDistanceMeters(centerLat, centerLng, raw.lat, raw.lng);
+    const dist = raw.distanceMeters ?? getDistanceMeters(centerLat, centerLng, raw.lat, raw.lng);
     
     // Filter out items strictly outside the requested radius
     if (dist > radiusMeters) continue;
 
+    if (!isActualHospital(raw.name)) continue;
+
     // Check for existing by name & proximity (within 100 meters)
     let isDuplicate = false;
-    let existingKey = '';
 
-    for (const [key, existing] of normalizedMap.entries()) {
+    for (const existing of normalizedMap.values()) {
       if (existing.providerId === raw.providerId && existing.provider === raw.provider) {
          isDuplicate = true;
          break;
@@ -130,26 +187,12 @@ export async function discoverHospitals(
       if (distanceBetween < 100) {
          if (existing.name.toLowerCase() === raw.name.toLowerCase() || distanceBetween < 20) {
             isDuplicate = true;
-            existingKey = key;
             break;
          }
       }
     }
 
     if (isDuplicate) {
-      if (existingKey) {
-        // Merge OSM and Google data if they matched
-        const existing = normalizedMap.get(existingKey)!;
-        if (existing.provider !== raw.provider) {
-           existing.provider = 'merged';
-           if (raw.provider === 'google') {
-             // Prefer Google's richer data
-             existing.rating = raw.rating || existing.rating;
-             existing.reviewCount = raw.reviewCount || existing.reviewCount;
-             existing.address = raw.address || existing.address;
-           }
-        }
-      }
       continue;
     }
 
@@ -175,55 +218,75 @@ export async function discoverHospitals(
 
   const finalList = Array.from(normalizedMap.values()).sort((a, b) => a.distanceMeters - b.distanceMeters);
 
-  console.log(`Google requests (grid points): ${googleRequests}`);
-  console.log(`Google raw: ${googleRawCount}`);
-  console.log(`OSM requests: ${osmRequests}`);
-  console.log(`OSM raw: ${osmRawCount}`);
   console.log(`Merged: ${mergedCount}`);
   console.log(`Deduplicated & within radius: ${finalList.length}`);
   console.log(`List: ${finalList.length}`);
   console.log(`Markers: ${finalList.length}`);
   console.log(`---------------------------\n`);
 
-  if (finalList.length === 0) {
-    console.log("[HospitalSearch] No hospitals found from APIs or DB! Returning fallback defaults.");
-    // Generate fallback hospitals around the current location
-    finalList.push({
-      id: "fallback_1",
-      provider: "osm",
-      providerId: "dummy_1",
-      name: "City Central Hospital (Demo)",
-      lat: centerLat + 0.005,
-      lng: centerLng + 0.005,
-      address: "Downtown Medical Area",
-      types: ["hospital"],
-      distanceMeters: getDistanceMeters(centerLat, centerLng, centerLat + 0.005, centerLng + 0.005)
-    });
-    finalList.push({
-      id: "fallback_2",
-      provider: "osm",
-      providerId: "dummy_2",
-      name: "General Care Hospital (Demo)",
-      lat: centerLat - 0.004,
-      lng: centerLng - 0.006,
-      address: "Westside District",
-      types: ["hospital"],
-      distanceMeters: getDistanceMeters(centerLat, centerLng, centerLat - 0.004, centerLng - 0.006)
-    });
-    finalList.push({
-      id: "fallback_3",
-      provider: "osm",
-      providerId: "dummy_3",
-      name: "Emergency Trauma Center (Demo)",
-      lat: centerLat - 0.008,
-      lng: centerLng + 0.003,
-      address: "Eastside District",
-      types: ["hospital"],
-      distanceMeters: getDistanceMeters(centerLat, centerLng, centerLat - 0.008, centerLng + 0.003)
-    });
-  }
-
   searchCache.set(cacheKey, { data: finalList, timestamp: Date.now() });
 
-  return finalList;
+  return { radius: radiusMeters, results: finalList };
+}
+
+export async function searchHospitalsByText(
+  query: string,
+  centerLat: number,
+  centerLng: number,
+  radiusMeters: number,
+  signal?: AbortSignal
+): Promise<{ radius: number, results: NormalizedHospital[] }> {
+  const safeSignal = signal || new AbortController().signal;
+  
+  if (!query || query.trim().length < 2) {
+    return { radius: radiusMeters, results: [] };
+  }
+
+  const cacheKey = `text_${query.trim().toLowerCase()}_${centerLat.toFixed(3)}_${centerLng.toFixed(3)}_${radiusMeters}`;
+  const cached = searchCache.get(cacheKey);
+  if (cached && Date.now() - cached.timestamp < 1000 * 30) { // 30 sec TTL for text search
+    console.log(`[HospitalSearch] Serving TEXT from cache: ${cacheKey}`);
+    return { radius: radiusMeters, results: cached.data };
+  }
+
+  try {
+    const rawResults = await searchGooglePlacesByText(query, centerLat, centerLng, radiusMeters, safeSignal);
+    
+    // Process and filter
+    const normalizedMap = new Map<string, NormalizedHospital>();
+    for (const raw of rawResults) {
+      const dist = raw.distanceMeters ?? getDistanceMeters(centerLat, centerLng, raw.lat, raw.lng);
+      
+      // Strict distance filtering for text search too
+      if (dist > radiusMeters) continue;
+
+    if (!isActualHospital(raw.name)) continue;
+
+      const internalId = `${raw.provider}_${raw.providerId}`;
+      normalizedMap.set(internalId, {
+        id: internalId,
+        provider: raw.provider,
+        providerId: raw.providerId,
+        name: raw.name,
+        lat: raw.lat,
+        lng: raw.lng,
+        address: raw.address,
+        phone: raw.phone,
+        rating: raw.rating,
+        reviewCount: raw.reviewCount,
+        openNow: raw.openNow,
+        businessStatus: raw.businessStatus,
+        types: raw.types,
+        distanceMeters: dist
+      });
+    }
+
+    const finalList = Array.from(normalizedMap.values()).sort((a, b) => (a.distanceMeters ?? 0) - (b.distanceMeters ?? 0));
+    searchCache.set(cacheKey, { data: finalList, timestamp: Date.now() });
+
+    return { radius: radiusMeters, results: finalList };
+  } catch (err: any) {
+    console.error("[HospitalSearch] Text search failed:", err);
+    throw err;
+  }
 }

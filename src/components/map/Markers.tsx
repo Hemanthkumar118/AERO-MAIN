@@ -1,9 +1,12 @@
 import type { JunctionStatus, IncidentSeverity, AvailabilityStatus } from '../../types';
-import { MapplsMarker } from './MapplsMarker';
+import { GoogleMapMarker } from './GoogleMapMarker';
+
 
 /* ── Ambulance Marker ── */
-interface AmbulanceMarkerProps {
-  position: [number, number];
+
+export interface AmbulanceMarkerProps {
+  position: [number, number]; // [lat, lng]
+  heading?: number;
   label?: string;
   speedKmH?: number;
   vehicleNumber?: string;
@@ -15,20 +18,9 @@ interface AmbulanceMarkerProps {
   updatedAt?: string;
 }
 
-function createAmbulanceHtml(isSOS: boolean = true) {
-  const pulseHtml = isSOS ? `<div class="ambulance-pulse-ring"></div>` : '';
-  return `
-    <div class="aero-marker-ambulance relative flex items-center justify-center" style="width: 44px; height: 44px;">
-      ${pulseHtml}
-      <div style="width: 38px; height: 38px; background-color: #ffffff; border-radius: 50%; box-shadow: 0 4px 8px rgba(0,0,0,0.3); display: flex; align-items: center; justify-content: center; border: 2.5px solid #ef4444; z-index: 10;">
-        <span style="font-size: 22px; line-height: 1;">🚑</span>
-      </div>
-    </div>
-  `;
-}
-
 export function AmbulanceMarker({
   position,
+  heading,
   label = 'Ambulance',
   speedKmH,
   vehicleNumber,
@@ -90,13 +82,13 @@ export function AmbulanceMarker({
   );
 
   return (
-    <MapplsMarker 
+    <GoogleMapMarker 
       position={position} 
-      html={createAmbulanceHtml(isSOS)}
-      width={44}
-      height={44}
-      offset={[22, 22]}
-      popupContent={popupContent}
+      html={`<div style="transform: rotate(${heading || 0}deg); font-size: 24px; filter: drop-shadow(0 2px 4px rgba(0,0,0,0.3));">🚑</div>`}
+      width={32}
+      height={32}
+      offset={[16, 16]}
+      popupContent={popupContent} 
     />
   );
 }
@@ -162,7 +154,7 @@ export function HospitalMarker({
   );
 
   return (
-    <MapplsMarker 
+    <GoogleMapMarker 
       position={position}
       html={createHospitalHtml()}
       width={34}
@@ -250,7 +242,7 @@ export function JunctionMarker({
   );
 
   return (
-    <MapplsMarker 
+    <GoogleMapMarker 
       position={position}
       html={createJunctionHtml(status)}
       width={32}
@@ -307,7 +299,7 @@ export function PoliceMarker({
   );
 
   return (
-    <MapplsMarker 
+    <GoogleMapMarker 
       position={position}
       html={createPoliceHtml(availability)}
       width={32}
@@ -361,7 +353,7 @@ export function IncidentMarker({
   );
 
   return (
-    <MapplsMarker 
+    <GoogleMapMarker 
       position={position}
       html={createIncidentHtml()}
       width={28}
@@ -371,4 +363,3 @@ export function IncidentMarker({
     />
   );
 }
-

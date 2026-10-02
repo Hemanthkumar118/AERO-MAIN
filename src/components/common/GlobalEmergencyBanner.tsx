@@ -26,7 +26,7 @@ export function GlobalEmergencyBanner({ userRole, userName }: { userRole?: strin
           id: active.id,
           status: 'ACTIVE',
           priority: active.priority || 'CODE_RED',
-          ambulanceId: active.ambulance_id || 'AMB-1',
+          ambulanceId: active.ambulance_id || 'UNAVAILABLE',
           ambulanceDisplayName: active.ambulance_id || 'AERO ALS',
           hospital: { name: active.destination_hospital || 'Hospital', id: '', address: '', location: { latitude: 0, longitude: 0 }, emergencyCapable: true },
           patient: {
@@ -42,7 +42,7 @@ export function GlobalEmergencyBanner({ userRole, userName }: { userRole?: strin
             polyline: active.route_geometry || [],
             distanceMeters: active.route_distance_meters || 0
           },
-          vehicleNumber: active.ambulance_id || 'AMB-1',
+          vehicleNumber: active.ambulance_id || 'UNAVAILABLE',
           createdAt: active.created_at
         });
       } else {
@@ -60,7 +60,7 @@ export function GlobalEmergencyBanner({ userRole, userName }: { userRole?: strin
   const etaMins = Math.round((activeEmergency.route?.etaSeconds || 0) / 60);
 
   return (
-    <div className="bg-[#FF3B30]/10 border-b border-[#FF3B30]/30 px-4 py-2 flex items-center justify-between shadow-lg z-50 text-xs shrink-0">
+    <div className="relative z-30 bg-[#FF3B30]/10 border-b border-[#FF3B30]/30 px-4 py-2 flex items-center justify-between shadow-lg text-xs shrink-0">
       <div className="flex items-center gap-3">
         <span className="w-2.5 h-2.5 rounded-full bg-[#FF3B30] animate-ping shrink-0" />
         <div className="flex items-center gap-2 flex-wrap">

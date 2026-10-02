@@ -3,6 +3,8 @@ import { AppShell } from '../../../components/layout/AppShell';
 import { PageHeader } from '../../../components/layout/PageHeader';
 import { Card } from '../../../components/ui/Card';
 import { analyticsService } from '../../../services/analyticsService';
+import { realtimeService } from '../../../services/realtimeService';
+import type { ConnectionState } from '../../../types';
 import { 
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip as RechartsTooltip, ResponsiveContainer,
   PieChart, Pie, Cell, LineChart, Line, Legend
@@ -18,12 +20,18 @@ export function AdminAnalytics() {
     junctionClearanceMetrics: any[];
   } | null>(null);
 
+  const [connectionState, setConnectionState] = useState<ConnectionState>(realtimeService.getConnectionState());
+
   useEffect(() => {
     analyticsService.getAnalyticsData().then(setData);
+    
+    return realtimeService.on('connection_change', (state) => {
+      setConnectionState(state);
+    });
   }, []);
 
   return (
-    <AppShell userRole="ADMIN" userName="Central Command Admin" connectionState="connected">
+    <AppShell userRole="ADMIN" userName="Central Command Admin" connectionState={connectionState}>
       <div className="h-full overflow-y-auto pb-10">
         <PageHeader
           title="Operations Analytics & Performance"

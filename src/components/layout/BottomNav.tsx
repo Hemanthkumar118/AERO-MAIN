@@ -148,7 +148,7 @@ export function BottomNav({ role }: BottomNavProps) {
 
   return (
     <nav
-      className="h-14 bg-bg-surface border-t border-border-subtle flex items-center justify-around px-2 shrink-0 z-50 sm:hidden"
+      className="relative z-40 h-14 bg-bg-surface border-t border-border-subtle flex items-center justify-around px-2 shrink-0 sm:hidden"
       aria-label="Main navigation"
     >
       {items.map((item) => (

@@ -2,7 +2,7 @@ import type { RouteInfo, LatLng } from '../types';
 import { routingService } from './routingService';
 
 export interface TrafficRoutingOptions {
-  provider?: 'mappls' | 'google' | 'mapbox' | 'osrm';
+  provider?: 'google' | 'osrm';
   trafficAware?: boolean;
 }
 
@@ -47,6 +47,7 @@ export class TrafficAwareRoutingProvider {
 
   /**
    * Fetch fastest route utilizing live traffic data if available.
+   * Uses Google Routes API via backend proxy, with OSRM as fallback.
    */
   static async getFastestRoute(
     origin: LatLng | [number, number],
@@ -57,13 +58,13 @@ export class TrafficAwareRoutingProvider {
     const destCoords = Array.isArray(destination) ? destination : [destination.latitude, destination.longitude];
 
     // Check environment config for routing provider
-    const configuredProvider = import.meta.env.VITE_ROUTING_PROVIDER || 'osrm';
+    const configuredProvider = import.meta.env.VITE_ROUTING_PROVIDER || 'google';
     const provider = options.provider || configuredProvider;
 
-    if (provider === 'mappls') {
+    if (provider === 'google') {
       try {
-        const baseUrl = import.meta.env.VITE_BACKEND_URL || (import.meta.env.DEV ? 'http://localhost:3001' : '');
-        const response = await fetch(`${baseUrl}/api/route/calculate`, {
+        const backendUrl = import.meta.env.VITE_BACKEND_URL || 'http://localhost:3001';
+        const response = await fetch(`${backendUrl}/api/route/calculate`, {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json'
@@ -98,13 +99,13 @@ export class TrafficAwareRoutingProvider {
               etaSeconds: route.durationSeconds,
               trafficAwareEtaSeconds: route.trafficAwareDurationSeconds,
               trafficStatus: 'LIVE',
-              routeProvider: 'mappls',
+              routeProvider: 'google',
               congestionSegments: parsedCongestion
             };
           }
         }
       } catch (err) {
-        console.warn('[AERO ROUTING] Mappls backend route failed, falling back to OSRM:', err);
+        console.warn('[AERO ROUTING] Google backend route failed, falling back to OSRM:', err);
       }
     }
 

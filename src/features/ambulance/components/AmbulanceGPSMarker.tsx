@@ -1,5 +1,5 @@
 import { useEffect, useState, useRef } from 'react';
-import { useMappls } from '../../../components/map/MapplsContext';
+import { useGoogleMap } from '../../../components/map/GoogleMapContext';
 import { AmbulanceMarker } from '../../../components/map';
 import { geolocationService, type GeoLocationResult } from '../../../services/geolocationService';
 
@@ -25,7 +25,7 @@ export function AmbulanceGPSMarker({
   followLiveLocation,
   onLocationUpdate
 }: AmbulanceGPSMarkerProps) {
-  const { map } = useMappls();
+  const { map } = useGoogleMap();
   const [gpsLocation, setGpsLocation] = useState<GeoLocationResult | null>(null);
   const isFirstUpdate = useRef(true);
   const lastEmittedPos = useRef<[number, number] | null>(null);
@@ -54,26 +54,14 @@ export function AmbulanceGPSMarker({
     const handleStart = () => { isInteracting.current = true; };
     const handleEnd = () => { isInteracting.current = false; };
 
-    map.addListener('mousedown', handleStart);
-    map.addListener('touchstart', handleStart);
-    map.addListener('dragstart', handleStart);
-    map.addListener('zoomstart', handleStart);
+    const events = ['mousedown', 'touchstart', 'dragstart'];
+    const endEvents = ['mouseup', 'touchend', 'dragend'];
 
-    map.addListener('mouseup', handleEnd);
-    map.addListener('touchend', handleEnd);
-    map.addListener('dragend', handleEnd);
-    map.addListener('zoomend', handleEnd);
+    events.forEach(event => map.addListener(event, handleStart));
+    endEvents.forEach(event => map.addListener(event, handleEnd));
 
     return () => {
-      map.removeListener('mousedown', handleStart);
-      map.removeListener('touchstart', handleStart);
-      map.removeListener('dragstart', handleStart);
-      map.removeListener('zoomstart', handleStart);
-
-      map.removeListener('mouseup', handleEnd);
-      map.removeListener('touchend', handleEnd);
-      map.removeListener('dragend', handleEnd);
-      map.removeListener('zoomend', handleEnd);
+      // Google Maps listeners are cleaned up when the map is destroyed
     };
   }, [map]);
 
@@ -82,7 +70,6 @@ export function AmbulanceGPSMarker({
     const currentPos: [number, number] = [gpsLocation.latitude, gpsLocation.longitude];
 
     // Emit back to parent only if moved significantly (e.g., > 1 meters) to avoid thrashing
-    // But we also need updates for speed, so emit if it's the first time or location changed.
     if (!lastEmittedPos.current || 
         Math.abs(lastEmittedPos.current[0] - currentPos[0]) > 0.00001 || 
         Math.abs(lastEmittedPos.current[1] - currentPos[1]) > 0.00001) {
@@ -91,13 +78,11 @@ export function AmbulanceGPSMarker({
     }
 
     // Handle map panning internally
-    // Do not pan if user is actively interacting with the map to prevent breaking zoom/pan animations
     if (followLiveLocation && !isInteracting.current && map) {
       if (isFirstUpdate.current) {
         map.setCenter({ lat: currentPos[0], lng: currentPos[1] });
         isFirstUpdate.current = false;
       } else {
-        // Just center
         map.setCenter({ lat: currentPos[0], lng: currentPos[1] });
       }
     }
@@ -108,6 +93,7 @@ export function AmbulanceGPSMarker({
   return (
     <AmbulanceMarker
       position={[gpsLocation.latitude, gpsLocation.longitude]}
+      heading={(gpsLocation as any).heading ?? ambulance.heading ?? 0}
       label={ambulance.name}
       speedKmH={gpsLocation.speed != null ? (gpsLocation.speed * 3.6) : undefined}
       vehicleNumber={ambulance.vehicleNumber}

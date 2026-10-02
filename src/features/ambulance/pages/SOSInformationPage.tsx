@@ -133,9 +133,11 @@ export function SOSInformationPage() {
     }
   };
 
+  const connState = realtimeService.getConnectionState();
+
   if (loading) {
     return (
-      <AppShell userRole="AMBULANCE" userName="Ambulance" connectionState="connected" gpsState="active">
+      <AppShell userRole="AMBULANCE" userName="Ambulance" connectionState={connState} gpsState="active">
         <div className="flex h-full items-center justify-center bg-bg-main text-white">
            Loading SOS Information...
         </div>
@@ -145,7 +147,7 @@ export function SOSInformationPage() {
 
   if (!incident || !sosState || sosState.status === 'ABORTED' || sosState.status === 'COMPLETED') {
     return (
-      <AppShell userRole="AMBULANCE" userName="Ambulance" connectionState="connected" gpsState="active">
+      <AppShell userRole="AMBULANCE" userName="Ambulance" connectionState={connState} gpsState="active">
         <div className="flex flex-col h-full items-center justify-center bg-bg-main p-6 text-center">
           <AlertTriangle className="w-16 h-16 text-yellow-500 mb-4" />
           <h2 className="text-2xl font-bold text-white mb-2">NO ACTIVE SOS</h2>
@@ -162,7 +164,7 @@ export function SOSInformationPage() {
   }
 
   return (
-    <AppShell userRole="AMBULANCE" userName="Ambulance" connectionState="connected" gpsState="active">
+    <AppShell userRole="AMBULANCE" userName="Ambulance" connectionState={connState} gpsState="active">
       <div className="flex flex-col h-full bg-bg-main overflow-y-auto">
         {/* Header */}
         <div className="sticky top-0 z-10 bg-bg-main/80 backdrop-blur-md border-b border-border-subtle p-4">

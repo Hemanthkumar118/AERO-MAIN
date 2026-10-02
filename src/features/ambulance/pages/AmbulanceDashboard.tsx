@@ -4,6 +4,7 @@ import {
   MapView,
   HospitalMarker,
   RoutePolyline,
+  RadiusCircle,
 } from '../../../components/map';
 import { AmbulanceGPSMarker } from '../components/AmbulanceGPSMarker';
 import { SOSController } from '../components/SOSController';
@@ -14,7 +15,7 @@ import { realtimeService } from '../../../services/realtimeService';
 import { routingService } from '../../../services/routingService';
 import { TrafficAwareRoutingProvider } from '../../../services/TrafficAwareRoutingProvider';
 import { geolocationService } from '../../../services/geolocationService';
-import { discoverHospitals } from '../../../services/hospitalSearch';
+import { discoverHospitals, getDistanceMeters } from '../../../services/hospitalSearch';
 import type { NormalizedHospital } from '../../../services/hospitalSearch/types';
 import type {
   EmergencyIncident,
@@ -25,6 +26,27 @@ import type {
 import { supabase } from '../../../lib/supabase';
 import { motion } from 'framer-motion';
 import { useAuth } from '../../../providers/AuthProvider';
+import { useGoogleMap } from '../../../components/map/GoogleMapContext';
+
+function MapPanner({ targetPos }: { targetPos: [number, number] | null }) {
+  const { map } = useGoogleMap();
+  const lastPos = useRef<string | null>(null);
+
+  useEffect(() => {
+    if (!map || !targetPos) return;
+    const posKey = `${targetPos[0]},${targetPos[1]}`;
+    if (lastPos.current !== posKey) {
+      try {
+        map.panTo({ lat: targetPos[0], lng: targetPos[1] });
+        map.setZoom(15);
+        lastPos.current = posKey;
+      } catch (err) {
+        console.warn("Error panning map", err);
+      }
+    }
+  }, [map, targetPos]);
+  return null;
+}
 
 export function AmbulanceDashboard() {
   const { user, profile } = useAuth();
@@ -41,21 +63,14 @@ export function AmbulanceDashboard() {
   const [gpsError, setGpsError] = useState<string | null>(null);
   const [gpsEnabled, setGpsEnabled] = useState(false);
   const [gpsTimestamp, setGpsTimestamp] = useState<Date | null>(null);
+  const [mapCenterOverride, setMapCenterOverride] = useState<[number, number] | null>(null);
 
   // Hospital & Routing state
   const [radiusKm, setRadiusKm] = useState<number>(5);
   const [loadingHospitals, setLoadingHospitals] = useState(false);
   const [hospitalError, setHospitalError] = useState<string | null>(null);
   const [hospitalResults, setHospitalResults] = useState<NormalizedHospital[]>([]);
-  const [searchQuery, setSearchQuery] = useState('');
-  const [debouncedSearchQuery, setDebouncedSearchQuery] = useState('');
 
-  useEffect(() => {
-    const timer = setTimeout(() => {
-      setDebouncedSearchQuery(searchQuery);
-    }, 300);
-    return () => clearTimeout(timer);
-  }, [searchQuery]);
   const [selectedHospital, setSelectedHospital] = useState<Hospital | null>(null);
   const [routeInfo, setRouteInfo] = useState<any | null>(null);
   
@@ -67,6 +82,8 @@ export function AmbulanceDashboard() {
 
   // UI state
   const [followLiveLocation, setFollowLiveLocation] = useState(true);
+  const [connectionState, setConnectionState] = useState<any>(realtimeService.getConnectionState());
+  const [hasManuallySearched, setHasManuallySearched] = useState(false);
 
   // Emergency State
   const [category] = useState<EmergencyCategory>('CARDIAC');
@@ -98,7 +115,15 @@ export function AmbulanceDashboard() {
         setRouteInfo(null);
       }
     });
-    return () => unsub();
+
+    const unsubConn = realtimeService.on('connection_change', (state) => {
+      setConnectionState(state);
+    });
+
+    return () => {
+      unsub();
+      unsubConn();
+    };
   }, [ambulance.id]);
 
   const handleAbort = async () => {
@@ -138,6 +163,9 @@ export function AmbulanceDashboard() {
     geolocationService.getCurrentPosition()
       .then(pos => {
         setBaseLocation([pos.latitude, pos.longitude]);
+        if (!mapCenterOverride) {
+          setMapCenterOverride([pos.latitude, pos.longitude]);
+        }
         setCurrentAccuracy(pos.accuracy);
         setGpsEnabled(true);
         setGpsError(null);
@@ -156,9 +184,23 @@ export function AmbulanceDashboard() {
   // We no longer sync to Supabase in a setInterval. We will do it in `handleLocationUpdate`
   // when the GPS actually changes significantly, reducing database load and matching GPS reality.
 
-  // 3. Auto-discover Hospitals
+  // To prevent constant re-searches on tiny GPS updates
+  const [searchCenter, setSearchCenter] = useState<[number, number] | null>(null);
+
   useEffect(() => {
-    if (!baseLocation || activeIncident) return;
+    if (!baseLocation) return;
+    if (!searchCenter) {
+      setSearchCenter(baseLocation);
+    } else if (currentLiveLocation.current) {
+      const dist = getDistanceMeters(searchCenter[0], searchCenter[1], currentLiveLocation.current[0], currentLiveLocation.current[1]);
+      if (dist > 500) {
+        setSearchCenter([...currentLiveLocation.current] as [number, number]);
+      }
+    }
+  }, [baseLocation, gpsTimestamp]);
+
+  useEffect(() => {
+    if (!searchCenter || activeIncident) return;
 
     const fetchAndRankHospitals = async () => {
       setLoadingHospitals(true);
@@ -167,15 +209,19 @@ export function AmbulanceDashboard() {
 
       try {
         setHospitalError(null);
-        let results = await discoverHospitals(baseLocation[0], baseLocation[1], radiusKm * 1000, debouncedSearchQuery, abortRef.current.signal);
+        // Only auto-expand if it's the very first automatic search
+        const autoExpand = !hasManuallySearched && radiusKm === 5;
+        const res = await discoverHospitals(searchCenter[0], searchCenter[1], radiusKm * 1000, autoExpand);
         
-        if (results.length > 0) {
-          const ranked = await routingService.rankHospitalsByTravelTime(baseLocation, results);
-          setHospitalResults(ranked);
+        if (res.results.length > 0) {
+          if (res.radius / 1000 !== radiusKm) {
+             setRadiusKm(res.radius / 1000);
+          }
+          setHospitalResults(res.results);
 
           // Auto-select the nearest one if nothing selected yet
           if (!selectedHospital) {
-            const best = ranked[0];
+            const best = res.results[0];
             setSelectedHospital({
               id: best.id,
               name: best.name,
@@ -184,27 +230,31 @@ export function AmbulanceDashboard() {
               phone: best.phone || '',
               emergencyCapable: true,
               totalBeds: 0, availableIcuBeds: 0, traumaBaysAvailable: 0, doctorsOnDuty: 0,
-              distanceKm: parseFloat(((best as any).drivingDistanceMeters / 1000).toFixed(1)),
-              drivingEtaSeconds: (best as any).drivingEtaSeconds
+              distanceKm: parseFloat(((best.distanceMeters ?? 0) / 1000).toFixed(1)),
             } as any);
-
-            // Just set selected hospital, do not calculate/set route yet (SOS triggers it)
           }
         } else {
           setHospitalResults([]);
+          // Do not force radius to 50 if user manually selected a radius and got 0 results.
+          if (!hasManuallySearched && radiusKm !== 50) {
+             setRadiusKm(50);
+          }
         }
       } catch (err: any) {
-        if (err.name !== 'AbortError') {
-          console.warn(err);
-          setHospitalError(err.message || 'HOSPITAL SEARCH ERROR');
-        }
+        console.warn(err);
+        setHospitalError(err.message || 'HOSPITAL SEARCH ERROR');
       } finally {
         setLoadingHospitals(false);
       }
     };
 
     fetchAndRankHospitals();
-  }, [baseLocation, radiusKm, activeIncident, debouncedSearchQuery]);
+  }, [baseLocation, radiusKm, activeIncident]);
+
+  const handleRadiusChange = (newRadius: number) => {
+    setHasManuallySearched(true);
+    setRadiusKm(newRadius);
+  };
 
   const filteredHospitals = hospitalResults;
 
@@ -216,10 +266,12 @@ export function AmbulanceDashboard() {
       location: { latitude: h.lat, longitude: h.lng },
       phone: h.phone || '',
       emergencyCapable: true,
-      distanceKm: parseFloat((h.distanceMeters / 1000).toFixed(1)),
+      distanceKm: parseFloat(((h.distanceMeters ?? 0) / 1000).toFixed(1)),
     };
     
     setSelectedHospital(hosp);
+    setFollowLiveLocation(false);
+    setMapCenterOverride([h.lat, h.lng]);
     
     // Immediately calculate and show the preview route
     if (baseLocation) {
@@ -323,7 +375,6 @@ export function AmbulanceDashboard() {
                        route_duration_seconds: newRoute.etaSeconds,
                        traffic_duration_seconds: newRoute.trafficAwareEtaSeconds || newRoute.etaSeconds,
                        traffic_status: newRoute.trafficStatus || 'UNAVAILABLE',
-                       route_provider: newRoute.routeProvider || 'osrm',
                        route_version: newVersion,
                        last_reroute_at: new Date().toISOString(),
                        route_updated_at: new Date().toISOString()
@@ -355,7 +406,7 @@ export function AmbulanceDashboard() {
     <AppShell
       userRole="AMBULANCE"
       userName={`${ambulance.name} (${ambulance.vehicleNumber})`}
-      connectionState={realtimeService.getConnectionState()}
+      connectionState={connectionState}
       gpsState={gpsEnabled ? 'active' : (gpsError ? 'unavailable' : 'acquiring')}
       gpsAccuracy={currentAccuracy}
       gpsTimestamp={gpsTimestamp}
@@ -365,7 +416,7 @@ export function AmbulanceDashboard() {
         {/* ── Map ── */}
         <div className="flex-1 relative min-h-0 bg-bg-main">
           {gpsError && !baseLocation && (
-            <div className="absolute inset-0 z-[2000] bg-[#0F1218]/95 backdrop-blur-md flex flex-col items-center justify-center p-6 text-center">
+            <div className="absolute inset-0 z-[80] bg-[#0F1218]/95 backdrop-blur-md flex flex-col items-center justify-center p-6 text-center">
               <div className="w-16 h-16 rounded-full bg-[#E53935]/10 flex items-center justify-center mb-4">
                 <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#E53935" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
                   <path d="M12 2v20M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6" />
@@ -378,7 +429,7 @@ export function AmbulanceDashboard() {
           )}
           
           <MapView 
-            center={baseLocation || [0, 0]} 
+            center={mapCenterOverride || baseLocation || [0, 0]} 
             zoom={15} 
             showLiveLocation={false}
           >
@@ -386,12 +437,12 @@ export function AmbulanceDashboard() {
               hospitals={filteredHospitals}
               loading={loadingHospitals}
               error={hospitalError}
-              searchQuery={searchQuery}
-              onSearchChange={setSearchQuery}
               onSelect={handleSearchSelect}
               selectedHospitalId={selectedHospital?.id}
               radiusKm={radiusKm}
-              onRadiusChange={setRadiusKm}
+              onRadiusChange={handleRadiusChange}
+              centerLocation={currentLiveLocation.current || baseLocation || [0,0]}
+              gpsEnabled={gpsEnabled}
             />
 
             <HospitalPins 
@@ -399,6 +450,14 @@ export function AmbulanceDashboard() {
               selectedHospitalId={selectedHospital?.id}
               onSelect={handleSearchSelect}
             />
+
+            {searchCenter && (
+              <>
+                <RadiusCircle center={searchCenter} radiusMeters={radiusKm * 1000} />
+              </>
+            )}
+
+            <MapPanner targetPos={destinationPos} />
 
             <AmbulanceGPSMarker
               ambulance={ambulance}
@@ -448,14 +507,18 @@ export function AmbulanceDashboard() {
           )}
 
           {/* Floating Action / Hospital Panel at Bottom Right */}
-          <div className="absolute bottom-6 right-6 z-[1000] flex flex-col gap-4 items-end pointer-events-none">
+          {/* Floating Action / Hospital Panel at Bottom Right */}
+          <div className="absolute bottom-[100px] md:bottom-8 right-4 md:right-6 z-30 flex flex-col gap-4 items-end pointer-events-none">
             {/* Checkbox */}
             <div className="bg-bg-surface/90 backdrop-blur border border-border-subtle rounded-lg px-3 py-2 pointer-events-auto shadow-lg">
               <label className="flex items-center gap-2 cursor-pointer">
                 <input 
                   type="checkbox" 
                   checked={followLiveLocation}
-                  onChange={(e) => setFollowLiveLocation(e.target.checked)}
+                  onChange={(e) => {
+                    setFollowLiveLocation(e.target.checked);
+                    if (e.target.checked) setMapCenterOverride(null);
+                  }}
                   className="w-4 h-4 rounded border-gray-600 bg-bg-surface text-[#35C7FF] focus:ring-[#35C7FF]/50"
                 />
                 <span className="text-xs font-bold text-gray-300">Follow Ambulance</span>

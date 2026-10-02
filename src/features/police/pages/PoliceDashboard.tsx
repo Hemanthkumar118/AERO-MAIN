@@ -30,58 +30,15 @@ export function PoliceDashboard() {
   useEffect(() => {
     let isMounted = true;
 
-    const fetchIncidents = async () => {
-      try {
-        // --- AUTO CLEANUP OF STALE GHOST RECORDS ---
-        // Cancel anything older than 2 hours to keep the dashboard clean
-        const twoHoursAgo = new Date(Date.now() - 2 * 60 * 60 * 1000).toISOString();
-        await supabase.from('emergency_incidents')
-          .update({ status: 'cancelled' })
-          .lt('created_at', twoHoursAgo)
-          .in('status', ['active', 'dispatched', 'en_route', 'arrived']);
-          
-        const { data, error } = await supabase.from('emergency_incidents')
-          .select('*')
-          .in('status', ['active', 'dispatched', 'en_route', 'arrived'])
-          .order('created_at', { ascending: false });
-        
-        if (data && !error && isMounted) {
-          const map = new Map<string, EmergencyIncident>();
-          data.forEach((i: any) => map.set(i.id, i as EmergencyIncident));
-          setIncidents(Array.from(map.values()));
-        }
-      } catch (err) {
-        console.error("Error fetching initial incidents:", err);
-      }
-    };
-    fetchIncidents();
-
-    // 2. Realtime Subscription (UPSERT logic to prevent duplicates)
-    const channel = supabase.channel('police_dashboard_incidents')
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'emergency_incidents' }, (payload: any) => {
-        if (payload.eventType === 'DELETE') {
-          setIncidents(prev => prev.filter(item => item.id !== payload.old.id));
-          return;
-        }
-        
-        const incoming = payload.new as EmergencyIncident;
-        const isActive = ['active', 'dispatched', 'en_route', 'arrived'].includes(incoming.status || '');
-        
-        setIncidents(prev => {
-          const map = new Map(prev.map(i => [i.id, i]));
-          if (isActive) {
-            map.set(incoming.id, incoming); // Add or Update
-          } else {
-            map.delete(incoming.id); // Remove if inactive
-          }
-          return Array.from(map.values());
-        });
-      })
-      .subscribe();
+    // realtimeService now handles fetching and subscribing to active incidents internally!
+    const unsub = realtimeService.on('incidents_updated', (updatedIncidents: EmergencyIncident[]) => {
+      if (!isMounted) return;
+      setIncidents(updatedIncidents);
+    });
 
     return () => {
       isMounted = false;
-      supabase.removeChannel(channel);
+      unsub();
     };
   }, []);
 
@@ -136,13 +93,21 @@ export function PoliceDashboard() {
 
 
 
+  // Ensure we get connection status updates
+  const [connectionState, setConnectionState] = useState(realtimeService.getConnectionState());
+  useEffect(() => {
+    return realtimeService.on('connection_change', (state) => {
+      setConnectionState(state);
+    });
+  }, []);
+
   const officerPos: [number, number] = officerLocation
     ? [officerLocation.latitude, officerLocation.longitude || 78.34]
     : [17.44, 78.34]; // Fallback
 
   const selectedIncident = incidents.find(i => i.id === selectedIncidentId);
   const primaryIncident = selectedIncident || active[0] || incoming[0];
-  
+
   useEffect(() => {
     if (primaryIncident && primaryIncident.current_latitude && primaryIncident.current_longitude) {
       setMapCenter([primaryIncident.current_latitude, primaryIncident.current_longitude]);
@@ -162,17 +127,17 @@ export function PoliceDashboard() {
   };
 
   return (
-    <AppShell 
-      userRole="POLICE" 
-      userName={`${policeProfile.full_name || 'Officer'}`} 
-      connectionState={realtimeService.getConnectionState()}
+    <AppShell
+      userRole="POLICE"
+      userName={`${policeProfile.full_name || 'Officer'}`}
+      connectionState={connectionState}
       gpsState={gpsState}
       gpsAccuracy={officerLocation?.accuracy || 0}
     >
       <div className="flex h-full overflow-hidden bg-bg-main">
-        
+
         {/* Left Side: Incoming Alerts Panel */}
-        <div className="w-[350px] shrink-0 border-r border-border-subtle bg-bg-surface flex flex-col h-full z-10 shadow-lg">
+        <div className="relative z-30 w-[350px] shrink-0 border-r border-border-subtle bg-bg-surface flex flex-col h-full shadow-lg hidden md:flex">
           <div className="p-4 border-b border-border-subtle flex justify-between items-center bg-bg-elevated sticky top-0">
             <h2 className="text-sm font-bold tracking-wider text-white">UPCOMING ALERTS</h2>
             <div className="flex gap-2">
@@ -181,11 +146,11 @@ export function PoliceDashboard() {
               </div>
             </div>
           </div>
-          
+
           <div className="flex-1 overflow-y-auto p-3 space-y-3">
             <AnimatePresence mode="popLayout">
               {incoming.length === 0 ? (
-                <motion.div 
+                <motion.div
                   initial={{ opacity: 0 }}
                   animate={{ opacity: 1 }}
                   exit={{ opacity: 0 }}
@@ -232,12 +197,12 @@ export function PoliceDashboard() {
             {/* Active Ambulances */}
             {[...incoming, ...active].map(incident => {
               if (!incident.current_latitude || !incident.current_longitude) return null;
-              
+
               const pos: [number, number] = [incident.current_latitude, incident.current_longitude];
-              const dest: [number, number] | null = incident.destination_latitude && incident.destination_longitude 
-                ? [incident.destination_latitude, incident.destination_longitude] 
+              const dest: [number, number] | null = incident.destination_latitude && incident.destination_longitude
+                ? [incident.destination_latitude, incident.destination_longitude]
                 : null;
-              
+
               const isFresh = incident.updated_at ? (new Date().getTime() - new Date(incident.updated_at).getTime() < 60000) : false;
 
               return (
@@ -266,26 +231,26 @@ export function PoliceDashboard() {
               );
             })}
           </MapView>
-          
+
           {/* Overlay Status Bar */}
-          <div className="absolute top-4 left-1/2 -translate-x-1/2 flex gap-3 z-[1000] pointer-events-none">
-             <div className="bg-bg-elevated/90 backdrop-blur-md px-4 py-2 rounded-full border border-border-subtle shadow-lg flex items-center gap-2">
-               <div className="w-2 h-2 rounded-full bg-[#20D67A] animate-pulse"></div>
-               <span className="text-xs font-bold text-white tracking-wider">LIVE MAP</span>
-             </div>
-             <div className="bg-bg-elevated/90 backdrop-blur-md px-4 py-2 rounded-full border border-border-subtle shadow-lg flex items-center gap-2">
-               <span className="text-xs font-bold text-text-secondary tracking-wider">ACTIVE EMERGENCIES:</span>
-               <span className="text-xs font-bold text-white">{incidents.length}</span>
-             </div>
+          <div className="absolute top-4 left-1/2 -translate-x-1/2 flex gap-3 z-30 pointer-events-none">
+            <div className="bg-bg-elevated/90 backdrop-blur-md px-4 py-2 rounded-full border border-border-subtle shadow-lg flex items-center gap-2">
+              <div className="w-2 h-2 rounded-full bg-[#20D67A] animate-pulse"></div>
+              <span className="text-xs font-bold text-white tracking-wider">LIVE MAP</span>
+            </div>
+            <div className="bg-bg-elevated/90 backdrop-blur-md px-4 py-2 rounded-full border border-border-subtle shadow-lg flex items-center gap-2">
+              <span className="text-xs font-bold text-text-secondary tracking-wider">ACTIVE EMERGENCIES:</span>
+              <span className="text-xs font-bold text-white">{incidents.length}</span>
+            </div>
           </div>
         </div>
 
         {/* Right Side: Active Corridors Panel */}
-        <div className="w-[350px] shrink-0 bg-bg-surface border-l border-border-subtle flex flex-col h-full z-10 shadow-lg">
+        <div className="relative z-30 w-[350px] shrink-0 bg-bg-surface border-l border-border-subtle flex flex-col h-full shadow-lg hidden lg:flex">
           <div className="p-4 border-b border-border-subtle flex justify-between items-center bg-bg-elevated sticky top-0">
             <h2 className="text-sm font-bold tracking-wider text-white">ACTIVE CORRIDORS</h2>
             <div className="flex gap-2 items-center">
-              <button 
+              <button
                 onClick={async () => {
                   if (confirm('Wipe all active emergencies?')) {
                     await supabase.from('emergency_incidents').update({ status: 'cancelled' }).in('status', ['active', 'dispatched', 'en_route', 'arrived']);
@@ -305,7 +270,7 @@ export function PoliceDashboard() {
           <div className="flex-1 overflow-y-auto p-4 space-y-4">
             <AnimatePresence mode="popLayout">
               {active.length === 0 ? (
-                <motion.div 
+                <motion.div
                   key="empty"
                   initial={{ opacity: 0 }}
                   animate={{ opacity: 1 }}
@@ -313,7 +278,7 @@ export function PoliceDashboard() {
                   className="text-center text-text-secondary py-12"
                 >
                   <div className="w-12 h-12 rounded-full bg-bg-elevated flex items-center justify-center mx-auto mb-3 border border-border-subtle shadow-inner">
-                    <svg className="w-6 h-6 text-text-secondary" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7"/></svg>
+                    <svg className="w-6 h-6 text-text-secondary" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" /></svg>
                   </div>
                   <p className="font-medium text-white">No active emergencies.</p>
                   <p className="text-sm mt-1">Standby for incoming requests.</p>
@@ -367,10 +332,9 @@ export function PoliceDashboard() {
                         </div>
                         <div className="flex justify-between items-center">
                           <span className="telemetry-label">GPS Status</span>
-                          <span className={`font-mono font-bold ${
-                            incident.updated_at && (new Date().getTime() - new Date(incident.updated_at).getTime() < 60000)
+                          <span className={`font-mono font-bold ${incident.updated_at && (new Date().getTime() - new Date(incident.updated_at).getTime() < 60000)
                               ? 'text-[#20D67A]' : 'text-[#FFB020]'
-                          }`}>
+                            }`}>
                             {incident.updated_at && (new Date().getTime() - new Date(incident.updated_at).getTime() < 60000)
                               ? 'LIVE' : 'STALE'}
                           </span>
@@ -380,42 +344,38 @@ export function PoliceDashboard() {
                       <div className="space-y-3" onClick={e => e.stopPropagation()}>
                         <p className="telemetry-label">Corridor Actions</p>
                         <div className="grid grid-cols-2 gap-2">
-                          <button 
-                            className={`font-bold py-2 rounded-lg text-xs transition-colors border ${
-                              incident.corridor_status === 'CLEAR' 
-                                ? 'bg-[#20D67A] text-bg-main border-[#20D67A]' 
+                          <button
+                            className={`font-bold py-2 rounded-lg text-xs transition-colors border ${incident.corridor_status === 'CLEAR'
+                                ? 'bg-[#20D67A] text-bg-main border-[#20D67A]'
                                 : 'bg-[#20D67A]/10 hover:bg-[#20D67A]/20 text-[#20D67A] border-[#20D67A]/30'
-                            }`}
+                              }`}
                             onClick={() => handleStatusChange(incident.id, 'CLEAR')}
                           >
                             CLEAR
                           </button>
-                          <button 
-                            className={`font-bold py-2 rounded-lg text-xs transition-colors border ${
-                              incident.corridor_status === 'CLEARING' 
-                                ? 'bg-[#35C7FF] text-bg-main border-[#35C7FF]' 
+                          <button
+                            className={`font-bold py-2 rounded-lg text-xs transition-colors border ${incident.corridor_status === 'CLEARING'
+                                ? 'bg-[#35C7FF] text-bg-main border-[#35C7FF]'
                                 : 'bg-[#35C7FF]/10 hover:bg-[#35C7FF]/20 text-[#35C7FF] border-[#35C7FF]/30'
-                            }`}
+                              }`}
                             onClick={() => handleStatusChange(incident.id, 'CLEARING')}
                           >
                             CLEARING
                           </button>
-                          <button 
-                            className={`font-bold py-2 rounded-lg text-xs transition-colors border ${
-                              incident.corridor_status === 'CAUTION' 
-                                ? 'bg-[#FFB020] text-bg-main border-[#FFB020]' 
+                          <button
+                            className={`font-bold py-2 rounded-lg text-xs transition-colors border ${incident.corridor_status === 'CAUTION'
+                                ? 'bg-[#FFB020] text-bg-main border-[#FFB020]'
                                 : 'bg-[#FFB020]/10 hover:bg-[#FFB020]/20 text-[#FFB020] border-[#FFB020]/30'
-                            }`}
+                              }`}
                             onClick={() => handleStatusChange(incident.id, 'CAUTION')}
                           >
                             CAUTION
                           </button>
-                          <button 
-                            className={`font-bold py-2 rounded-lg text-xs transition-colors border ${
-                              incident.corridor_status === 'BLOCKED' 
-                                ? 'bg-[#FF3B30] text-bg-main border-[#FF3B30]' 
+                          <button
+                            className={`font-bold py-2 rounded-lg text-xs transition-colors border ${incident.corridor_status === 'BLOCKED'
+                                ? 'bg-[#FF3B30] text-bg-main border-[#FF3B30]'
                                 : 'bg-[#FF3B30]/10 hover:bg-[#FF3B30]/20 text-[#FF3B30] border-[#FF3B30]/30'
-                            }`}
+                              }`}
                             onClick={() => handleStatusChange(incident.id, 'BLOCKED')}
                           >
                             BLOCKED
@@ -437,3 +397,7 @@ export function PoliceDashboard() {
     </AppShell>
   );
 }
+
+
+
+

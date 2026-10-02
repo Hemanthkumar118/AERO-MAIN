@@ -6,7 +6,7 @@ import { EmergencyProtocolContent, TermsOfServiceContent } from '../../public/co
 import { supabase } from '../../../lib/supabase';
 import { hospitalService } from '../../../services/hospitalService';
 import { geolocationService } from '../../../services/geolocationService';
-import { discoverHospitals } from '../../../services/hospitalSearch';
+import { discoverHospitals, autocompleteGooglePlaces, getGooglePlaceDetails } from '../../../services/hospitalSearch';
 import type { Hospital } from '../../../types';
 import type { NormalizedHospital } from '../../../services/hospitalSearch/types';
 
@@ -31,6 +31,8 @@ export function RegisterPage({ onRegister }: RegisterPageProps) {
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState('');
   const [mapHospitals, setMapHospitals] = useState<NormalizedHospital[]>([]);
+  const [searchRadius, setSearchRadius] = useState(5000);
+  const [_isSearchingRadius, setIsSearchingRadius] = useState(false);
   
   // Drawer state
   const [legalDrawerOpen, setLegalDrawerOpen] = useState(false);
@@ -39,38 +41,83 @@ export function RegisterPage({ onRegister }: RegisterPageProps) {
   // Combobox state
   const [hospitalSearchTerm, setHospitalSearchTerm] = useState('');
   const [isDropdownOpen, setIsDropdownOpen] = useState(false);
+  
+  const [userLocation, setUserLocation] = useState<[number, number]>([17.44, 78.34]);
+  const [autocompleteResults, setAutocompleteResults] = useState<any[]>([]);
+  const [autocompleteLoading, setAutocompleteLoading] = useState(false);
+  const [fetchingDetailsId, setFetchingDetailsId] = useState<string | null>(null);
+
+  // Debounce autocomplete search
+  useEffect(() => {
+    if (!hospitalSearchTerm.trim()) {
+      setAutocompleteResults([]);
+      return;
+    }
+
+    const handler = setTimeout(async () => {
+      setAutocompleteLoading(true);
+      try {
+        const results = await autocompleteGooglePlaces(hospitalSearchTerm, userLocation[0], userLocation[1], 50000);
+        setAutocompleteResults(results);
+      } catch (err) {
+        console.error("Autocomplete failed:", err);
+        setAutocompleteResults([]);
+      } finally {
+        setAutocompleteLoading(false);
+      }
+    }, 400);
+
+    return () => clearTimeout(handler);
+  }, [hospitalSearchTerm, userLocation]);
+
+  const loadMapHospitals = (lat: number, lng: number, radiusMeters: number) => {
+    setIsSearchingRadius(true);
+    discoverHospitals(lat, lng, radiusMeters, false)
+      .then(data => {
+        setMapHospitals(data.results);
+        
+        // If we have a selected hospital, check if it's still in the results
+        setFormData(prev => {
+          if (prev.hospitalId) {
+            const stillExists = data.results.some((h: any) => h.id === prev.hospitalId);
+            if (!stillExists) {
+              return { ...prev, hospitalId: '' }; // clear if out of range
+            }
+          } else if (data.results.length > 0) {
+            // Auto-select first if none selected
+            return { ...prev, hospitalId: data.results[0].id };
+          }
+          return prev;
+        });
+      })
+      .catch(console.error)
+      .finally(() => setIsSearchingRadius(false));
+  };
 
   useEffect(() => {
-    const loadMapHospitals = (lat: number, lng: number) => {
-      const abortCtrl = new AbortController();
-      discoverHospitals(lat, lng, 5000, undefined, abortCtrl.signal)
-        .then(data => {
-          setMapHospitals(data);
-          if (data.length > 0 && !formData.hospitalId) {
-            setFormData(prev => ({ ...prev, hospitalId: data[0].id }));
-          }
-        })
-        .catch(console.error);
-    };
-
     // Attempt to load from map API if geolocation is available
     geolocationService.getCurrentPosition()
       .then(pos => {
-        loadMapHospitals(pos.latitude, pos.longitude);
+        setUserLocation([pos.latitude, pos.longitude]);
       })
       .catch(() => {
         // Fallback to a default location (Hyderabad) if geolocation is denied/fails
-        loadMapHospitals(17.44, 78.34);
+        setUserLocation([17.44, 78.34]);
       });
 
     // Also load local DB hospitals
     hospitalService.getAllHospitals().then(data => {
       setHospitals(data);
-      if (data.length > 0) {
-        setFormData(prev => ({ ...prev, hospitalId: prev.hospitalId || data[0].id }));
+      if (data.length > 0 && !formData.hospitalId) {
+        setFormData(prev => ({ ...prev, hospitalId: data[0].id }));
       }
     });
   }, []);
+
+  // Fetch hospitals whenever location or radius changes
+  useEffect(() => {
+    loadMapHospitals(userLocation[0], userLocation[1], searchRadius);
+  }, [userLocation, searchRadius]);
 
   const calculatePasswordStrength = (pass: string) => {
     if (pass.length === 0) return 0;
@@ -114,6 +161,37 @@ export function RegisterPage({ onRegister }: RegisterPageProps) {
     (h.address && h.address.toLowerCase().includes(hospitalSearchTerm.toLowerCase()))
   );
   const selectedHospitalName = activeHospitals.find(h => h.id === formData.hospitalId)?.name || '';
+
+  const handleSelectAutocomplete = async (placeId: string) => {
+    setFetchingDetailsId(placeId);
+    try {
+      const details = await getGooglePlaceDetails(placeId);
+      if (!details) throw new Error("Place details not found");
+      
+      const normalized: NormalizedHospital = {
+        id: details.providerId,
+        providerId: details.providerId,
+        provider: details.provider,
+        name: details.name,
+        lat: details.lat,
+        lng: details.lng,
+        address: details.address,
+        phone: details.phone,
+        types: details.types,
+        distanceMeters: 0,
+      };
+
+      setMapHospitals(prev => [normalized, ...prev]);
+      setFormData(prev => ({ ...prev, hospitalId: normalized.id }));
+      setHospitalSearchTerm('');
+      setIsDropdownOpen(false);
+    } catch (err) {
+      console.error("Failed to get place details:", err);
+      alert("Failed to load hospital details. Please try again.");
+    } finally {
+      setFetchingDetailsId(null);
+    }
+  };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -411,7 +489,25 @@ export function RegisterPage({ onRegister }: RegisterPageProps) {
 
                 {['HOSPITAL', 'AMBULANCE'].includes(formData.role) && (
                   <motion.div initial={{ opacity: 0, y: -8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -8 }} transition={{ duration: 0.3 }} className="group relative z-20">
-                    <label className="block text-[10px] font-bold text-[#A7ADB5] uppercase tracking-widest mb-2 transition-colors group-focus-within:text-white">Assigned Hospital Facility</label>
+                    <div className="flex items-center justify-between mb-2">
+                      <label className="block text-[10px] font-bold text-[#A7ADB5] uppercase tracking-widest transition-colors group-focus-within:text-white">Assigned Hospital Facility</label>
+                      <div className="flex gap-1">
+                        {[5, 15, 25, 50].map(r => (
+                          <button
+                            key={r}
+                            type="button"
+                            onClick={() => setSearchRadius(r * 1000)}
+                            className={`px-2 py-0.5 text-[9px] font-bold rounded transition-colors ${
+                              searchRadius === r * 1000 
+                                ? 'bg-[#E53935] text-white' 
+                                : 'bg-[#1A1D24] text-[#A7ADB5] hover:text-white border border-border-subtle'
+                            }`}
+                          >
+                            {r}km
+                          </button>
+                        ))}
+                      </div>
+                    </div>
                     <div className="relative">
                       <input
                         type="text"
@@ -436,30 +532,56 @@ export function RegisterPage({ onRegister }: RegisterPageProps) {
                             exit={{ opacity: 0, y: 5 }}
                             className="absolute z-[100] w-full mt-2 max-h-60 overflow-y-auto bg-[#0F1218] border border-border-subtle rounded-xl shadow-2xl custom-scrollbar"
                           >
-                            {filteredHospitals.length === 0 ? (
-                              <div className="p-4 text-sm text-[#A7ADB5] text-center">No hospitals found</div>
-                            ) : (
-                              filteredHospitals.map(h => (
-                                <div
-                                  key={h.id}
-                                  onClick={() => {
-                                    setFormData({...formData, hospitalId: h.id});
-                                    setHospitalSearchTerm('');
-                                    setIsDropdownOpen(false);
-                                  }}
-                                  className="p-3 hover:bg-white/5 cursor-pointer border-b border-white/5 last:border-0 transition-colors flex justify-between items-start gap-4"
-                                >
-                                  <div>
-                                    <div className="text-white text-sm font-medium">{h.name}</div>
-                                    {h.address && <div className="text-[#A7ADB5] text-[10px] mt-0.5 line-clamp-1">{h.address}</div>}
-                                  </div>
-                                  {('distanceMeters' in h) && (
-                                    <div className="text-xs font-bold text-[#20C997] shrink-0 bg-[#20C997]/10 px-2 py-0.5 rounded-full">
-                                      {((h as NormalizedHospital).distanceMeters / 1000).toFixed(1)} km
+                            {hospitalSearchTerm.trim() ? (
+                              <>
+                                {autocompleteLoading && <div className="p-4 text-sm text-[#A7ADB5] text-center">Searching Google Places...</div>}
+                                {!autocompleteLoading && autocompleteResults.length === 0 && (
+                                  <div className="p-4 text-sm text-[#A7ADB5] text-center">No hospitals found</div>
+                                )}
+                                {!autocompleteLoading && autocompleteResults.map((place) => (
+                                  <div
+                                    key={place.placePrediction.placeId}
+                                    onClick={() => handleSelectAutocomplete(place.placePrediction.placeId)}
+                                    className={`p-3 hover:bg-white/5 cursor-pointer border-b border-white/5 last:border-0 transition-colors flex justify-between items-start gap-4 ${fetchingDetailsId === place.placePrediction.placeId ? 'opacity-50 cursor-not-allowed' : ''}`}
+                                  >
+                                    <div className="flex-1 min-w-0">
+                                      <h4 className="text-sm font-bold text-white mb-0.5">{place.placePrediction.text.text}</h4>
+                                      <p className="text-xs text-[#A7ADB5] truncate">Google Places Result</p>
                                     </div>
-                                  )}
-                                </div>
-                              ))
+                                    {fetchingDetailsId === place.placePrediction.placeId && (
+                                      <div className="w-4 h-4 rounded-full border-2 border-[#E53935] border-t-transparent animate-spin"></div>
+                                    )}
+                                  </div>
+                                ))}
+                              </>
+                            ) : (
+                              <>
+                                {filteredHospitals.length === 0 ? (
+                                  <div className="p-4 text-sm text-[#A7ADB5] text-center">No nearby hospitals found</div>
+                                ) : (
+                                  filteredHospitals.map(h => (
+                                    <div
+                                      key={h.id}
+                                      onClick={() => {
+                                        setFormData({...formData, hospitalId: h.id});
+                                        setHospitalSearchTerm('');
+                                        setIsDropdownOpen(false);
+                                      }}
+                                      className="p-3 hover:bg-white/5 cursor-pointer border-b border-white/5 last:border-0 transition-colors flex justify-between items-start gap-4"
+                                    >
+                                      <div>
+                                        <div className="text-white text-sm font-medium">{h.name}</div>
+                                        {h.address && <div className="text-[#A7ADB5] text-[10px] mt-0.5 line-clamp-1">{h.address}</div>}
+                                      </div>
+                                      {('distanceMeters' in h) && (
+                                        <div className="text-xs font-bold text-[#20C997] shrink-0 bg-[#20C997]/10 px-2 py-0.5 rounded-full">
+                                          {((h as NormalizedHospital).distanceMeters / 1000).toFixed(1)} km
+                                        </div>
+                                      )}
+                                    </div>
+                                  ))
+                                )}
+                              </>
                             )}
                           </motion.div>
                         )}
@@ -657,3 +779,4 @@ export function RegisterPage({ onRegister }: RegisterPageProps) {
     </motion.div>
   );
 }
+

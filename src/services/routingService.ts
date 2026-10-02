@@ -6,6 +6,8 @@
 import type { RouteInfo, LatLng } from '../types';
 import { toLeafletPos, toOsrmCoord, fromOsrmToLeaflet } from '../utils/coordinates';
 
+const routeCache = new Map<string, { data: RouteInfo, timestamp: number }>();
+
 export const routingService = {
   /**
    * Fetch live real-world driving route using OpenStreetMap OSRM API
@@ -18,6 +20,12 @@ export const routingService = {
     const destOsrm = toOsrmCoord(destination);
     const originLeaflet = toLeafletPos(origin);
     const destLeaflet = toLeafletPos(destination);
+
+    const cacheKey = `${originOsrm[0].toFixed(4)},${originOsrm[1].toFixed(4)}_${destOsrm[0].toFixed(4)},${destOsrm[1].toFixed(4)}`;
+    const cached = routeCache.get(cacheKey);
+    if (cached && Date.now() - cached.timestamp < 1000 * 60 * 5) {
+      return cached.data;
+    }
 
     try {
       // Use free OpenStreetMap OSRM routing engine (no API key required)
@@ -36,13 +44,15 @@ export const routingService = {
 
           const steps = route.legs?.[0]?.steps || [];
 
-          return {
+          const finalResult = {
             polyline,
             distanceMeters: Math.round(route.distance),
             etaSeconds: Math.round(route.duration),
             congestionSegments: [], // Mapbox returns congestion data differently, we will just use standard color for now
             steps,
           };
+          routeCache.set(cacheKey, { data: finalResult, timestamp: Date.now() });
+          return finalResult;
         }
       } else {
         console.warn(`[AERO ROUTING] HTTP error ${res.status} from routing engine`);
@@ -70,12 +80,14 @@ export const routingService = {
     const distMeters = Math.round(R * c);
     const etaSecs = Math.round(distMeters / 15); // ~54 km/h average speed
 
-    return {
+    const fallbackResult = {
       polyline: [],
       distanceMeters: distMeters || 3800,
       etaSeconds: etaSecs || 310,
       congestionSegments: [],
     };
+    routeCache.set(cacheKey, { data: fallbackResult, timestamp: Date.now() });
+    return fallbackResult;
   },
 
   /**

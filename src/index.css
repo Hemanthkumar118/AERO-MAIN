@@ -171,3 +171,22 @@
     transition-duration: 0.01ms !important;
   }
 }
+
+
+/* Ambulance Map Marker Realistic Styling */
+@keyframes ambulanceEmergencyLights {
+    0%, 100% {
+        filter: drop-shadow(0 0 2px rgba(255,0,0,0.3)) drop-shadow(0 0 4px rgba(0,0,255,0.3));
+    }
+    50% {
+        filter: drop-shadow(0 0 10px rgba(255,0,0,0.8)) drop-shadow(0 0 12px rgba(0,0,255,0.8));
+    }
+}
+
+.ambulance-emergency-mode img {
+    animation: ambulanceEmergencyLights 0.5s infinite ease-in-out;
+}
+
+.ambulance-selected-mode img {
+    filter: drop-shadow(0 0 8px rgba(59, 130, 246, 0.9)); /* Tailwind blue-500 */
+}

@@ -45,7 +45,7 @@ export const analyticsService = {
       status: i.status === 'active' ? 'ACTIVE' : i.status === 'resolved' ? 'COMPLETED' : 'PENDING',
       priority: i.priority || 'CODE_RED',
       ambulanceDisplayName: i.ambulance_id || 'AERO ALS',
-      vehicleNumber: i.ambulance_id || 'AMB-1',
+      vehicleNumber: i.ambulance_id || 'UNAVAILABLE',
       hospital: { name: i.destination_hospital || 'Unknown' },
       patient: { category: i.incident_type || 'UNAVAILABLE' },
       createdAt: i.created_at,

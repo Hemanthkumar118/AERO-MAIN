@@ -16,7 +16,7 @@ import { ETADisplay } from '../../../components/status/ETADisplay';
 import { EmergencyStatusBar } from '../../../components/status/EmergencyStatusBar';
 import { policeService } from '../../../services/policeService';
 import { realtimeService } from '../../../services/realtimeService';
-import type { Emergency, Junction, JunctionStatus } from '../../../types';
+import type { Emergency, Junction, JunctionStatus, ConnectionState } from '../../../types';
 
 export function ActiveEmergencyDetails() {
   const { id } = useParams<{ id: string }>();
@@ -27,6 +27,13 @@ export function ActiveEmergencyDetails() {
 
   const [junctions, setJunctions] = useState<Junction[]>([]);
   const [showCompleteDialog, setShowCompleteDialog] = useState(false);
+  const [connectionState, setConnectionState] = useState<ConnectionState>(realtimeService.getConnectionState());
+
+  useEffect(() => {
+    return realtimeService.on('connection_change', (state) => {
+      setConnectionState(state);
+    });
+  }, []);
 
   useEffect(() => {
     if (id) {
@@ -103,7 +110,7 @@ export function ActiveEmergencyDetails() {
   const mapCenter: [number, number] = activePos;
 
   return (
-    <AppShell userRole="POLICE" connectionState="connected">
+    <AppShell userRole="POLICE" connectionState={connectionState}>
       <div className="flex flex-col h-full bg-bg-main overflow-hidden">
         
         {/* Header */}

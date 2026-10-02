@@ -62,7 +62,7 @@ export function IncidentReportModal({
   };
 
   return (
-    <div className="fixed inset-0 z-[1000] flex items-center justify-center p-4 bg-bg-main/80 backdrop-blur-sm animate-fade-in">
+    <div className="fixed inset-0 z-[70] flex items-center justify-center p-4 bg-bg-main/80 backdrop-blur-sm animate-fade-in">
       <div className="w-full max-w-lg bg-bg-elevated border border-border-subtle rounded-2xl p-6 shadow-2xl space-y-4">
         <div className="flex items-center justify-between border-b border-border-subtle pb-3">
           <div className="flex items-center gap-2.5">

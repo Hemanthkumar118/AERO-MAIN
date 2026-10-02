@@ -97,7 +97,7 @@ export interface EmergencyIncident {
   route_duration_seconds?: number;
   traffic_duration_seconds?: number;
   traffic_status?: string;
-  route_provider?: string;
+
   route_version?: number;
   last_reroute_at?: string;
   route_updated_at?: string;

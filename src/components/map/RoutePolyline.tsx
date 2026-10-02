@@ -1,6 +1,6 @@
 import { useEffect, useRef } from 'react';
 import type { CongestionSegment } from '../../types';
-import { useMappls } from './MapplsContext';
+import { useGoogleMap } from './GoogleMapContext';
 
 interface RoutePolylineProps {
   positions: [number, number][];
@@ -13,12 +13,12 @@ export function RoutePolyline({
   active = true,
   congestionSegments,
 }: RoutePolylineProps) {
-  const { map, mapplsClassObject } = useMappls();
-  const outerLineRef = useRef<any>(null);
-  const baseLineRef = useRef<any>(null);
-  const congestionLinesRef = useRef<any[]>([]);
-  const mainLineRef = useRef<any>(null);
-  const pulseLineRef = useRef<any>(null);
+  const { map } = useGoogleMap();
+  const outerLineRef = useRef<google.maps.Polyline | null>(null);
+  const baseLineRef = useRef<google.maps.Polyline | null>(null);
+  const congestionLinesRef = useRef<google.maps.Polyline[]>([]);
+  const mainLineRef = useRef<google.maps.Polyline | null>(null);
+  const pulseLineRef = useRef<google.maps.Polyline | null>(null);
 
   // Color mapping for traffic congestion
   const congestionColors: Record<string, string> = {
@@ -29,33 +29,65 @@ export function RoutePolyline({
   };
 
   useEffect(() => {
-    if (!map || !mapplsClassObject || !positions || positions.length < 2) return;
+    if (!map || !positions || positions.length < 2) return;
 
     const path = positions.map(pos => ({ lat: pos[0], lng: pos[1] }));
 
     // Cleanup previous lines
-    const cleanup = () => {
-      if (outerLineRef.current) outerLineRef.current.remove();
-      if (baseLineRef.current) baseLineRef.current.remove();
-      congestionLinesRef.current.forEach(line => line.remove());
-      congestionLinesRef.current = [];
-      if (mainLineRef.current) mainLineRef.current.remove();
-      if (pulseLineRef.current) pulseLineRef.current.remove();
+    const removePolyline = (polyline: google.maps.Polyline | null) => {
+      if (polyline) {
+        polyline.setMap(null);
+      }
     };
-    
+
+    const cleanup = () => {
+      removePolyline(outerLineRef.current);
+      outerLineRef.current = null;
+      removePolyline(baseLineRef.current);
+      baseLineRef.current = null;
+      congestionLinesRef.current.forEach(line => removePolyline(line));
+      congestionLinesRef.current = [];
+      removePolyline(mainLineRef.current);
+      mainLineRef.current = null;
+      removePolyline(pulseLineRef.current);
+      pulseLineRef.current = null;
+    };
+
     cleanup();
 
-    const createPolyline = (options: any) => {
-      return new (mapplsClassObject as any).Polyline({
-        map: map,
+    const createPolyline = (options: {
+      path?: google.maps.LatLngLiteral[];
+      strokeColor: string;
+      strokeOpacity: number;
+      strokeWeight: number;
+      isDashed?: boolean;
+    }): google.maps.Polyline => {
+      const polylineOptions: google.maps.PolylineOptions = {
+        map,
         path: options.path || path,
         strokeColor: options.strokeColor,
         strokeOpacity: options.strokeOpacity,
         strokeWeight: options.strokeWeight,
-        lineCap: 'round',
-        lineJoin: 'round',
-        strokeDashstyle: options.strokeDashstyle,
-      });
+        geodesic: true,
+      };
+
+      if (options.isDashed) {
+        polylineOptions.strokeOpacity = 0;
+        polylineOptions.icons = [
+          {
+            icon: {
+              path: 'M 0,-1 0,1',
+              strokeOpacity: options.strokeOpacity || 0.8,
+              strokeColor: options.strokeColor,
+              scale: options.strokeWeight / 2,
+            },
+            offset: '0',
+            repeat: '12px',
+          },
+        ];
+      }
+
+      return new google.maps.Polyline(polylineOptions);
     };
 
     // Outer Neon Glow Layer
@@ -88,23 +120,21 @@ export function RoutePolyline({
         strokeColor: active ? '#06b6d4' : '#64748b',
         strokeWeight: 4,
         strokeOpacity: active ? 0.95 : 0.6,
-        strokeDashstyle: active ? undefined : 'dash',
+        isDashed: !active,
       });
     }
 
     if (active) {
-      // Mappls SDK doesn't natively support animating dashed lines easily without direct mapbox gl integration.
-      // But we can add a basic dashed line on top.
       pulseLineRef.current = createPolyline({
         strokeColor: '#ffffff',
         strokeWeight: 2,
         strokeOpacity: 0.8,
-        strokeDashstyle: 'dash',
+        isDashed: true,
       });
     }
 
     return cleanup;
-  }, [map, mapplsClassObject, positions, active, congestionSegments]);
+  }, [map, positions, active, congestionSegments]);
 
   return null;
 }

@@ -161,7 +161,7 @@ export const policeService = {
       id: i.id,
       status: i.status === 'active' ? 'ACTIVE' : i.status === 'resolved' ? 'COMPLETED' : 'PENDING',
       priority: i.priority || 'CODE_RED',
-      ambulanceId: i.ambulance_id || 'AMB-1',
+      ambulanceId: i.ambulance_id || 'UNAVAILABLE',
       ambulanceDisplayName: i.ambulance_id || 'AERO ALS',
       hospital: { id: '', name: i.destination_hospital, address: '', location: { latitude: 0, longitude: 0 }, emergencyCapable: true },
       patient: {
@@ -179,7 +179,7 @@ export const policeService = {
         polyline: i.route_geometry || [],
         distanceMeters: i.route_distance_meters || 0
       },
-      vehicleNumber: i.ambulance_id || 'AMB-1',
+      vehicleNumber: i.ambulance_id || 'UNAVAILABLE',
       createdAt: i.created_at
     } as any;
   }

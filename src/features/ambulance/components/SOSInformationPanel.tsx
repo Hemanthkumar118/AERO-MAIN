@@ -71,7 +71,6 @@ export function SOSInformationPanel({
     etaSeconds: incident.route_duration_seconds,
     trafficAwareEtaSeconds: incident.traffic_duration_seconds,
     trafficStatus: incident.traffic_status as any,
-    routeProvider: incident.route_provider as any,
     speedKmH: incident.current_speed,
     startedAt: incident.created_at,
     updatedAt: incident.updated_at,
@@ -79,7 +78,7 @@ export function SOSInformationPanel({
 
   if (!expanded) {
     return (
-      <div className="absolute top-20 right-4 z-50 pointer-events-auto">
+      <div className="absolute top-20 right-4 z-30 pointer-events-auto">
         <div className="bg-bg-surface/90 backdrop-blur-md border border-border-subtle rounded-lg shadow-lg p-3 flex items-center justify-between gap-4 w-[200px]">
           <div className="flex items-center gap-2">
             <span className="font-bold text-white text-sm">SOS</span>
@@ -97,7 +96,7 @@ export function SOSInformationPanel({
   }
 
   return (
-    <div className="absolute top-20 right-4 z-50 pointer-events-auto max-w-[320px] w-[calc(100vw-24px)] md:w-[320px] max-h-[calc(100vh-120px)] overflow-y-auto custom-scrollbar">
+    <div className="absolute top-20 right-4 z-30 pointer-events-auto max-w-[320px] w-[calc(100vw-24px)] md:w-[320px] max-h-[calc(100vh-220px)] md:max-h-[calc(100vh-120px)] overflow-y-auto custom-scrollbar">
       <div className="bg-bg-surface/95 backdrop-blur-xl border border-border-subtle rounded-xl shadow-2xl overflow-hidden flex flex-col">
         
         {/* Header */}

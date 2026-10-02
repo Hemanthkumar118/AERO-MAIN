@@ -37,7 +37,7 @@ export function Drawer({
     : 'animate-fade-in';
 
   return (
-    <div className="fixed inset-0 z-[8000]">
+    <div className="fixed inset-0 z-[70]">
       {/* Backdrop */}
       <div
         className="absolute inset-0 bg-black/50 animate-fade-in"

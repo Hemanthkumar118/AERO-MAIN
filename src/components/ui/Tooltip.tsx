@@ -43,7 +43,7 @@ export function Tooltip({ content, children, position = 'top', className = '' }:
         <div
           role="tooltip"
           className={`
-            absolute z-[7000] px-2.5 py-1.5 text-[12px] font-medium
+            absolute z-50 px-2.5 py-1.5 text-[12px] font-medium
             bg-bg-elevated text-text-primary border border-border-strong
             rounded-[6px] shadow-overlay whitespace-nowrap
             animate-fade-in pointer-events-none

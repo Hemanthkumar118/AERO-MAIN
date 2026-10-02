@@ -5,7 +5,7 @@ import { Button } from '../../../components/ui/Button';
 import { Input } from '../../../components/ui/Input';
 import { useAuth, type AeroProfile } from '../../../providers/AuthProvider';
 import { hospitalService } from '../../../services/hospitalService';
-import { discoverHospitals } from '../../../services/hospitalSearch';
+import { discoverHospitals, autocompleteGooglePlaces, getGooglePlaceDetails } from '../../../services/hospitalSearch';
 import { geolocationService } from '../../../services/geolocationService';
 import type { Hospital } from '../../../types';
 import type { NormalizedHospital } from '../../../services/hospitalSearch/types';
@@ -21,7 +21,37 @@ export function AccountSettingsPage() {
   const [hospitals, setHospitals] = useState<Hospital[]>([]);
   const [mapHospitals, setMapHospitals] = useState<NormalizedHospital[]>([]);
   const [hospitalSearchTerm, setHospitalSearchTerm] = useState('');
+  const [searchRadius, setSearchRadius] = useState(5000);
+  const [_isSearchingRadius, setIsSearchingRadius] = useState(false);
   const [isDropdownOpen, setIsDropdownOpen] = useState(false);
+  
+  const [userLocation, setUserLocation] = useState<[number, number]>([17.44, 78.34]);
+  const [autocompleteResults, setAutocompleteResults] = useState<any[]>([]);
+  const [autocompleteLoading, setAutocompleteLoading] = useState(false);
+  const [fetchingDetailsId, setFetchingDetailsId] = useState<string | null>(null);
+
+  // Debounce autocomplete search
+  useEffect(() => {
+    if (!hospitalSearchTerm.trim()) {
+      setAutocompleteResults([]);
+      return;
+    }
+
+    const handler = setTimeout(async () => {
+      setAutocompleteLoading(true);
+      try {
+        const results = await autocompleteGooglePlaces(hospitalSearchTerm, userLocation[0], userLocation[1], 50000);
+        setAutocompleteResults(results);
+      } catch (err) {
+        console.error("Autocomplete failed:", err);
+        setAutocompleteResults([]);
+      } finally {
+        setAutocompleteLoading(false);
+      }
+    }, 400);
+
+    return () => clearTimeout(handler);
+  }, [hospitalSearchTerm, userLocation]);
   useEffect(() => {
     if (authProfile) {
       setLocalProfile({ ...authProfile });
@@ -34,22 +64,44 @@ export function AccountSettingsPage() {
     }
   }, [profileError]);
 
+  const loadMapHospitals = (lat: number, lng: number, radiusMeters: number) => {
+    setIsSearchingRadius(true);
+    discoverHospitals(lat, lng, radiusMeters, false)
+      .then(data => {
+        setMapHospitals(data.results);
+        setLocalProfile(prev => {
+          if (!prev) return prev;
+          if (prev.hospital_id) {
+            const stillExists = data.results.some((h: any) => h.id === prev.hospital_id);
+            if (!stillExists) {
+              return { ...prev, hospital_id: '' };
+            }
+          }
+          return prev;
+        });
+      })
+      .catch(console.error)
+      .finally(() => setIsSearchingRadius(false));
+  };
+
   useEffect(() => {
     if (!['hospital', 'ambulance'].includes(authProfile?.role || '')) return;
-
-    const loadMapHospitals = (lat: number, lng: number) => {
-      const abortCtrl = new AbortController();
-      discoverHospitals(lat, lng, 15000, undefined, abortCtrl.signal)
-        .then(data => setMapHospitals(data))
-        .catch(console.error);
-    };
 
     hospitalService.getAllHospitals().then(setHospitals);
 
     geolocationService.getCurrentPosition()
-      .then(pos => loadMapHospitals(pos.latitude, pos.longitude))
-      .catch(() => loadMapHospitals(17.44, 78.34));
+      .then(pos => {
+        setUserLocation([pos.latitude, pos.longitude]);
+      })
+      .catch(() => {
+        setUserLocation([17.44, 78.34]);
+      });
   }, [authProfile?.role]);
+
+  useEffect(() => {
+    if (!['hospital', 'ambulance'].includes(authProfile?.role || '')) return;
+    loadMapHospitals(userLocation[0], userLocation[1], searchRadius);
+  }, [userLocation, searchRadius, authProfile?.role]);
 
   const activeHospitals = useMemo(() => {
     const combinedMap = new Map<string, typeof hospitals[0] | NormalizedHospital>();
@@ -71,6 +123,37 @@ export function AccountSettingsPage() {
   );
   
   const selectedHospitalName = activeHospitals.find(h => h.id === localProfile?.hospital_id)?.name || '';
+
+  const handleSelectAutocomplete = async (placeId: string) => {
+    setFetchingDetailsId(placeId);
+    try {
+      const details = await getGooglePlaceDetails(placeId);
+      if (!details) throw new Error("Place details not found");
+      
+      const normalized: NormalizedHospital = {
+        id: details.providerId,
+        providerId: details.providerId,
+        provider: details.provider,
+        name: details.name,
+        lat: details.lat,
+        lng: details.lng,
+        address: details.address,
+        phone: details.phone,
+        types: details.types,
+        distanceMeters: 0,
+      };
+
+      setMapHospitals(prev => [normalized, ...prev]);
+      setLocalProfile(prev => prev ? { ...prev, hospital_id: normalized.id } : null);
+      setHospitalSearchTerm('');
+      setIsDropdownOpen(false);
+    } catch (err) {
+      console.error("Failed to get place details:", err);
+      alert("Failed to load hospital details. Please try again.");
+    } finally {
+      setFetchingDetailsId(null);
+    }
+  };
 
   const fetchProfile = async () => {
     setBannerState(null);
@@ -263,7 +346,25 @@ export function AccountSettingsPage() {
                   {['hospital', 'ambulance'].includes(localProfile?.role || '') && (
                     <div className="grid grid-cols-1 gap-5">
                       <div className="group relative z-20">
-                        <label className="block text-[10px] font-bold text-text-secondary uppercase tracking-widest mb-2 transition-colors group-focus-within:text-white">Assigned Hospital Facility</label>
+                        <div className="flex items-center justify-between mb-2">
+                          <label className="block text-[10px] font-bold text-text-secondary uppercase tracking-widest transition-colors group-focus-within:text-white">Assigned Hospital Facility</label>
+                          <div className="flex gap-1">
+                            {[5, 15, 25, 50].map(r => (
+                              <button
+                                key={r}
+                                type="button"
+                                onClick={() => setSearchRadius(r * 1000)}
+                                className={`px-2 py-0.5 text-[9px] font-bold rounded transition-colors ${
+                                  searchRadius === r * 1000 
+                                    ? 'bg-[#E53935] text-white' 
+                                    : 'bg-[#1A1D24] text-[#A7ADB5] hover:text-white border border-border-subtle'
+                                }`}
+                              >
+                                {r}km
+                              </button>
+                            ))}
+                          </div>
+                        </div>
                         <div className="relative">
                           <input
                             type="text"
@@ -288,30 +389,56 @@ export function AccountSettingsPage() {
                                 exit={{ opacity: 0, y: 5 }}
                                 className="absolute z-[100] w-full mt-2 max-h-60 overflow-y-auto bg-bg-surface border border-border-subtle rounded-xl shadow-2xl custom-scrollbar"
                               >
-                                {filteredHospitals.length === 0 ? (
-                                  <div className="p-4 text-sm text-text-secondary text-center">No hospitals found</div>
-                                ) : (
-                                  filteredHospitals.map(h => (
-                                    <div
-                                      key={h.id}
-                                      onClick={() => {
-                                        setLocalProfile(prev => prev ? { ...prev, hospital_id: h.id } : null);
-                                        setHospitalSearchTerm('');
-                                        setIsDropdownOpen(false);
-                                      }}
-                                      className="p-3 hover:bg-white/5 cursor-pointer border-b border-border-subtle last:border-0 transition-colors flex justify-between items-start gap-4"
-                                    >
-                                      <div>
-                                        <div className="text-white text-sm font-medium">{h.name}</div>
-                                        {h.address && <div className="text-text-secondary text-[10px] mt-0.5 line-clamp-1">{h.address}</div>}
-                                      </div>
-                                      {('distanceMeters' in h) && (
-                                        <div className="text-xs font-bold text-emerald-400 shrink-0 bg-emerald-500/10 px-2 py-0.5 rounded-full">
-                                          {((h as NormalizedHospital).distanceMeters / 1000).toFixed(1)} km
+                                {hospitalSearchTerm.trim() ? (
+                                  <>
+                                    {autocompleteLoading && <div className="p-4 text-sm text-text-secondary text-center">Searching Google Places...</div>}
+                                    {!autocompleteLoading && autocompleteResults.length === 0 && (
+                                      <div className="p-4 text-sm text-text-secondary text-center">No hospitals found</div>
+                                    )}
+                                    {!autocompleteLoading && autocompleteResults.map((place) => (
+                                      <div
+                                        key={place.placePrediction.placeId}
+                                        onClick={() => handleSelectAutocomplete(place.placePrediction.placeId)}
+                                        className={`p-3 hover:bg-white/5 cursor-pointer border-b border-border-subtle last:border-0 transition-colors flex justify-between items-start gap-4 ${fetchingDetailsId === place.placePrediction.placeId ? 'opacity-50 cursor-not-allowed' : ''}`}
+                                      >
+                                        <div className="flex-1 min-w-0">
+                                          <h4 className="text-sm font-bold text-white mb-0.5">{place.placePrediction.text.text}</h4>
+                                          <p className="text-xs text-text-secondary truncate">Google Places Result</p>
                                         </div>
-                                      )}
-                                    </div>
-                                  ))
+                                        {fetchingDetailsId === place.placePrediction.placeId && (
+                                          <div className="w-4 h-4 rounded-full border-2 border-cyan-500 border-t-transparent animate-spin"></div>
+                                        )}
+                                      </div>
+                                    ))}
+                                  </>
+                                ) : (
+                                  <>
+                                    {filteredHospitals.length === 0 ? (
+                                      <div className="p-4 text-sm text-text-secondary text-center">No nearby hospitals found</div>
+                                    ) : (
+                                      filteredHospitals.map(h => (
+                                        <div
+                                          key={h.id}
+                                          onClick={() => {
+                                            setLocalProfile(prev => prev ? { ...prev, hospital_id: h.id } : null);
+                                            setHospitalSearchTerm('');
+                                            setIsDropdownOpen(false);
+                                          }}
+                                          className="p-3 hover:bg-white/5 cursor-pointer border-b border-border-subtle last:border-0 transition-colors flex justify-between items-start gap-4"
+                                        >
+                                          <div>
+                                            <div className="text-white text-sm font-medium">{h.name}</div>
+                                            {h.address && <div className="text-text-secondary text-[10px] mt-0.5 line-clamp-1">{h.address}</div>}
+                                          </div>
+                                          {('distanceMeters' in h) && (
+                                            <div className="text-xs font-bold text-emerald-400 shrink-0 bg-emerald-500/10 px-2 py-0.5 rounded-full">
+                                              {((h as NormalizedHospital).distanceMeters / 1000).toFixed(1)} km
+                                            </div>
+                                          )}
+                                        </div>
+                                      ))
+                                    )}
+                                  </>
                                 )}
                               </motion.div>
                             )}

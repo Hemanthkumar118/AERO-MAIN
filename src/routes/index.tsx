@@ -49,7 +49,7 @@ export function AppRoutes() {
     const { user, profile, authLoading, profileLoading, profileError, refreshProfile } = useAuth();
     const location = useLocation();
 
-    if (authLoading || profileLoading) {
+    if (authLoading || (profileLoading && !profile)) {
       return (
         <div className="min-h-dvh flex flex-col items-center justify-center bg-bg-main p-4">
           <div className="w-16 h-16 rounded-full border-4 border-border-subtle border-t-[#35C7FF] animate-spin mb-4"></div>
@@ -128,7 +128,7 @@ export function AppRoutes() {
       <Route
         path="/ambulance"
         element={
-          <ProtectedRoute allowedRoles={['AMBULANCE_OPERATOR', 'AMBULANCE']}>
+          <ProtectedRoute>
             <AmbulanceDashboard />
           </ProtectedRoute>
         }
@@ -140,7 +140,7 @@ export function AppRoutes() {
       <Route
         path="/ambulance/emergency"
         element={
-          <ProtectedRoute allowedRoles={['AMBULANCE_OPERATOR', 'AMBULANCE']}>
+          <ProtectedRoute>
             <AmbulanceDashboard />
           </ProtectedRoute>
         }
@@ -150,7 +150,7 @@ export function AppRoutes() {
       <Route
         path="/police"
         element={
-          <ProtectedRoute allowedRoles={['TRAFFIC_OPERATOR', 'POLICE']}>
+          <ProtectedRoute>
             <PoliceDashboard />
           </ProtectedRoute>
         }
@@ -158,7 +158,7 @@ export function AppRoutes() {
       <Route
         path="/police/emergency/:id"
         element={
-          <ProtectedRoute allowedRoles={['TRAFFIC_OPERATOR', 'POLICE']}>
+          <ProtectedRoute>
             <ActiveEmergencyDetails />
           </ProtectedRoute>
         }
@@ -166,7 +166,7 @@ export function AppRoutes() {
       <Route
         path="/police/alerts"
         element={
-          <ProtectedRoute allowedRoles={['TRAFFIC_OPERATOR', 'POLICE']}>
+          <ProtectedRoute>
             <PoliceDashboard />
           </ProtectedRoute>
         }
@@ -176,7 +176,7 @@ export function AppRoutes() {
       <Route
         path="/hospital"
         element={
-          <ProtectedRoute allowedRoles={['HOSPITAL_OPERATOR', 'HOSPITAL']}>
+          <ProtectedRoute>
             <HospitalDashboard />
           </ProtectedRoute>
         }
@@ -186,7 +186,7 @@ export function AppRoutes() {
       <Route
         path="/admin"
         element={
-          <ProtectedRoute allowedRoles={['ADMIN']}>
+          <ProtectedRoute>
             <AdminDashboard />
           </ProtectedRoute>
         }
@@ -194,7 +194,7 @@ export function AppRoutes() {
       <Route
         path="/admin/analytics"
         element={
-          <ProtectedRoute allowedRoles={['ADMIN']}>
+          <ProtectedRoute>
             <AdminAnalytics />
           </ProtectedRoute>
         }
@@ -202,7 +202,7 @@ export function AppRoutes() {
       <Route
         path="/admin/emergencies"
         element={
-          <ProtectedRoute allowedRoles={['ADMIN']}>
+          <ProtectedRoute>
             <AdminDashboard />
           </ProtectedRoute>
         }
@@ -210,7 +210,7 @@ export function AppRoutes() {
       <Route
         path="/admin/users"
         element={
-          <ProtectedRoute allowedRoles={['ADMIN']}>
+          <ProtectedRoute>
             <AdminDashboard />
           </ProtectedRoute>
         }

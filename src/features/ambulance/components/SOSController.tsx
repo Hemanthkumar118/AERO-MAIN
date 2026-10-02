@@ -153,8 +153,8 @@ export function SOSController({
   if (state === 'FETCHING_GPS') buttonLabel = 'GPS...';
   if (state === 'CONFIRMING') buttonLabel = 'READY';
   if (state === 'COUNTDOWN') buttonLabel = 'CALCULATING...';
-  if (state === 'SENDING') buttonLabel = 'ACTIVATING...';
-  if (state === 'SENT') buttonLabel = 'ACTIVE';
+  if (state === 'SENDING') buttonLabel = 'Sending SOS...';
+  if (state === 'SENT') buttonLabel = 'SOS Active';
 
   return (
     <div className={className}>

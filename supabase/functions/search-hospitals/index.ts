@@ -19,7 +19,7 @@ serve(async (req) => {
       );
     }
 
-    const { latitude, longitude, radius, query, type } = await req.json();
+    const { action, latitude, longitude, radius, query, type, placeId } = await req.json();
 
     if (!latitude || !longitude) {
        return new Response(JSON.stringify({ error: 'Missing coordinates' }), {
@@ -32,7 +32,21 @@ serve(async (req) => {
     let url = '';
     let body = {};
     
-    if (query) {
+    if (action === 'autocomplete') {
+      url = 'https://places.googleapis.com/v1/places:autocomplete';
+      body = {
+        input: query,
+        locationBias: {
+          circle: {
+            center: { latitude, longitude },
+            radius: radius || 50000.0
+          }
+        }
+      };
+    } else if (action === 'details') {
+      url = `https://places.googleapis.com/v1/places/${placeId}`;
+      body = {}; // GET request actually, but fetch below uses POST. We need to handle this.
+    } else if (query) {
       // Text Search
       url = 'https://places.googleapis.com/v1/places:searchText';
       body = {
@@ -40,7 +54,7 @@ serve(async (req) => {
         locationBias: {
           circle: {
             center: { latitude, longitude },
-            radius: radius || 5000
+            radius: radius || 50000.0
           }
         },
         maxResultCount: 20
@@ -54,22 +68,35 @@ serve(async (req) => {
         locationRestriction: {
           circle: {
             center: { latitude, longitude },
-            radius: radius || 5000
+            radius: radius || 50000.0
           }
         },
         rankPreference: 'DISTANCE'
       };
     }
 
-    const res = await fetch(url, {
-      method: 'POST',
+    const fetchOptions: RequestInit = {
+      method: action === 'details' ? 'GET' : 'POST',
       headers: {
         'Content-Type': 'application/json',
         'X-Goog-Api-Key': GOOGLE_MAPS_API_KEY,
-        'X-Goog-FieldMask': 'places.id,places.displayName,places.location,places.formattedAddress,places.primaryType'
-      },
-      body: JSON.stringify(body)
-    });
+      }
+    };
+
+    if (action === 'autocomplete') {
+      // no field mask required for autocomplete, or we can leave it blank
+    } else {
+      (fetchOptions.headers as any)['X-Goog-FieldMask'] = 'places.id,places.displayName,places.location,places.formattedAddress,places.primaryType,places.nationalPhoneNumber,places.googleMapsUri,places.businessStatus';
+      if (action === 'details') {
+        (fetchOptions.headers as any)['X-Goog-FieldMask'] = 'id,displayName,location,formattedAddress,primaryType,nationalPhoneNumber,googleMapsUri,businessStatus';
+      }
+    }
+
+    if (action !== 'details') {
+      fetchOptions.body = JSON.stringify(body);
+    }
+
+    const res = await fetch(url, fetchOptions);
 
     if (!res.ok) {
       const errorText = await res.text();
