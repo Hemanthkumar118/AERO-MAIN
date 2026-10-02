@@ -322,6 +322,70 @@ app.post('/api/places/textsearch', authenticateUser, async (req, res) => {
     res.status(500).json({ error: 'Failed to fetch places data.' });
   }
 });
+// Google Routes API Proxy
+app.post('/api/route/calculate', authenticateUser, async (req, res) => {
+  try {
+    const apiKey = process.env.GOOGLE_MAPS_API_KEY;
+    if (!apiKey) {
+      return res.status(503).json({ error: 'Google Maps API Key is not configured on the server.' });
+    }
+
+    const { origin, destination } = req.body;
+    if (!origin || !origin.lat || !origin.lng || !destination || !destination.lat || !destination.lng) {
+      return res.status(400).json({ error: 'Origin and destination coordinates are required.' });
+    }
+
+    const requestBody = {
+      origin: { location: { latLng: { latitude: origin.lat, longitude: origin.lng } } },
+      destination: { location: { latLng: { latitude: destination.lat, longitude: destination.lng } } },
+      travelMode: "DRIVE",
+      routingPreference: "TRAFFIC_AWARE",
+      computeAlternativeRoutes: false,
+      units: "METRIC"
+    };
+
+    const response = await fetch('https://routes.googleapis.com/directions/v2:computeRoutes', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-Goog-Api-Key': apiKey,
+        'X-Goog-FieldMask': 'routes.distanceMeters,routes.duration,routes.staticDuration,routes.polyline.encodedPolyline'
+      },
+      body: JSON.stringify(requestBody)
+    });
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      console.error('Google Routes API Error:', errorText);
+      return res.status(response.status).json({ error: 'Failed to compute route.' });
+    }
+
+    const data = await response.json();
+    if (!data.routes || data.routes.length === 0) {
+      return res.status(404).json({ error: 'No route found.' });
+    }
+
+    const route = data.routes[0];
+    const durationSeconds = route.duration ? parseInt(route.duration) : null;
+    const staticDurationSeconds = route.staticDuration ? parseInt(route.staticDuration) : null;
+
+    res.json({
+      success: true,
+      provider: "google",
+      distanceMeters: route.distanceMeters,
+      distanceKm: route.distanceMeters ? Number((route.distanceMeters / 1000).toFixed(2)) : null,
+      durationSeconds,
+      durationMinutes: durationSeconds ? Math.round(durationSeconds / 60) : null,
+      staticDurationSeconds,
+      etaText: durationSeconds ? `${Math.round(durationSeconds / 60)} min` : null,
+      distanceText: route.distanceMeters ? (route.distanceMeters >= 1000 ? `${(route.distanceMeters / 1000).toFixed(1)} km` : `${route.distanceMeters} m`) : null,
+      polyline: route.polyline?.encodedPolyline
+    });
+  } catch (error) {
+    console.error('Route Calculation Endpoint Error:', error.message || error);
+    res.status(500).json({ error: 'Failed to calculate route.' });
+  }
+});
 
 app.listen(PORT, '0.0.0.0', () => {
   console.log(`AERO AI Backend Server running on port ${PORT}`);

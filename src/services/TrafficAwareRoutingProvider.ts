@@ -77,30 +77,19 @@ export class TrafficAwareRoutingProvider {
 
         const data = await response.json();
         
-        if (response.ok && data.routes && data.routes.length > 0) {
-          const route = data.routes[0];
-          
-          // Decode polylineString into array of [lat, lng]
-          const decodedPolyline = TrafficAwareRoutingProvider.decodePolyline(route.polylineString, 5);
+        if (response.ok && data.success && data.polyline) {
+          // Decode polyline into array of [lat, lng]
+          const decodedPolyline = TrafficAwareRoutingProvider.decodePolyline(data.polyline, 5);
           
           if (decodedPolyline && Array.isArray(decodedPolyline)) {
-            let parsedCongestion = [];
-            if (route.congestionSegments && Array.isArray(route.congestionSegments)) {
-              parsedCongestion = route.congestionSegments.map((seg: any) => ({
-                polyline: TrafficAwareRoutingProvider.decodePolyline(seg.polylineString, 5),
-                level: seg.level,
-                speedKmh: seg.speedKmh
-              })).filter((seg: any) => seg.polyline && seg.polyline.length > 0);
-            }
-
             return {
               polyline: decodedPolyline,
-              distanceMeters: route.distanceMeters,
-              etaSeconds: route.durationSeconds,
-              trafficAwareEtaSeconds: route.trafficAwareDurationSeconds,
+              distanceMeters: data.distanceMeters,
+              etaSeconds: data.staticDurationSeconds || data.durationSeconds,
+              trafficAwareEtaSeconds: data.durationSeconds,
               trafficStatus: 'LIVE',
               routeProvider: 'google',
-              congestionSegments: parsedCongestion
+              congestionSegments: []
             };
           }
         }

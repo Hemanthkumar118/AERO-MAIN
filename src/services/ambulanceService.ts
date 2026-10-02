@@ -1,7 +1,5 @@
 import { supabase } from '../lib/supabase';
-import { realtimeService } from './realtimeService';
 
-import { TrafficAwareRoutingProvider } from './TrafficAwareRoutingProvider';
 import type { Emergency, Hospital, PatientInfo, TrafficIncident } from '../types';
 
 export const ambulanceService = {
@@ -35,51 +33,88 @@ export const ambulanceService = {
     };
   },
 
+  async getActiveEmergency(userId: string): Promise<any> {
+    const { data, error } = await supabase
+      .from('emergency_incidents')
+      .select('*')
+      .eq('user_id', userId)
+      .in('status', ['active', 'dispatched', 'en_route', 'rerouting'])
+      .order('created_at', { ascending: false })
+      .limit(1)
+      .maybeSingle();
+
+    if (error) {
+      throw error;
+    }
+    return data ?? null;
+  },
+
   async requestSOS(
     ambulanceId: string,
     hospital: Hospital,
     patientData?: Partial<PatientInfo>,
     currentPos?: [number, number],
   ): Promise<Emergency> {
-    const ambulance = await this.getAmbulanceState(ambulanceId);
-    const startPos = currentPos || ambulance.position;
+    const { data: { session }, error: sessionError } = await supabase.auth.getSession();
+    if (sessionError || !session?.user) {
+      throw new Error("Authentication required. Please log in as an ambulance operator to activate SOS.");
+    }
+    const userId = session.user.id;
     
-    if (!currentPos || isNaN(currentPos[0]) || isNaN(currentPos[1])) {
-      throw new Error("Live GPS location is missing or inaccurate. Cannot activate SOS corridor without fresh coordinates.");
+    // 14. DUPLICATE SOS PROTECTION
+    const existingActive = await this.getActiveEmergency(userId);
+    if (existingActive) {
+      const error = new Error("EMERGENCY ALREADY ACTIVE");
+      (error as any).code = 'ALREADY_ACTIVE';
+      throw error;
     }
 
-    // Compute live driving route from current GPS to chosen hospital
-    const routeInfo = await TrafficAwareRoutingProvider.getFastestRoute(startPos as [number, number], [
-      hospital.location.latitude,
-      hospital.location.longitude,
-    ]);
+    const priorityMapping: Record<string, string> = {
+      'CODE_RED': 'critical',
+      'CODE_YELLOW': 'high',
+      'CODE_GREEN': 'medium',
+    };
+    const pgPriority = priorityMapping[patientData?.priority as string] || 'critical';
+    
+    const startPos = currentPos || [17.44, 78.34];
 
-    if (!routeInfo.polyline || routeInfo.polyline.length === 0) {
-      throw new Error("Unable to calculate route to the selected hospital.");
+    // Fast insert without waiting for route calculation or ambulance lookup
+    const { data, error } = await supabase.from('emergency_incidents').insert({
+      user_id: userId,
+      incident_type: patientData?.category || 'CARDIAC',
+      priority: pgPriority,
+      status: 'active',
+      ambulance_id: ambulanceId,
+      latitude: startPos[0],
+      longitude: startPos[1],
+      destination_hospital: hospital.name,
+      destination_latitude: hospital.location.latitude,
+      destination_longitude: hospital.location.longitude,
+      current_latitude: startPos[0],
+      current_longitude: startPos[1],
+      current_speed: 0,
+      description: patientData?.chiefComplaint || 'Emergency Request'
+    }).select().single();
+    
+    if (error || !data) {
+      console.error('Supabase insert failed:', error);
+      throw new Error(`Failed to create emergency incident: ${error?.message}`);
     }
 
-    const newEmergency: Emergency = {
-      id: '',
+    return {
+      id: data.id,
       status: 'ACTIVE',
       priority: patientData?.priority || 'CODE_RED',
       category: patientData?.category || 'CARDIAC',
-      ambulanceId: ambulance.id,
-      ambulanceDisplayName: ambulance.name,
-      vehicleNumber: ambulance.vehicleNumber,
-      driverName: ambulance.driverName,
-      driverPhone: ambulance.driverPhone,
+      ambulanceId: ambulanceId,
+      ambulanceDisplayName: 'Ambulance',
+      vehicleNumber: ambulanceId,
+      driverName: 'Paramedic',
+      driverPhone: '',
       hospital,
       currentSpeedKmH: 0,
       distanceCoveredKm: 0,
-      createdAt: new Date().toISOString(),
-      route: {
-        polyline: routeInfo.polyline,
-        distanceMeters: routeInfo.distanceMeters,
-        etaSeconds: routeInfo.etaSeconds,
-        steps: routeInfo.steps,
-        junctions: realtimeService.getJunctions(),
-        congestionSegments: routeInfo.congestionSegments,
-      },
+      createdAt: data.created_at || new Date().toISOString(),
       patient: {
         name: patientData?.name || 'Emergency Patient',
         age: patientData?.age || 45,
@@ -105,67 +140,6 @@ export const ambulanceService = {
         specialistAlerted: true,
       },
     };
-
-    // Supabase Persistence
-    const { data: { session }, error: sessionError } = await supabase.auth.getSession();
-    if (sessionError || !session?.user) {
-      throw new Error("Authentication required. Please log in as an ambulance operator to activate SOS.");
-    }
-    const userId = session.user.id;
-
-    const priorityMapping: Record<string, string> = {
-      'CODE_RED': 'critical',
-      'CODE_YELLOW': 'high',
-      'CODE_GREEN': 'medium',
-    };
-    const pgPriority = priorityMapping[newEmergency.priority as string] || 'critical';
-    
-    // 14. DUPLICATE SOS PROTECTION: Check if ambulance already has an active emergency
-    const { data: existingActive } = await supabase.from('emergency_incidents')
-      .select('id')
-      .eq('user_id', userId)
-      .in('status', ['active', 'dispatched', 'en_route', 'arrived', 'rerouting'])
-      .maybeSingle();
-      
-    if (existingActive) {
-      throw new Error("EMERGENCY ALREADY ACTIVE: Please complete or cancel your current emergency before starting a new one.");
-    }
-
-    const { data, error } = await supabase.from('emergency_incidents').insert({
-      user_id: userId,
-      incident_type: newEmergency.category,
-      priority: pgPriority,
-      status: 'active',
-      ambulance_id: ambulance.vehicleNumber || ambulance.name,
-      latitude: startPos[0],
-      longitude: startPos[1],
-      destination_hospital: hospital.name,
-      destination_latitude: hospital.location.latitude,
-      destination_longitude: hospital.location.longitude,
-      eta_minutes: Math.round(routeInfo.etaSeconds / 60),
-      route_geometry: routeInfo.polyline,
-      route_distance_meters: routeInfo.distanceMeters,
-      route_duration_seconds: routeInfo.etaSeconds,
-      traffic_duration_seconds: routeInfo.trafficAwareEtaSeconds || routeInfo.etaSeconds,
-      traffic_status: routeInfo.trafficStatus || 'UNAVAILABLE',
-      route_version: 1,
-      current_latitude: startPos[0],
-      current_longitude: startPos[1],
-      current_speed: 0,
-      description: newEmergency.patient?.chiefComplaint || 'Emergency Request'
-    }).select().single();
-    
-    if (error || !data) {
-      console.error('Supabase insert failed:', error);
-      if (error?.message?.includes('schema cache') || error?.code === 'PGRST204') {
-        throw new Error(`DATABASE CONFIGURATION ERROR: Schema mismatch. Please run "NOTIFY pgrst, 'reload schema';" in Supabase SQL Editor. Details: ${error?.message}`);
-      }
-      throw new Error(`Failed to create emergency incident: ${error?.message}`);
-    }
-
-    // Map the real DB ID back
-    newEmergency.id = data.id;
-    return newEmergency;
   },
 
   async triggerReroute(_emergencyId: string, _alternateHospital?: Hospital): Promise<Emergency> {

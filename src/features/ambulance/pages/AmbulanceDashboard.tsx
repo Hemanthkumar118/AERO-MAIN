@@ -545,17 +545,26 @@ export function AmbulanceDashboard() {
                       currentPos={currentLiveLocation.current || baseLocation || [0, 0]}
                       patientData={{ category, priority, chiefComplaint: `${category} — ${priority}` }}
                       onEmergencyActive={(emergency) => {
-                        if (emergency.route) {
-                          setRouteInfo({
-                            polyline: emergency.route.polyline,
-                            distanceMeters: emergency.route.distanceMeters,
-                            etaSeconds: emergency.route.etaSeconds,
-                            steps: emergency.route.steps || [],
-                          });
-                          lastRouteCalculationTime.current = Date.now();
+                        setActiveIncident(emergency as any);
+                        if (routeInfo && routeInfo.polyline.length > 0) {
                           setNavigationStatus('active');
+                          // Push the pre-calculated route to the newly created emergency incident
+                          supabase.from('emergency_incidents').update({
+                            route_geometry: routeInfo.polyline,
+                            route_distance_meters: routeInfo.distanceMeters,
+                            route_duration_seconds: routeInfo.etaSeconds,
+                            traffic_duration_seconds: routeInfo.trafficAwareEtaSeconds || routeInfo.etaSeconds,
+                            traffic_status: routeInfo.trafficStatus || 'UNAVAILABLE',
+                            route_version: 1,
+                            last_reroute_at: new Date().toISOString(),
+                            route_updated_at: new Date().toISOString()
+                          }).eq('id', emergency.id).then();
+                        } else {
+                          // Force a reroute on the next tick if we don't have one
+                          setNavigationStatus('rerouting');
+                          lastRouteCalculationTime.current = 0; 
                         }
-                      }} 
+                      }}
                     />
                   </div>
                 </div>

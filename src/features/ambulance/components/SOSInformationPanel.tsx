@@ -135,10 +135,9 @@ export function SOSInformationPanel({
             <div>
               <div className="text-[11px] text-text-secondary uppercase mb-0.5 flex justify-between items-center pr-2">
                 <span>Distance</span>
-                {sosState.speedKmH != null && <span className="text-[9px] text-[#35C7FF] bg-[#35C7FF]/10 px-1 py-0.5 rounded font-bold">{Math.round(sosState.speedKmH)} km/h</span>}
               </div>
               <div className="font-bold text-white text-base">
-                {sosState.distanceMeters != null ? (sosState.distanceMeters / 1000).toFixed(1) + ' km' : <span className="text-xs text-text-secondary">UNAVAILABLE</span>}
+                {sosState.distanceMeters != null ? (sosState.distanceMeters >= 1000 ? (sosState.distanceMeters / 1000).toFixed(1) + ' km' : sosState.distanceMeters + ' m') : <span className="text-xs text-text-secondary">{navigationStatus === 'active' || navigationStatus === 'rerouting' ? 'CALCULATING...' : 'UNAVAILABLE'}</span>}
               </div>
             </div>
             <div>
@@ -163,9 +162,16 @@ export function SOSInformationPanel({
                     )}
                   </>
                 ) : (
-                  sosState.etaSeconds != null ? Math.round(sosState.etaSeconds / 60) + ' min' : <span className="text-xs text-text-secondary">UNAVAILABLE</span>
+                  sosState.etaSeconds != null ? Math.round(sosState.etaSeconds / 60) + ' min' : <span className="text-xs text-text-secondary">{navigationStatus === 'active' || navigationStatus === 'rerouting' ? 'CALCULATING...' : 'UNAVAILABLE'}</span>
                 )}
               </div>
+            </div>
+          </div>
+
+          <div className="pt-1.5 border-t border-border-subtle">
+            <div className="text-[11px] text-text-secondary uppercase mb-0.5 flex justify-between items-center">
+              <span>Speed</span>
+              {sosState.speedKmH != null && <span className="text-[9px] text-[#35C7FF] bg-[#35C7FF]/10 px-1 py-0.5 rounded font-bold">{Math.round(sosState.speedKmH)} km/h</span>}
             </div>
           </div>
 

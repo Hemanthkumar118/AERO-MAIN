@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { SOSButton } from '../../../components/status/SOSButton';
 import { Dialog } from '../../../components/ui/Dialog';
 import { useToast } from '../../../components/ui/Toast';
@@ -29,6 +29,7 @@ export function SOSController({
   const [state, setState] = useState<SOSState>('IDLE');
   const [countdown, setCountdown] = useState(3);
   const [liveGps, setLiveGps] = useState<[number, number] | null>(null);
+  const sosRequestInFlightRef = useRef(false);
   const { addToast } = useToast();
 
   useEffect(() => {
@@ -74,31 +75,45 @@ export function SOSController({
 
         setTimeout(() => {
           setState('IDLE');
+          sosRequestInFlightRef.current = false;
           onEmergencyActive(emergency);
         }, 1200);
       })
       .catch(err => {
         console.error('SOS failed:', err);
         setState('IDLE');
-        addToast({
-          variant: 'error',
-          title: 'SOS Failed',
-          message: err.message || 'Could not activate emergency corridor. Check GPS and try again.',
-        });
+        sosRequestInFlightRef.current = false;
+        
+        if (err.code === 'ALREADY_ACTIVE' || err.message?.includes('ALREADY ACTIVE')) {
+          addToast({
+            variant: 'warning',
+            title: 'Emergency Already Active',
+            message: 'You already have an active emergency. Please complete or cancel it before starting a new one.',
+          });
+        } else {
+          addToast({
+            variant: 'error',
+            title: 'SOS Failed',
+            message: err.message || 'Could not activate emergency corridor. Check GPS and try again.',
+          });
+        }
       });
   }, [state]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const handleSOSClick = async () => {
-    if (state !== 'IDLE') return;
+    if (state !== 'IDLE' || sosRequestInFlightRef.current) return;
+    
+    sosRequestInFlightRef.current = true;
+    setState('FETCHING_GPS');
+
     console.log('[AERO SOS] BUTTON CLICKED');
     console.log('[AERO SOS] Starting emergency workflow');
-
-    setState('FETCHING_GPS');
 
     // 1. Validate Hospital
     if (!hospital || !hospital.id || !hospital.location) {
       addToast({ variant: 'error', title: 'Invalid Destination', message: 'Selected hospital has invalid location data.' });
       setState('IDLE');
+      sosRequestInFlightRef.current = false;
       return;
     }
     console.log(`[AERO SOS DESTINATION]\nname: ${hospital.name}\nlat: ${hospital.location.latitude}\nlon: ${hospital.location.longitude}`);
@@ -108,6 +123,7 @@ export function SOSController({
     if (sessionError || !session?.user) {
       addToast({ variant: 'error', title: 'Auth Required', message: 'Your session has expired. Please sign in again.' });
       setState('IDLE');
+      sosRequestInFlightRef.current = false;
       return;
     }
     console.log(`[AERO SOS]\nAuthenticated: true\nUser ID: ${session.user.id}`);
@@ -115,9 +131,12 @@ export function SOSController({
     // 3. Profile / Ambulance Check (Assume valid for now if we have ambulanceId)
     console.log(`[AERO SOS DEBUG]\nPROFILE: Loaded ✓\nAMBULANCE: Assigned ✓`);
 
-    // 4. Retrieve Latest Valid GPS
+    // 4. Retrieve Latest Valid GPS (Timeout after 1.5s to avoid freezing)
     try {
-      const position = await geolocationService.getCurrentPosition();
+      const positionPromise = geolocationService.getCurrentPosition();
+      const timeoutPromise = new Promise((_, reject) => setTimeout(() => reject(new Error('GPS Timeout')), 1500));
+      
+      const position = await Promise.race([positionPromise, timeoutPromise]) as any;
       if (!position || isNaN(position.latitude) || isNaN(position.longitude) || (position.latitude === 0 && position.longitude === 0)) {
         throw new Error('Invalid coordinates');
       }
@@ -125,18 +144,19 @@ export function SOSController({
       console.log(`[AERO SOS GPS]\nlat: ${position.latitude}\nlon: ${position.longitude}\naccuracy: ${position.accuracy}`);
       setLiveGps([position.latitude, position.longitude]);
     } catch (err) {
-      console.error('GPS fetch failed', err);
+      console.error('GPS fetch failed or timed out', err);
       // Fallback: If we already have a valid currentPos from props, we use it, but log it.
       if (currentPos && currentPos[0] !== 0 && !isNaN(currentPos[0])) {
          setLiveGps(currentPos);
       } else {
         addToast({ variant: 'error', title: 'GPS Unavailable', message: 'Waiting for a valid GPS position.' });
         setState('IDLE');
+        sosRequestInFlightRef.current = false;
         return;
       }
     }
 
-    // 5. Proceed to Confirmation
+    // 5. Proceed to Confirmation (Immediate transition)
     setState('CONFIRMING');
   };
 
@@ -145,12 +165,15 @@ export function SOSController({
     setState('COUNTDOWN');
   };
 
-  const handleCancel = () => setState('IDLE');
+  const handleCancel = () => {
+    setState('IDLE');
+    sosRequestInFlightRef.current = false;
+  };
 
   const distLabel = (hospital as any).distanceLabel || (hospital.distanceKm ? `${hospital.distanceKm} km` : '');
 
   let buttonLabel = 'SOS';
-  if (state === 'FETCHING_GPS') buttonLabel = 'GPS...';
+  if (state === 'FETCHING_GPS') buttonLabel = 'STARTING...';
   if (state === 'CONFIRMING') buttonLabel = 'READY';
   if (state === 'COUNTDOWN') buttonLabel = 'CALCULATING...';
   if (state === 'SENDING') buttonLabel = 'Sending SOS...';
