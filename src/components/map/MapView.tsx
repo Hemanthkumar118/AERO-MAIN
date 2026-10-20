@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { TomTomMap, type StandardStyleID } from '@tomtom-org/maps-sdk/map';
+import { TomTomConfig } from '@tomtom-org/maps-sdk/core';
 import type { Map as MapLibreMap } from 'maplibre-gl';
 import * as maplibregl from 'maplibre-gl';
 import 'maplibre-gl/dist/maplibre-gl.css';
@@ -10,6 +11,57 @@ import { TomTomIncidentsLayer } from './TomTomIncidentsLayer';
 import { TrafficLegend } from './TrafficLegend';
 import { IncidentDetailModal } from './IncidentDetailModal';
 import type { TomTomIncident } from '../../types';
+
+/**
+ * Recursively converts a MapLibre text-field expression to prioritize English names
+ * ['coalesce', ['get', 'name_en'], ['get', 'name:en'], ['get', 'name']]
+ */
+function toEnglishTextField(expr: any): any {
+  if (expr === '{name}') {
+    return ['coalesce', ['get', 'name_en'], ['get', 'name:en'], ['get', 'name']];
+  }
+  if (Array.isArray(expr)) {
+    if (expr.length === 2 && expr[0] === 'get' && expr[1] === 'name') {
+      return ['coalesce', ['get', 'name_en'], ['get', 'name:en'], ['get', 'name']];
+    }
+    return expr.map(sub => toEnglishTextField(sub));
+  }
+  if (typeof expr === 'string' && expr.includes('{name}')) {
+    return ['coalesce', ['get', 'name_en'], ['get', 'name:en'], ['get', 'name']];
+  }
+  return expr;
+}
+
+/**
+ * Enforces English-only map labels across all symbol layers on MapLibre map instance
+ */
+export function enforceEnglishLabels(map: MapLibreMap) {
+  if (!map || !map.getStyle) return;
+  try {
+    const style = map.getStyle();
+    if (!style || !style.layers) return;
+
+    for (const layer of style.layers) {
+      if (layer.type === 'symbol' && layer.layout && layer.layout['text-field']) {
+        const currentField = layer.layout['text-field'];
+        const str = JSON.stringify(currentField);
+        // Only transform if it hasn't already been converted to prioritize English
+        if (!str.includes('name_en')) {
+          const updatedField = toEnglishTextField(currentField);
+          if (JSON.stringify(updatedField) !== str) {
+            try {
+              map.setLayoutProperty(layer.id, 'text-field', updatedField);
+            } catch (err) {
+              console.warn(`[MapView] Failed to enforce English label on layer ${layer.id}:`, err);
+            }
+          }
+        }
+      }
+    }
+  } catch (err) {
+    console.warn('[MapView] Error enforcing English labels:', err);
+  }
+}
 
 interface MapViewProps {
   center: [number, number]; // [lat, lng]
@@ -68,6 +120,13 @@ export function MapView({
       return;
     }
 
+    // Configure global TomTom SDK settings to English
+    try {
+      TomTomConfig.instance.put({ apiKey, language: 'en-GB' });
+    } catch (e) {
+      // ignore
+    }
+
     if (isInitializing.current || isMapLoaded || mapRef.current) {
       return;
     }
@@ -81,29 +140,46 @@ export function MapView({
       ? { lat: 17.4435, lng: 78.3772 }
       : { lat: center[0], lng: center[1] };
 
+    const applyEnglish = (m: MapLibreMap) => {
+      enforceEnglishLabels(m);
+    };
+
     try {
       // Initialize modern TomTomMap backed by MapLibre GL with light theme
       const ttMap = new TomTomMap({
         apiKey,
         style: mapStyle,
+        language: 'en-GB',
         mapLibre: {
           container: mapContainer,
           center: [safeCenter.lng, safeCenter.lat], // MapLibre uses [lng, lat]
           zoom: zoom || 14,
         },
-      });
+      } as any);
 
       tomtomMapRef.current = ttMap;
       const coreMap = ttMap.mapLibreMap;
       mapRef.current = coreMap;
+      (window as any).__aeroMap = coreMap;
+      (window as any).__aeroTomTom = ttMap;
+
+      try {
+        ttMap.setLanguage('en-GB');
+      } catch (e) {
+        // will apply when map is ready
+      }
 
       coreMap.on('load', () => {
+        applyEnglish(coreMap);
         setIsMapLoaded(true);
       });
+      coreMap.on('styledata', () => applyEnglish(coreMap));
+      coreMap.on('idle', () => applyEnglish(coreMap));
 
       // Fallback in case load takes longer or already ready
       setTimeout(() => {
         if (coreMap && !isMapLoaded) {
+          applyEnglish(coreMap);
           setIsMapLoaded(true);
         }
       }, 1500);
@@ -124,9 +200,14 @@ export function MapView({
         });
 
         mapRef.current = mlMap;
+        (window as any).__aeroMap = mlMap;
+
         mlMap.on('load', () => {
+          applyEnglish(mlMap);
           setIsMapLoaded(true);
         });
+        mlMap.on('styledata', () => applyEnglish(mlMap));
+        mlMap.on('idle', () => applyEnglish(mlMap));
       } catch (fallbackErr: any) {
         console.error('[MapView] Fatal MapLibre initialization error:', fallbackErr);
         setTrafficError(fallbackErr.message || 'Failed to initialize TomTom Maps');
