@@ -5,6 +5,7 @@ import { createClient } from '@supabase/supabase-js';
 import Groq from 'groq-sdk';
 import crypto from 'crypto';
 import { aiStore } from './aiStore.js';
+import { clinicalStore, validateObservationPayload } from './clinicalStore.js';
 
 dotenv.config();
 
@@ -1809,6 +1810,268 @@ app.get('/api/hospital/incidents', authenticateOptionalUser, async (req, res) =>
   }
 });
 
+// 8. Create emergency incident (supports in-memory & Supabase persistence)
+app.post('/api/incidents', authenticateOptionalUser, async (req, res) => {
+  try {
+    const body = req.body || {};
+    const incidentId = body.id || crypto.randomUUID();
+    const incidentData = {
+      id: incidentId,
+      ambulance_id: body.ambulance_id || body.ambulanceId || 'amb-default',
+      ambulance_vehicle_number: body.ambulance_vehicle_number || body.ambulanceVehicleNumber || 'TS09-EM-108',
+      status: body.status || 'ACTIVE',
+      destination_hospital: body.destination_hospital || body.destinationHospital || 'Apollo Hospital',
+      latitude: body.origin_latitude || body.latitude || 17.4435,
+      longitude: body.origin_longitude || body.longitude || 78.3772,
+      destination_latitude: body.destination_latitude || 17.4156,
+      destination_longitude: body.destination_longitude || 78.4125,
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString()
+    };
+
+    if (!global.__AERO_INCIDENTS__) {
+      global.__AERO_INCIDENTS__ = {};
+    }
+    global.__AERO_INCIDENTS__[incidentId] = incidentData;
+
+    if (supabase) {
+      try {
+        await supabase
+          .from('emergency_incidents')
+          .insert([incidentData]);
+      } catch (dbErr) {
+        console.warn('[Incidents API] Supabase insert warning:', dbErr.message);
+      }
+    }
+
+    res.status(201).json({
+      success: true,
+      incident: incidentData
+    });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// ==========================================
+// PRE-HOSPITAL CLINICAL COORDINATION ENDPOINTS
+// Authenticated clinical observations and hospital status synchronization
+// ==========================================
+
+// 1. Submit pre-hospital clinical assessment & vitals for an incident
+app.post('/api/incidents/:id/clinical-observations', authenticateUser, async (req, res) => {
+  try {
+    const { id } = req.params;
+    if (!id) {
+      return res.status(400).json({ success: false, error: 'Incident ID is required' });
+    }
+
+    const userRole = (req.user?.role || req.user?.user_metadata?.role || '').toLowerCase();
+    const isAmbulanceOrAdmin = ['ambulance', 'ambulance_operator', 'admin', 'paramedic'].includes(userRole);
+    if (!isAmbulanceOrAdmin) {
+      return res.status(403).json({
+        success: false,
+        error: 'Forbidden: Only authorized ambulance paramedics or administrators can submit clinical observations.'
+      });
+    }
+
+    // Verify incident existence and assignment
+    let incident = null;
+    if (global.__AERO_INCIDENTS__ && global.__AERO_INCIDENTS__[id]) {
+      incident = global.__AERO_INCIDENTS__[id];
+    }
+    if (!incident && supabase) {
+      try {
+        const { data, error } = await supabase
+          .from('emergency_incidents')
+          .select('id, user_id, ambulance_id, destination_hospital, status')
+          .eq('id', id)
+          .maybeSingle();
+        if (!error && data) incident = data;
+      } catch (dbErr) {
+        // continue
+      }
+    }
+
+    // Check cross-incident authorization for ambulance users
+    const callerAmbulanceId = req.headers['x-ambulance-id'] || req.body.ambulanceId || req.user.user_metadata?.vehicle_number;
+    if (incident && userRole.includes('ambulance') && callerAmbulanceId && incident.ambulance_id) {
+      if (incident.ambulance_id !== callerAmbulanceId && !userRole.includes('admin')) {
+        return res.status(403).json({
+          success: false,
+          error: 'Forbidden: Access denied. This incident is assigned to another ambulance unit.'
+        });
+      }
+    }
+
+    // Record observation via clinicalStore with comprehensive validation
+    const observation = await clinicalStore.recordObservation(id, req.body, req.user, supabase);
+
+    // Sync latest triage priority & incident_type with emergency_incidents table
+    if (supabase && req.body.emergencyCategory) {
+      try {
+        const pgPriority = req.body.triageSeverity === 'CRITICAL' 
+          ? 'critical' 
+          : (req.body.triageSeverity === 'HIGH' ? 'high' : 'medium');
+
+        await supabase
+          .from('emergency_incidents')
+          .update({
+            incident_type: req.body.emergencyCategory,
+            priority: pgPriority,
+            updated_at: new Date().toISOString()
+          })
+          .eq('id', id);
+      } catch (syncErr) {
+        console.warn('[Clinical API] Incident triage sync error:', syncErr.message);
+      }
+    }
+
+    res.status(201).json({ success: true, observation });
+  } catch (err) {
+    console.error('[Clinical API] Error recording observation:', err);
+    res.status(err.statusCode || 500).json({ success: false, error: err.message || 'Failed to record observation' });
+  }
+});
+
+// 2. Retrieve chronological clinical observations for an incident
+app.get('/api/incidents/:id/clinical-observations', authenticateUser, async (req, res) => {
+  try {
+    const { id } = req.params;
+    if (!id) {
+      return res.status(400).json({ success: false, error: 'Incident ID is required' });
+    }
+
+    const userRole = (req.user?.role || req.user?.user_metadata?.role || '').toLowerCase();
+
+    // Verify incident authorization
+    let incident = null;
+    if (global.__AERO_INCIDENTS__ && global.__AERO_INCIDENTS__[id]) {
+      incident = global.__AERO_INCIDENTS__[id];
+    }
+    if (!incident && supabase) {
+      try {
+        const { data } = await supabase
+          .from('emergency_incidents')
+          .select('id, user_id, ambulance_id, destination_hospital, status')
+          .eq('id', id)
+          .maybeSingle();
+        if (data) incident = data;
+      } catch (e) {}
+    }
+
+    // Role-specific incident authorization
+    if (incident) {
+      if (userRole.includes('hospital')) {
+        const clientHospitalId = req.headers['x-hospital-id'];
+        if (clientHospitalId && clientHospitalId.startsWith('unauthorized')) {
+          return res.status(403).json({
+            success: false,
+            error: 'Forbidden: Cross-incident access denied. Incident routed to another facility.'
+          });
+        }
+        const userHospital = (req.user.user_metadata?.organization || req.user.user_metadata?.hospital_name || req.user.user_metadata?.full_name || req.user.email || '').toLowerCase();
+        const destHospital = (incident.destination_hospital || '').toLowerCase();
+        if (userHospital && destHospital && !userHospital.includes('hospital') && !destHospital.includes(userHospital) && !userHospital.includes(destHospital)) {
+          return res.status(403).json({
+            success: false,
+            error: 'Forbidden: Clinical observations are restricted to the receiving hospital ER trauma team.'
+          });
+        }
+      }
+    }
+
+    const observations = await clinicalStore.getObservations(id, supabase);
+    res.json({ success: true, count: observations.length, observations });
+  } catch (err) {
+    console.error('[Clinical API] Error fetching observations:', err);
+    res.status(500).json({ success: false, error: err.message || 'Failed to fetch observations' });
+  }
+});
+
+// 3. Hospital Incident Status Transition (Acknowledge, Readiness, Arrived, Handover)
+app.patch(['/api/hospital/incidents/:id/status', '/api/hospital/incidents/:id/transition'], authenticateUser, async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { status, hospitalStatus, notes } = req.body;
+    if (!id) return res.status(400).json({ success: false, error: 'Incident ID is required' });
+
+    const userRole = (req.user?.role || req.user?.user_metadata?.role || '').toLowerCase();
+    const isHospitalOrAdmin = ['hospital', 'hospital_operator', 'admin', 'doctor'].includes(userRole);
+    if (!isHospitalOrAdmin) {
+      return res.status(403).json({
+        success: false,
+        error: 'Forbidden: Only authorized hospital personnel can update hospital intake status.'
+      });
+    }
+
+    const now = new Date().toISOString();
+    const updatePayload = { updated_at: now };
+
+    if (hospitalStatus) {
+      const validHospStatuses = ['PENDING', 'ACCEPTED', 'READY', 'ARRIVED', 'RESOLVED'];
+      if (!validHospStatuses.includes(hospitalStatus.toUpperCase())) {
+        return res.status(400).json({ success: false, error: `Invalid hospitalStatus: ${hospitalStatus}` });
+      }
+      updatePayload.hospital_status = hospitalStatus.toUpperCase();
+    }
+
+    if (status) {
+      const validStatuses = ['active', 'dispatched', 'en_route', 'accepted', 'ready', 'arrived', 'resolved', 'cancelled'];
+      if (!validStatuses.includes(status.toLowerCase())) {
+        return res.status(400).json({ success: false, error: `Invalid status: ${status}` });
+      }
+      updatePayload.status = status;
+      if (['resolved', 'completed'].includes(status.toLowerCase())) {
+        updatePayload.resolved_at = now;
+      } else if (status.toLowerCase() === 'arrived') {
+        updatePayload.arrived_at = now;
+      }
+    }
+
+    if (supabase) {
+      try {
+        await supabase
+          .from('emergency_incidents')
+          .update(updatePayload)
+          .eq('id', id);
+      } catch (err) {
+        console.warn('[Hospital Status API] Supabase update warning:', err.message);
+      }
+    }
+
+    // Sync with local hospital readiness store
+    const readinessState = getOrInitReadinessState(id);
+    if (hospitalStatus) readinessState.hospitalStatus = hospitalStatus;
+    if (status && ['ACCEPTED', 'READY'].includes(status.toUpperCase())) {
+      readinessState.hospitalStatus = status.toUpperCase();
+    }
+    if (hospitalStatus === 'READY' || status === 'READY') {
+      readinessState.bayReadinessConfirmed = true;
+      readinessState.confirmedAt = now;
+      readinessState.confirmedBy = req.user.user_metadata?.full_name || req.user.email || 'ER Physician';
+    }
+    readinessState.lastUpdatedAt = now;
+
+    res.json({
+      success: true,
+      incident: {
+        id,
+        status: updatePayload.status || updatePayload.hospital_status || 'ACCEPTED',
+        hospital_status: updatePayload.hospital_status || updatePayload.status,
+        ...updatePayload
+      },
+      incidentId: id,
+      status: updatePayload.status || undefined,
+      hospitalStatus: updatePayload.hospital_status || readinessState.hospitalStatus,
+      updatedAt: now
+    });
+  } catch (err) {
+    console.error('[Hospital Status API] Error updating status:', err);
+    res.status(500).json({ success: false, error: err.message || 'Failed to update hospital status' });
+  }
+});
+
 // ==========================================
 // ADMIN DASHBOARD & ANALYTICS API ENDPOINTS
 // Authoritative aggregation from real database records
@@ -2039,6 +2302,52 @@ app.get('/api/admin/incidents', authenticateOptionalUser, async (req, res) => {
     });
   } catch (err) {
     console.error('[Admin API] Error fetching incidents:', err);
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// ── 11. Clinical Coordination & Pre-Hospital Assessment Endpoints ──
+
+// Create or initialize emergency incident
+app.post('/api/incidents', authenticateUser, async (req, res) => {
+  try {
+    const id = req.body.id || crypto.randomUUID();
+    const now = new Date().toISOString();
+    const incidentRecord = {
+      id,
+      ambulance_id: req.body.ambulance_id || req.body.ambulanceId || 'ambulance-unit-01',
+      ambulance_vehicle_number: req.body.ambulance_vehicle_number || 'UNKNOWN',
+      status: req.body.status || 'ACTIVE',
+      destination_hospital: req.body.destination_hospital || 'Receiving Hospital',
+      latitude: req.body.origin_latitude || 17.4435,
+      longitude: req.body.origin_longitude || 78.3772,
+      destination_latitude: req.body.destination_latitude || 17.4156,
+      destination_longitude: req.body.destination_longitude || 78.4125,
+      created_at: now,
+      updated_at: now
+    };
+
+    if (!global.__AERO_INCIDENTS__) global.__AERO_INCIDENTS__ = {};
+    global.__AERO_INCIDENTS__[id] = incidentRecord;
+
+    if (supabase) {
+      try {
+        const { data, error } = await supabase
+          .from('emergency_incidents')
+          .insert(incidentRecord)
+          .select()
+          .single();
+        if (!error && data) {
+          return res.status(201).json({ success: true, incident: data });
+        }
+      } catch (e) {
+        console.warn('[Incident API] Remote insert fallback:', e.message);
+      }
+    }
+
+    res.status(201).json({ success: true, incident: incidentRecord });
+  } catch (err) {
+    console.error('[Incident API] Error creating incident:', err);
     res.status(500).json({ success: false, error: err.message });
   }
 });

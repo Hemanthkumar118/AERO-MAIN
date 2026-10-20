@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
-import { Minus, Plus, ChevronRight, CheckCircle2, Clock } from 'lucide-react';
+import { Minus, Plus, ChevronRight, CheckCircle2, Clock, Activity } from 'lucide-react';
 import type { EmergencyIncident, SOSState } from '../../../types';
 import { useToast } from '../../../components/ui/Toast';
 
@@ -9,6 +9,7 @@ interface SOSInformationPanelProps {
   routeInfo?: any | null;
   onAbort: () => void;
   onComplete: () => void;
+  onOpenClinicalAssessment?: () => void;
 }
 
 export function SOSInformationPanel({
@@ -16,7 +17,8 @@ export function SOSInformationPanel({
   navigationStatus,
   routeInfo,
   onAbort,
-  onComplete
+  onComplete,
+  onOpenClinicalAssessment
 }: SOSInformationPanelProps) {
   const [expanded, setExpanded] = useState(true);
   const { addToast } = useToast();
@@ -247,6 +249,20 @@ export function SOSInformationPanel({
               )}
             </div>
           </div>
+
+          {/* Clinical Assessment Action */}
+          {onOpenClinicalAssessment && (
+            <div className="pt-1.5 border-t border-border-subtle">
+              <button
+                type="button"
+                onClick={onOpenClinicalAssessment}
+                className="w-full py-2 px-3 rounded-lg bg-blue-600/20 hover:bg-blue-600/30 text-cyan-400 border border-cyan-500/30 flex items-center justify-center gap-2 text-xs font-bold transition-all shadow-sm cursor-pointer"
+              >
+                <Activity className="w-3.5 h-3.5 text-cyan-400" />
+                <span>CLINICAL ASSESSMENT & VITALS</span>
+              </button>
+            </div>
+          )}
 
           {/* Actions */}
           <div className="flex gap-2 pt-1.5 border-t border-border-subtle">

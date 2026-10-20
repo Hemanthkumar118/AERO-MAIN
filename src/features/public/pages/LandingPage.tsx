@@ -516,10 +516,10 @@ export function LandingPage() {
           {/* Stats panel */}
           <div className="grid grid-cols-2 gap-4">
             {[
-              { value: '14', suffix: ' min', label: 'Avg. urban delay', color: '#FF3B30' },
+              { value: '14', suffix: ' min', label: 'Avg. urban delay (Benchmark)', color: '#FF3B30' },
               { value: '40', suffix: '%', label: 'Preventable fatalities', color: '#FF3B30' },
-              { value: '1.2', suffix: 'M', label: 'Emergency calls/year', color: '#8D98A6' },
-              { value: '6', suffix: 'sec', label: 'AERO clearance latency', color: '#20D67A' },
+              { value: '1.2', suffix: 'M', label: 'Emergency calls/yr (Est.)', color: '#8D98A6' },
+              { value: '6', suffix: 'sec', label: 'Clearance latency (Simulated)', color: '#20D67A' },
             ].map((s) => (
               <div key={s.label} className="problem-line telemetry-panel rounded-xl p-5">
                 <p className="text-3xl font-black mb-1" style={{ color: s.color, fontFamily: 'ui-monospace, monospace' }}>
@@ -684,9 +684,9 @@ export function LandingPage() {
 
               <div className="space-y-3">
                 {[
-                  { label: 'Routes Evaluated', value: '247', suffix: ' paths/sec' },
-                  { label: 'Time Saved', value: '5:51', suffix: ' minutes' },
-                  { label: 'Confidence', value: '98.4', suffix: '%' },
+                  { label: 'Routes Evaluated (Simulated)', value: '247', suffix: ' paths/sec' },
+                  { label: 'Time Saved (Model Benchmark)', value: '5:51', suffix: ' minutes' },
+                  { label: 'Routing Confidence (Model)', value: '98.4', suffix: '%' },
                 ].map(r => (
                   <div key={r.label} className="flex items-center justify-between py-3" style={{ borderBottom: '1px solid rgba(255,255,255,0.05)' }}>
                     <span className="telemetry-label">{r.label}</span>
@@ -807,7 +807,7 @@ export function LandingPage() {
           >
             <img src="/hospital_arrival.jpg" alt="" loading="lazy" className="w-full h-full object-cover object-[70%_center] opacity-[0.65]" />
           </motion.div>
-          <div className="absolute inset-0" style={{ background: 'linear-gradient(to right, rgba(13,18,25,0.95) 0%, rgba(255,255,255,0.85) 45%, rgba(13,18,25,0.25) 80%, rgba(13,18,25,0.1) 100%)' }} />
+          <div className="absolute inset-0" style={{ background: 'linear-gradient(to right, rgba(13,18,25,0.95) 0%, rgba(13,18,25,0.85) 45%, rgba(13,18,25,0.25) 80%, rgba(13,18,25,0.1) 100%)' }} />
           <div className="absolute inset-0" style={{ background: 'linear-gradient(to bottom, rgba(7,10,15,1) 0%, rgba(13,18,25,0) 15%, rgba(13,18,25,0) 85%, rgba(7,10,15,1) 100%)' }} />
         </div>
 

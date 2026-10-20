@@ -32,7 +32,7 @@ class RealtimeService {
 
   private setupChannel() {
     if (this.channel) {
-      supabase.removeChannel(this.channel);
+      return;
     }
 
     this.connectionState = 'reconnecting' as any; // Cast in case reconnecting isn't in type
@@ -47,10 +47,24 @@ class RealtimeService {
         }
       )
       .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'clinical_observations' },
+        (payload: any) => {
+          this.handleClinicalObservationChange(payload);
+        }
+      )
+      .on(
         'broadcast',
         { event: 'location_update' },
         (payload: any) => {
           this.handleLocationBroadcast(payload);
+        }
+      )
+      .on(
+        'broadcast',
+        { event: 'clinical_observation_update' },
+        (payload: any) => {
+          this.handleClinicalBroadcast(payload);
         }
       )
       .subscribe((status: string) => {
@@ -140,6 +154,30 @@ class RealtimeService {
         event: 'location_update',
         payload
       }).catch((e: any) => console.warn('Broadcast failed:', e));
+    }
+  }
+
+  private handleClinicalObservationChange(payload: any) {
+    const { new: newRec } = payload;
+    if (newRec) {
+      this.dispatchLocal('clinical_observation_updated', newRec);
+    }
+  }
+
+  private handleClinicalBroadcast(payload: any) {
+    if (payload?.payload) {
+      this.dispatchLocal('clinical_observation_updated', payload.payload);
+    }
+  }
+
+  public broadcastClinicalObservation(observation: any) {
+    this.dispatchLocal('clinical_observation_updated', observation);
+    if (this.channel && this.connectionState === 'connected') {
+      this.channel.send({
+        type: 'broadcast',
+        event: 'clinical_observation_update',
+        payload: observation
+      }).catch((e: any) => console.warn('Clinical broadcast failed:', e));
     }
   }
 

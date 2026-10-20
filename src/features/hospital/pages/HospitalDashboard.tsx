@@ -32,8 +32,12 @@ import {
   X, 
   Radio,
   AlertTriangle,
-  Hospital as HospitalIcon
+  Hospital as HospitalIcon,
+  Check,
+  ArrowRight,
+  FileText
 } from 'lucide-react';
+import { clinicalService, type ClinicalObservation } from '../../../services/clinicalService';
 
 export function HospitalDashboard() {
   const { addToast } = useToast();
@@ -47,6 +51,11 @@ export function HospitalDashboard() {
   const [isLoadingReadiness, setIsLoadingReadiness] = useState<boolean>(false);
   const [isConfirmingReadiness, setIsConfirmingReadiness] = useState<boolean>(false);
   const [readinessError, setReadinessError] = useState<string | null>(null);
+
+  // Pre-hospital Clinical Observations State
+  const [clinicalObservations, setClinicalObservations] = useState<ClinicalObservation[]>([]);
+  const [isLoadingObservations, setIsLoadingObservations] = useState<boolean>(false);
+  const [statusActionLoading, setStatusActionLoading] = useState<string | null>(null);
 
   // Specialist Assignment Modal State
   const [showSpecialistModal, setShowSpecialistModal] = useState<boolean>(false);
@@ -107,14 +116,42 @@ export function HospitalDashboard() {
     }
   }, []);
 
+  // Load Database-backed Clinical Observations for selected emergency
+  const loadClinicalObservations = useCallback(async (emergencyId: string) => {
+    setIsLoadingObservations(true);
+    try {
+      const observations = await clinicalService.getObservations(emergencyId);
+      setClinicalObservations(observations);
+    } catch (err: any) {
+      console.warn('[HospitalDashboard] Could not fetch clinical observations:', err);
+    } finally {
+      setIsLoadingObservations(false);
+    }
+  }, []);
+
   // Sync selected emergency changes
   useEffect(() => {
     if (selectedEmergency?.id) {
       loadReadiness(selectedEmergency.id);
+      loadClinicalObservations(selectedEmergency.id);
     } else {
       setReadinessState(null);
+      setClinicalObservations([]);
     }
-  }, [selectedEmergency?.id, loadReadiness]);
+  }, [selectedEmergency?.id, loadReadiness, loadClinicalObservations]);
+
+  // Real-time subscription to clinical observation updates
+  useEffect(() => {
+    if (!selectedEmergency?.id) return;
+    const unsub = realtimeService.on('clinical_observation_updated', (event: any) => {
+      if (event?.incident_id === selectedEmergency.id) {
+        loadClinicalObservations(selectedEmergency.id);
+      }
+    });
+    return () => {
+      if (typeof unsub === 'function') unsub();
+    };
+  }, [selectedEmergency?.id, loadClinicalObservations]);
 
   // Initial load
   useEffect(() => {
@@ -321,6 +358,16 @@ export function HospitalDashboard() {
     setIsConfirmingReadiness(false);
 
     if (result.success) {
+      // Also persist status transition to READY in emergency_incidents
+      clinicalService.updateHospitalStatus(selectedEmergency.id, {
+        status: 'READY',
+        hospitalStatus: 'READY',
+        notes: `ER Bay primed & confirmed ready by ${userName}`
+      }).catch(err => console.warn('[HospitalDashboard] Non-fatal READY sync error:', err));
+
+      setSelectedEmergency(prev => prev ? ({ ...prev, status: 'READY' as any }) : null);
+      setIncomingEmergencies(prev => prev.map(emg => emg.id === selectedEmergency.id ? ({ ...emg, status: 'READY' as any }) : emg));
+
       setReadinessState(prev => {
         if (!prev) return null;
         return {
@@ -344,6 +391,55 @@ export function HospitalDashboard() {
         title: 'Confirmation Failed',
         message: result.error || 'Validation error during readiness confirmation.'
       });
+    }
+  };
+
+  // Persistent Hospital Incident Status Transitions (Acknowledge, Ready, Arrive, Handover)
+  const handleUpdateHospitalLifecycle = async (
+    newStatus: 'ACCEPTED' | 'READY' | 'arrived' | 'resolved', 
+    actionLabel: string
+  ) => {
+    if (!selectedEmergency) return;
+    setStatusActionLoading(newStatus);
+    try {
+      const res = await clinicalService.updateHospitalStatus(selectedEmergency.id, {
+        status: newStatus,
+        notes: `Hospital action: ${actionLabel} by ${profile?.full_name || 'ER Staff'}`
+      });
+
+      if (res.success) {
+        const updatedStatus = (res.incident?.status || newStatus).toUpperCase();
+        setSelectedEmergency(prev => prev ? { ...prev, status: updatedStatus } : null);
+        setIncomingEmergencies(prev => prev.map(emg => emg.id === selectedEmergency.id ? { ...emg, status: updatedStatus } : emg));
+        
+        if (newStatus === 'READY') {
+          setReadinessState(prev => prev ? { ...prev, hospitalStatus: 'READY', bayReadinessConfirmed: true } : null);
+        }
+
+        addToast({
+          variant: 'success',
+          title: 'Emergency Status Updated',
+          message: `Status transitioned to ${updatedStatus} and broadcast to ambulance crew.`
+        });
+
+        if (newStatus === 'resolved') {
+          loadHospitalData();
+        }
+      } else {
+        addToast({
+          variant: 'error',
+          title: 'Action Failed',
+          message: res.error || 'Server rejected status transition.'
+        });
+      }
+    } catch (err: any) {
+      addToast({
+        variant: 'error',
+        title: 'Action Error',
+        message: err.message || 'Failed to update hospital status.'
+      });
+    } finally {
+      setStatusActionLoading(null);
     }
   };
 
@@ -436,14 +532,41 @@ export function HospitalDashboard() {
   const etaMinutes = activeEtaSeconds != null ? Math.floor(activeEtaSeconds / 60) : null;
   const etaSecondsDisplay = activeEtaSeconds != null ? activeEtaSeconds % 60 : null;
 
-  const vitals = selectedEmergency?.patient?.vitals;
-  const hasTelemetry = vitals && (
+  // Derive vitals with preference for latest pre-hospital clinical assessment
+  const latestObservation = clinicalObservations[0] || null;
+  const observationVitals = latestObservation ? {
+    heartRate: latestObservation.heart_rate,
+    bloodPressure: (latestObservation.systolic_bp && latestObservation.diastolic_bp)
+      ? `${latestObservation.systolic_bp}/${latestObservation.diastolic_bp}`
+      : null,
+    spo2: latestObservation.spo2,
+    respiratoryRate: latestObservation.respiratory_rate,
+    gcsScore: latestObservation.gcs,
+    temperature: latestObservation.temperature,
+    sourceDevice: latestObservation.is_manual ? 'Paramedic Assessment (Manual Entry)' : (latestObservation.source_device || 'En-route ALS Monitor'),
+    measuredAt: latestObservation.recorded_at || latestObservation.created_at,
+    isManual: latestObservation.is_manual,
+    notes: latestObservation.clinical_notes,
+    category: latestObservation.emergency_category,
+    severity: latestObservation.triage_severity,
+    observedBy: latestObservation.recorded_by_name
+  } : null;
+
+  const vitals = observationVitals || selectedEmergency?.patient?.vitals;
+  const hasTelemetry = !!vitals && (
     vitals.heartRate != null || 
-    vitals.bloodPressure || 
+    vitals.bloodPressure != null || 
     vitals.spo2 != null || 
     vitals.respiratoryRate != null || 
     vitals.gcsScore != null
   );
+
+  const missingVitals: string[] = [];
+  if (!vitals || vitals.heartRate == null) missingVitals.push('Heart Rate');
+  if (!vitals || !vitals.bloodPressure) missingVitals.push('Blood Pressure');
+  if (!vitals || vitals.spo2 == null) missingVitals.push('SpO2');
+  if (!vitals || vitals.respiratoryRate == null) missingVitals.push('Resp Rate');
+  if (!vitals || vitals.gcsScore == null) missingVitals.push('GCS');
 
   const isConfirmedReady = readinessState?.bayReadinessConfirmed || readinessState?.hospitalStatus === 'READY';
   const mandatoryTasks = readinessState?.tasks.filter(t => t.isMandatory) || [];
@@ -732,15 +855,30 @@ export function HospitalDashboard() {
                         <Activity className="w-3.5 h-3.5 text-blue-400" />
                         Clinical Telemetry Vitals
                       </span>
-                      {hasTelemetry ? (
-                        <span className="inline-flex items-center gap-1 text-[9px] font-bold text-emerald-400 bg-emerald-500/10 border border-emerald-500/20 px-1.5 py-0.5 rounded">
-                          <Radio className="w-2.5 h-2.5 animate-pulse" /> LIVE TELEMETRY
-                        </span>
-                      ) : (
-                        <span className="text-[9px] font-medium text-slate-500 bg-slate-800/80 px-1.5 py-0.5 rounded border border-slate-700">
-                          AWAITING TRANSMISSION
-                        </span>
-                      )}
+                      <div className="flex items-center gap-1.5">
+                        {latestObservation?.is_manual ? (
+                          <span className="inline-flex items-center gap-1 text-[9px] font-bold text-amber-400 bg-amber-500/10 border border-amber-500/25 px-1.5 py-0.5 rounded">
+                            PARAMEDIC MANUAL ENTRY
+                          </span>
+                        ) : hasTelemetry ? (
+                          <span className="inline-flex items-center gap-1 text-[9px] font-bold text-emerald-400 bg-emerald-500/10 border border-emerald-500/20 px-1.5 py-0.5 rounded">
+                            <Radio className="w-2.5 h-2.5 animate-pulse" /> LIVE TELEMETRY
+                          </span>
+                        ) : (
+                          <span className="text-[9px] font-medium text-slate-500 bg-slate-800/80 px-1.5 py-0.5 rounded border border-slate-700">
+                            AWAITING TRANSMISSION
+                          </span>
+                        )}
+                        {isLoadingObservations ? (
+                          <span className="text-[9px] font-mono text-cyan-400 animate-pulse">
+                            Syncing...
+                          </span>
+                        ) : clinicalObservations.length > 0 ? (
+                          <span className="text-[9px] font-mono text-slate-500">
+                            ({clinicalObservations.length} logged)
+                          </span>
+                        ) : null}
+                      </div>
                     </div>
 
                     <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
@@ -828,10 +966,28 @@ export function HospitalDashboard() {
                       </div>
                     </div>
 
-                    {!hasTelemetry && (
-                      <div className="mt-2 text-[11px] text-slate-400 bg-[#07090C] border border-[#1E293B] rounded-lg p-2 flex items-center gap-2">
-                        <Clock className="w-3.5 h-3.5 text-slate-500 shrink-0" />
-                        <span>Awaiting connected clinical monitor or paramedic manual entry from vehicle.</span>
+                    {/* Missing Vitals / Paramedic Assessment Status Banner */}
+                    {missingVitals.length > 0 && (
+                      <div className="mt-2 text-[11px] text-amber-300/90 bg-amber-500/10 border border-amber-500/20 rounded-lg p-2.5 flex items-center justify-between">
+                        <div className="flex items-center gap-2">
+                          <AlertCircle className="w-3.5 h-3.5 text-amber-400 shrink-0" />
+                          <span>
+                            Awaiting crew vitals: <strong>{missingVitals.join(', ')}</strong>
+                          </span>
+                        </div>
+                        <span className="text-[9px] text-slate-400 italic">SOS & routing unaffected</span>
+                      </div>
+                    )}
+
+                    {/* Paramedic Clinical Assessment Notes if available */}
+                    {latestObservation?.clinical_notes && (
+                      <div className="mt-2 bg-[#131826] p-2.5 rounded-lg border border-[#1E293B]">
+                        <span className="block text-[9px] font-bold uppercase tracking-wider text-slate-400 mb-0.5">
+                          Paramedic Clinical Notes ({latestObservation.recorded_by_name || 'En-route Crew'})
+                        </span>
+                        <p className="text-xs text-slate-200 font-medium leading-relaxed">
+                          {latestObservation.clinical_notes}
+                        </p>
                       </div>
                     )}
                   </div>
@@ -873,6 +1029,133 @@ export function HospitalDashboard() {
                         {selectedEmergency.patient?.leadDoctorAssigned || readinessState?.assignedSpecialist ? 'Reassign' : 'Assign Specialist'}
                       </button>
                     </div>
+                  </div>
+                </div>
+
+                {/* 2. ER Clinical Coordination Lifecycle Actions */}
+                <div className="bg-[#0D111A] border border-[#1E293B] rounded-xl p-4 shadow-sm">
+                  <div className="flex items-center justify-between mb-3 pb-2 border-b border-[#1E293B]">
+                    <div>
+                      <h3 className="text-xs font-bold text-slate-100 uppercase tracking-wider flex items-center gap-1.5">
+                        <Activity className="w-4 h-4 text-cyan-400" />
+                        ER Lifecycle Coordination
+                      </h3>
+                      <p className="text-[10px] text-slate-400 font-medium mt-0.5">
+                        Synchronized status transitions persisted to database and broadcast to crew
+                      </p>
+                    </div>
+                    <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-slate-800 text-slate-300 border border-slate-700 font-mono">
+                      STATUS: {selectedEmergency.status}
+                    </span>
+                  </div>
+
+                  {/* 4 Sequential Lifecycle Steps */}
+                  <div className="grid grid-cols-2 gap-2">
+                    {/* Step 1: Acknowledge */}
+                    <button
+                      onClick={() => handleUpdateHospitalLifecycle('ACCEPTED', 'Acknowledge Incoming Emergency')}
+                      disabled={statusActionLoading !== null || ['ACCEPTED', 'READY', 'ARRIVED', 'RESOLVED'].includes(selectedEmergency.status)}
+                      className={`p-2.5 rounded-lg border text-left flex flex-col justify-between transition-all ${
+                        ['ACCEPTED', 'READY', 'ARRIVED', 'RESOLVED'].includes(selectedEmergency.status)
+                          ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-400 cursor-default'
+                          : 'bg-[#131826] border-[#1E293B] hover:border-blue-500 text-slate-200 cursor-pointer'
+                      }`}
+                    >
+                      <div className="flex items-center justify-between text-[11px] font-bold">
+                        <span>1. Acknowledge Alert</span>
+                        {['ACCEPTED', 'READY', 'ARRIVED', 'RESOLVED'].includes(selectedEmergency.status) ? (
+                          <Check className="w-3.5 h-3.5" />
+                        ) : statusActionLoading === 'ACCEPTED' ? (
+                          <Activity className="w-3.5 h-3.5 animate-spin text-blue-400" />
+                        ) : (
+                          <ArrowRight className="w-3.5 h-3.5 text-blue-400" />
+                        )}
+                      </div>
+                      <span className="text-[9px] text-slate-400 mt-1">
+                        {['ACCEPTED', 'READY', 'ARRIVED', 'RESOLVED'].includes(selectedEmergency.status) ? 'Confirmed by ER desk' : 'Confirm incoming reception'}
+                      </span>
+                    </button>
+
+                    {/* Step 2: Bay Ready */}
+                    <button
+                      onClick={handleConfirmReadiness}
+                      disabled={statusActionLoading !== null || isConfirmedReady || isConfirmingReadiness}
+                      className={`p-2.5 rounded-lg border text-left flex flex-col justify-between transition-all ${
+                        isConfirmedReady || ['READY', 'ARRIVED', 'RESOLVED'].includes(selectedEmergency.status)
+                          ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-400 cursor-default'
+                          : allMandatoryReady
+                            ? 'bg-blue-500/10 border-blue-500/30 hover:border-blue-400 text-blue-200 cursor-pointer'
+                            : 'bg-[#131826] border-[#1E293B] text-slate-400 cursor-pointer'
+                      }`}
+                    >
+                      <div className="flex items-center justify-between text-[11px] font-bold">
+                        <span>2. Confirm Bay Ready</span>
+                        {isConfirmedReady || ['READY', 'ARRIVED', 'RESOLVED'].includes(selectedEmergency.status) ? (
+                          <Check className="w-3.5 h-3.5" />
+                        ) : isConfirmingReadiness ? (
+                          <Activity className="w-3.5 h-3.5 animate-spin text-emerald-400" />
+                        ) : (
+                          <ShieldCheck className="w-3.5 h-3.5 text-emerald-400" />
+                        )}
+                      </div>
+                      <span className="text-[9px] text-slate-400 mt-1">
+                        {isConfirmedReady ? 'Bay primed & team alerted' : allMandatoryReady ? 'Ready for confirmation' : 'Requires checklist ready'}
+                      </span>
+                    </button>
+
+                    {/* Step 3: Arrived */}
+                    <button
+                      onClick={() => handleUpdateHospitalLifecycle('arrived', 'Confirm Ambulance Bay Arrival')}
+                      disabled={statusActionLoading !== null || ['ARRIVED', 'RESOLVED'].includes(selectedEmergency.status)}
+                      className={`p-2.5 rounded-lg border text-left flex flex-col justify-between transition-all ${
+                        ['ARRIVED', 'RESOLVED'].includes(selectedEmergency.status)
+                          ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-400 cursor-default'
+                          : ['ACCEPTED', 'READY'].includes(selectedEmergency.status)
+                            ? 'bg-[#131826] border-[#1E293B] hover:border-purple-500 text-slate-200 cursor-pointer'
+                            : 'bg-[#131826]/50 border-[#1E293B] text-slate-500 cursor-not-allowed'
+                      }`}
+                    >
+                      <div className="flex items-center justify-between text-[11px] font-bold">
+                        <span>3. Ambulance Arrival</span>
+                        {['ARRIVED', 'RESOLVED'].includes(selectedEmergency.status) ? (
+                          <Check className="w-3.5 h-3.5" />
+                        ) : statusActionLoading === 'arrived' ? (
+                          <Activity className="w-3.5 h-3.5 animate-spin text-purple-400" />
+                        ) : (
+                          <Radio className="w-3.5 h-3.5 text-purple-400" />
+                        )}
+                      </div>
+                      <span className="text-[9px] text-slate-400 mt-1">
+                        {['ARRIVED', 'RESOLVED'].includes(selectedEmergency.status) ? 'Vehicle at bay' : 'Mark arrival at bay'}
+                      </span>
+                    </button>
+
+                    {/* Step 4: Handover */}
+                    <button
+                      onClick={() => handleUpdateHospitalLifecycle('resolved', 'Complete Clinical Handover & Transfer')}
+                      disabled={statusActionLoading !== null || (selectedEmergency.status as string) === 'RESOLVED' || !['ARRIVED', 'arrived'].includes(selectedEmergency.status.toLowerCase())}
+                      className={`p-2.5 rounded-lg border text-left flex flex-col justify-between transition-all ${
+                        (selectedEmergency.status as string) === 'RESOLVED'
+                          ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-400 cursor-default'
+                          : ['ARRIVED', 'arrived'].includes(selectedEmergency.status.toLowerCase())
+                            ? 'bg-amber-500/10 border-amber-500/30 hover:border-amber-400 text-amber-200 cursor-pointer'
+                            : 'bg-[#131826]/50 border-[#1E293B] text-slate-500 cursor-not-allowed'
+                      }`}
+                    >
+                      <div className="flex items-center justify-between text-[11px] font-bold">
+                        <span>4. Complete Handover</span>
+                        {(selectedEmergency.status as string) === 'RESOLVED' ? (
+                          <Check className="w-3.5 h-3.5" />
+                        ) : statusActionLoading === 'resolved' ? (
+                          <Activity className="w-3.5 h-3.5 animate-spin text-amber-400" />
+                        ) : (
+                          <FileText className="w-3.5 h-3.5 text-amber-400" />
+                        )}
+                      </div>
+                      <span className="text-[9px] text-slate-400 mt-1">
+                        {(selectedEmergency.status as string) === 'RESOLVED' ? 'Care transferred' : 'Sign off patient transfer'}
+                      </span>
+                    </button>
                   </div>
                 </div>
 

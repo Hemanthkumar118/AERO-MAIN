@@ -10,6 +10,7 @@ import { HospitalSearchPanel } from '../components/HospitalSearchPanel';
 import { HospitalPins } from '../components/HospitalPins';
 import { AmbulanceNavigationPanel } from '../components/AmbulanceNavigationPanel';
 import { SOSInformationPanel } from '../components/SOSInformationPanel';
+import { ClinicalAssessmentModal } from '../components/ClinicalAssessmentModal';
 import { realtimeService } from '../../../services/realtimeService';
 import { routingService } from '../../../services/routingService';
 import { TrafficAwareRoutingProvider } from '../../../services/TrafficAwareRoutingProvider';
@@ -48,6 +49,7 @@ export function AmbulanceDashboard() {
   const [routingLoading, setRoutingLoading] = useState(false);
   const [routingError, setRoutingError] = useState<string | null>(null);
   const [selectedAlternativeIndex, setSelectedAlternativeIndex] = useState(0);
+  const [showClinicalModal, setShowClinicalModal] = useState(false);
   // Centralized Route & Traffic Calculation
   const calculateRouteForHospital = async (
     hosp: Hospital, 
@@ -477,6 +479,18 @@ export function AmbulanceDashboard() {
               routeInfo={routeInfo}
               onAbort={handleAbort}
               onComplete={handleComplete}
+              onOpenClinicalAssessment={() => setShowClinicalModal(true)}
+            />
+          )}
+
+          {/* CLINICAL ASSESSMENT MODAL */}
+          {showClinicalModal && activeIncident && (
+            <ClinicalAssessmentModal
+              isOpen={showClinicalModal}
+              incidentId={activeIncident.id}
+              ambulanceId={ambulance.id}
+              destinationHospital={activeIncident.destination_hospital || selectedHospital?.name}
+              onClose={() => setShowClinicalModal(false)}
             />
           )}
 
