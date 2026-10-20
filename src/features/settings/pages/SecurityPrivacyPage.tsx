@@ -130,9 +130,9 @@ export function SecurityPrivacyPage() {
 
   if (loading) {
     return (
-      <div className="min-h-dvh bg-bg-main flex flex-col">
+      <div className="min-h-dvh bg-aero-background flex flex-col">
         <Header title="SECURITY DASHBOARD" subtitle="Manage your AERO account security and active sessions." />
-        <div className="flex-1 flex flex-col items-center justify-center text-text-secondary gap-4">
+        <div className="flex-1 flex flex-col items-center justify-center text-aero-text-secondary gap-4">
           <div className="w-8 h-8 rounded-full border-2 border-cyan-600 border-t-transparent animate-spin"></div>
           <span className="text-sm font-bold tracking-widest uppercase">Loading Security...</span>
         </div>
@@ -141,7 +141,7 @@ export function SecurityPrivacyPage() {
   }
 
   return (
-    <div className="min-h-dvh bg-bg-main flex flex-col pb-12">
+    <div className="min-h-dvh bg-aero-background flex flex-col pb-12">
       <Header title="SECURITY DASHBOARD" subtitle="Manage your AERO account security and active sessions." />
       
       <main className="flex-1 p-4 sm:p-6 lg:p-8 max-w-5xl mx-auto w-full space-y-6 lg:space-y-8">
@@ -165,11 +165,11 @@ export function SecurityPrivacyPage() {
           <div className="lg:col-span-1 space-y-6">
             
             {/* Security Status Card */}
-            <div className="bg-bg-surface/60 border border-cyan-900/30 rounded-2xl p-6 shadow-xl backdrop-blur-sm">
+            <div className="bg-aero-surface/60 border border-cyan-900/30 rounded-2xl p-6 shadow-xl backdrop-blur-sm">
               <h3 className="text-xs font-bold text-cyan-500 uppercase tracking-widest mb-4">Security Status</h3>
               <div className="space-y-4">
                 <div className="flex items-center justify-between">
-                  <span className="text-sm text-text-secondary">Email verified</span>
+                  <span className="text-sm text-aero-text-secondary">Email verified</span>
                   {userData?.email_confirmed_at ? (
                     <span className="flex items-center text-emerald-400 text-xs font-bold gap-1.5"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3"><path d="M20 6L9 17l-5-5"></path></svg> Yes</span>
                   ) : (
@@ -177,15 +177,15 @@ export function SecurityPrivacyPage() {
                   )}
                 </div>
                 <div className="flex items-center justify-between">
-                  <span className="text-sm text-text-secondary">Password auth</span>
+                  <span className="text-sm text-aero-text-secondary">Password auth</span>
                   <span className="flex items-center text-emerald-400 text-xs font-bold gap-1.5"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3"><path d="M20 6L9 17l-5-5"></path></svg> Enabled</span>
                 </div>
                 <div className="flex items-center justify-between">
-                  <span className="text-sm text-text-secondary">Session active</span>
+                  <span className="text-sm text-aero-text-secondary">Session active</span>
                   <span className="flex items-center text-emerald-400 text-xs font-bold gap-1.5"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3"><path d="M20 6L9 17l-5-5"></path></svg> Active</span>
                 </div>
                 <div className="flex items-center justify-between">
-                  <span className="text-sm text-text-secondary">RLS protection</span>
+                  <span className="text-sm text-aero-text-secondary">RLS protection</span>
                   <span className="flex items-center text-emerald-400 text-xs font-bold gap-1.5"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3"><path d="M20 6L9 17l-5-5"></path></svg> Enabled</span>
                 </div>
               </div>
@@ -195,7 +195,7 @@ export function SecurityPrivacyPage() {
             {!userData?.email_confirmed_at && (
               <div className="bg-amber-950/20 border border-amber-900/50 rounded-2xl p-6 shadow-xl">
                 <h3 className="text-xs font-bold text-amber-500 uppercase tracking-widest mb-4">Email Verification</h3>
-                <p className="text-sm text-text-secondary mb-4">Your email address <span className="font-bold text-white">{userData?.email}</span> is not yet verified. Some operational features may be restricted.</p>
+                <p className="text-sm text-aero-text-secondary mb-4">Your email address <span className="font-bold text-aero-text-primary">{userData?.email}</span> is not yet verified. Some operational features may be restricted.</p>
                 <Button variant="outline" onClick={handleResendVerification} className="w-full text-amber-400 border-amber-500/30 hover:bg-amber-500/10">
                   RESEND VERIFICATION EMAIL
                 </Button>
@@ -203,19 +203,19 @@ export function SecurityPrivacyPage() {
             )}
 
             {/* Active Session Card */}
-            <div className="bg-bg-surface/40 border border-border-subtle rounded-2xl p-6 shadow-xl">
+            <div className="bg-aero-surface/40 border border-aero-border rounded-2xl p-6 shadow-xl">
               <h3 className="text-xs font-bold text-cyan-500 uppercase tracking-widest mb-4">Active Session</h3>
               <div className="space-y-4 mb-6">
                 <div>
-                  <p className="text-[10px] text-text-primary0 uppercase font-bold tracking-wider mb-1">Status</p>
+                  <p className="text-[10px] text-aero-text-secondary uppercase font-bold tracking-wider mb-1">Status</p>
                   <p className="text-sm font-medium text-emerald-400 flex items-center gap-2">
                     <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
                     Currently Active
                   </p>
                 </div>
                 <div>
-                  <p className="text-[10px] text-text-primary0 uppercase font-bold tracking-wider mb-1">Last Active</p>
-                  <p className="text-sm text-text-secondary">{userData?.last_sign_in_at ? new Date(userData.last_sign_in_at).toLocaleString() : 'Just now'}</p>
+                  <p className="text-[10px] text-aero-text-secondary uppercase font-bold tracking-wider mb-1">Last Active</p>
+                  <p className="text-sm text-aero-text-secondary">{userData?.last_sign_in_at ? new Date(userData.last_sign_in_at).toLocaleString() : 'Just now'}</p>
                 </div>
               </div>
               <div className="space-y-3">
@@ -234,8 +234,8 @@ export function SecurityPrivacyPage() {
           <div className="lg:col-span-2 space-y-6">
             
             {/* Password Section */}
-            <div className="bg-bg-surface/40 border border-border-subtle rounded-2xl overflow-hidden shadow-xl">
-              <div className="bg-bg-surface/80 px-6 py-4 border-b border-border-subtle">
+            <div className="bg-aero-surface/40 border border-aero-border rounded-2xl overflow-hidden shadow-xl">
+              <div className="bg-aero-surface/80 px-6 py-4 border-b border-aero-border">
                 <h3 className="text-xs font-bold text-cyan-500 uppercase tracking-widest">Password & Authentication</h3>
               </div>
               <div className="p-6">
@@ -274,8 +274,8 @@ export function SecurityPrivacyPage() {
             </div>
 
             {/* Privacy Section */}
-            <div className="bg-bg-surface/40 border border-border-subtle rounded-2xl overflow-hidden shadow-xl">
-              <div className="bg-bg-surface/80 px-6 py-4 border-b border-border-subtle">
+            <div className="bg-aero-surface/40 border border-aero-border rounded-2xl overflow-hidden shadow-xl">
+              <div className="bg-aero-surface/80 px-6 py-4 border-b border-aero-border">
                 <h3 className="text-xs font-bold text-cyan-500 uppercase tracking-widest">Privacy Information</h3>
               </div>
               <div className="p-6">
@@ -283,22 +283,22 @@ export function SecurityPrivacyPage() {
                   <li className="flex gap-4">
                     <div className="mt-0.5 shrink-0 text-cyan-500"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="12" r="10"></circle><path d="M12 16v-4"></path><path d="M12 8h.01"></path></svg></div>
                     <div>
-                      <h4 className="text-sm font-bold text-white mb-1">Operational Records</h4>
-                      <p className="text-sm text-text-secondary">AERO securely associates operational records and emergency incidents with your authenticated user ID. Row Level Security (RLS) protects your data.</p>
+                      <h4 className="text-sm font-bold text-aero-text-primary mb-1">Operational Records</h4>
+                      <p className="text-sm text-aero-text-secondary">AERO securely associates operational records and emergency incidents with your authenticated user ID. Row Level Security (RLS) protects your data.</p>
                     </div>
                   </li>
                   <li className="flex gap-4">
                     <div className="mt-0.5 shrink-0 text-cyan-500"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"></path><circle cx="12" cy="10" r="3"></circle></svg></div>
                     <div>
-                      <h4 className="text-sm font-bold text-white mb-1">Location Data</h4>
-                      <p className="text-sm text-text-secondary">Your GPS location is only shared and utilized for routing when you are actively logged into an AERO operational dashboard.</p>
+                      <h4 className="text-sm font-bold text-aero-text-primary mb-1">Location Data</h4>
+                      <p className="text-sm text-aero-text-secondary">Your GPS location is only shared and utilized for routing when you are actively logged into an AERO operational dashboard.</p>
                     </div>
                   </li>
                   <li className="flex gap-4">
                     <div className="mt-0.5 shrink-0 text-cyan-500"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect><path d="M7 11V7a5 5 0 0 1 10 0v4"></path></svg></div>
                     <div>
-                      <h4 className="text-sm font-bold text-white mb-1">Credential Security</h4>
-                      <p className="text-sm text-text-secondary">Authentication credentials are managed entirely by Supabase Auth. AERO never stores your password in plain text. Groq AI API keys remain securely on the backend server.</p>
+                      <h4 className="text-sm font-bold text-aero-text-primary mb-1">Credential Security</h4>
+                      <p className="text-sm text-aero-text-secondary">Authentication credentials are managed entirely by Supabase Auth. AERO never stores your password in plain text. Groq AI API keys remain securely on the backend server.</p>
                     </div>
                   </li>
                 </ul>
@@ -308,26 +308,26 @@ export function SecurityPrivacyPage() {
             {/* Danger Zone */}
             <div className="bg-red-950/10 border border-red-900/30 rounded-2xl overflow-hidden shadow-xl">
               <div className="bg-red-950/30 px-6 py-4 border-b border-red-900/30">
-                <h3 className="text-xs font-bold text-red-500 uppercase tracking-widest">Danger Zone</h3>
+                <h3 className="text-xs font-bold text-aero-red uppercase tracking-widest">Danger Zone</h3>
               </div>
               <div className="p-6 space-y-6">
                 <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
                   <div>
-                    <h4 className="text-sm font-bold text-white mb-1">Sign Out All Devices</h4>
-                    <p className="text-xs text-text-secondary max-w-sm">Immediately terminate all active AERO sessions associated with this account across all browsers and devices.</p>
+                    <h4 className="text-sm font-bold text-aero-text-primary mb-1">Sign Out All Devices</h4>
+                    <p className="text-xs text-aero-text-secondary max-w-sm">Immediately terminate all active AERO sessions associated with this account across all browsers and devices.</p>
                   </div>
-                  <Button variant="outline" onClick={() => handleSignOut('global')} className="text-red-400 border-red-500/30 hover:bg-red-500/10 shrink-0">
+                  <Button variant="outline" onClick={() => handleSignOut('global')} className="text-red-400 border-aero-red/30 hover:bg-aero-red-soft shrink-0">
                     SIGN OUT EVERYWHERE
                   </Button>
                 </div>
                 
                 <div className="pt-6 border-t border-red-900/20 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
                   <div>
-                    <h4 className="text-sm font-bold text-white mb-1">Delete Account</h4>
-                    <p className="text-xs text-text-secondary max-w-sm">Permanently delete your AERO operational identity and remove all associated non-retained records.</p>
+                    <h4 className="text-sm font-bold text-aero-text-primary mb-1">Delete Account</h4>
+                    <p className="text-xs text-aero-text-secondary max-w-sm">Permanently delete your AERO operational identity and remove all associated non-retained records.</p>
                   </div>
                   <div className="flex flex-col gap-2 sm:items-end">
-                    <Button variant="outline" disabled className="opacity-50 cursor-not-allowed border-border-subtle bg-transparent text-text-primary0 shrink-0">
+                    <Button variant="outline" disabled className="opacity-50 cursor-not-allowed border-aero-border bg-transparent text-aero-text-secondary shrink-0">
                       DELETE ACCOUNT
                     </Button>
                     <span className="text-[10px] text-red-400/80 font-medium">Account deletion requires administrator verification.</span>

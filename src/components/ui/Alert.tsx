@@ -13,11 +13,11 @@ interface AlertProps {
 }
 
 const variantClasses: Record<AlertVariant, string> = {
-  info: 'bg-[#35C7FF]/10 border-[#35C7FF]/30 text-[#35C7FF]',
-  success: 'bg-[#20D67A]/10 border-[#20D67A]/30 text-[#20D67A]',
-  warning: 'bg-[#FFB020]/10 border-[#FFB020]/30 text-[#FFB020]',
-  error: 'bg-[#FF3B30]/10 border-[#FF3B30]/30 text-[#FF3B30]',
-  emergency: 'bg-[#FF3B30]/20 border-[#FF3B30]/50 text-white shadow-[0_0_15px_rgba(255,59,48,0.3)]',
+  info: 'bg-aero-blue-soft border-aero-blue/30 text-aero-blue',
+  success: 'bg-aero-green-soft border-aero-green/30 text-aero-green',
+  warning: 'bg-aero-amber-soft border-aero-amber/30 text-aero-amber',
+  error: 'bg-aero-red-soft border-aero-red/30 text-aero-red',
+  emergency: 'bg-aero-red-soft border-[#FF3B30]/50 text-aero-text-primary shadow-[0_0_15px_rgba(255,59,48,0.3)]',
 };
 
 const defaultIcons: Record<AlertVariant, React.ReactNode> = {

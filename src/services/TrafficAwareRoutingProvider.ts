@@ -2,7 +2,7 @@ import type { RouteInfo, LatLng } from '../types';
 import { routingService } from './routingService';
 
 export interface TrafficRoutingOptions {
-  provider?: 'google' | 'osrm';
+  provider?: 'tomtom' | 'google' | 'ors' | 'osrm';
   trafficAware?: boolean;
 }
 
@@ -47,7 +47,7 @@ export class TrafficAwareRoutingProvider {
 
   /**
    * Fetch fastest route utilizing live traffic data if available.
-   * Uses Google Routes API via backend proxy, with OSRM as fallback.
+   * Uses TomTom Routes API via backend proxy, with ORS/OSRM as fallback.
    */
   static async getFastestRoute(
     origin: LatLng | [number, number],
@@ -57,54 +57,64 @@ export class TrafficAwareRoutingProvider {
     const originCoords = Array.isArray(origin) ? origin : [origin.latitude, origin.longitude];
     const destCoords = Array.isArray(destination) ? destination : [destination.latitude, destination.longitude];
 
-    // Check environment config for routing provider
-    const configuredProvider = import.meta.env.VITE_ROUTING_PROVIDER || 'google';
+    const configuredProvider = (import.meta.env.VITE_ROUTING_PROVIDER || 'tomtom') as 'tomtom' | 'google' | 'ors' | 'osrm';
     const provider = options.provider || configuredProvider;
 
-    if (provider === 'google') {
-      try {
-        const backendUrl = import.meta.env.VITE_BACKEND_URL || 'http://localhost:3001';
-        const response = await fetch(`${backendUrl}/api/route/calculate`, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json'
-          },
-          body: JSON.stringify({
-            origin: { lat: originCoords[0], lng: originCoords[1] },
-            destination: { lat: destCoords[0], lng: destCoords[1] }
-          })
-        });
+    try {
+      const backendUrl = import.meta.env.VITE_BACKEND_URL || 'http://localhost:3001';
+      const response = await fetch(`${backendUrl}/api/route/calculate`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          origin: { lat: originCoords[0], lng: originCoords[1] },
+          destination: { lat: destCoords[0], lng: destCoords[1] },
+          provider
+        })
+      });
 
-        const data = await response.json();
-        
-        if (response.ok && data.success && data.polyline) {
-          // Decode polyline into array of [lat, lng]
-          const decodedPolyline = TrafficAwareRoutingProvider.decodePolyline(data.polyline, 5);
-          
-          if (decodedPolyline && Array.isArray(decodedPolyline)) {
-            return {
-              polyline: decodedPolyline,
-              distanceMeters: data.distanceMeters,
-              etaSeconds: data.staticDurationSeconds || data.durationSeconds,
-              trafficAwareEtaSeconds: data.durationSeconds,
-              trafficStatus: 'LIVE',
-              routeProvider: 'google',
-              congestionSegments: []
-            };
-          }
+      const data = await response.json();
+      
+      if (response.ok && data.success && data.polyline) {
+        let decodedPolyline: [number, number][] = [];
+        if (typeof data.polyline === 'string') {
+          decodedPolyline = TrafficAwareRoutingProvider.decodePolyline(data.polyline, 5);
+        } else if (Array.isArray(data.polyline)) {
+          decodedPolyline = data.polyline;
         }
-      } catch (err) {
-        console.warn('[AERO ROUTING] Google backend route failed, falling back to OSRM:', err);
+        
+        if (decodedPolyline && Array.isArray(decodedPolyline) && decodedPolyline.length > 0) {
+          return {
+            polyline: decodedPolyline,
+            distanceMeters: data.distanceMeters,
+            etaSeconds: data.durationSeconds,
+            trafficAwareEtaSeconds: data.isTrafficAware ? data.durationSeconds : undefined,
+            staticEtaSeconds: data.staticDurationSeconds,
+            trafficDelaySeconds: data.trafficDelaySeconds || 0,
+            isTrafficAware: Boolean(data.isTrafficAware),
+            trafficStatus: data.trafficStatus || (data.isTrafficAware ? 'LIVE' : 'UNAVAILABLE'),
+            routeProvider: data.provider || provider,
+            calculatedAt: data.calculatedAt || new Date().toISOString(),
+            congestionSegments: data.congestionSegments || [],
+            routeIncidents: data.routeIncidents || [],
+            alternatives: data.alternatives || []
+          };
+        }
       }
+    } catch (err) {
+      console.warn('[AERO ROUTING] Backend route failed, falling back to local OSRM:', err);
     }
 
-    // Fallback or default to OSRM
+    // Fallback or default to local OSRM
     const osrmRoute = await routingService.getLiveRoute(originCoords as [number, number], destCoords as [number, number]);
     
     return {
       ...osrmRoute,
+      isTrafficAware: false,
       trafficStatus: 'UNAVAILABLE',
-      routeProvider: 'osrm'
+      routeProvider: 'osrm',
+      calculatedAt: new Date().toISOString()
     };
   }
 

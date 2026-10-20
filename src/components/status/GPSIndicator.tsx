@@ -12,17 +12,27 @@ interface GPSIndicatorProps {
 const stateConfig: Record<GPSState, { label: string; color: string; animate: string }> = {
   acquiring: {
     label: 'Acquiring GPS...',
-    color: 'text-warning-400',
-    animate: 'animate-pulse-soft',
+    color: 'text-amber-400',
+    animate: 'animate-pulse',
   },
   active: {
     label: 'GPS Active',
-    color: 'text-success-400',
+    color: 'text-emerald-400',
+    animate: '',
+  },
+  stale: {
+    label: 'GPS Stale',
+    color: 'text-amber-400',
     animate: '',
   },
   unavailable: {
     label: 'GPS Unavailable',
-    color: 'text-[#FF3B30]',
+    color: 'text-red-400',
+    animate: '',
+  },
+  permission_denied: {
+    label: 'GPS Denied',
+    color: 'text-red-400',
     animate: '',
   },
 };

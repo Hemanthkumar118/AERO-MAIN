@@ -1,6 +1,6 @@
 export { MapView } from './MapView';
-export { GoogleMapMarker } from './GoogleMapMarker';
-export { GoogleMapContext, useGoogleMap } from './GoogleMapContext';
+export { TomTomMapMarker, GoogleMapMarker } from './TomTomMapMarker';
+export { TomTomMapContext, useTomTomMap, GoogleMapContext, useGoogleMap } from './TomTomMapContext';
 export {
   AmbulanceMarker,
   HospitalMarker,
@@ -10,3 +10,7 @@ export {
 } from './Markers';
 export { RoutePolyline } from './RoutePolyline';
 export { RadiusCircle } from './RadiusCircle';
+export { TomTomTrafficLayer } from './TomTomTrafficLayer';
+export { TomTomIncidentsLayer } from './TomTomIncidentsLayer';
+export { TrafficLegend } from './TrafficLegend';
+export { IncidentDetailModal } from './IncidentDetailModal';

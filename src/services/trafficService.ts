@@ -1,5 +1,5 @@
 import { supabase } from '../lib/supabase';
-import type { Junction, TrafficIncident, CongestionSegment, JunctionStatus } from '../types';
+import type { Junction, TrafficIncident, TomTomIncident, CongestionSegment, JunctionStatus } from '../types';
 
 export const trafficService = {
   async getJunctions(): Promise<Junction[]> {
@@ -62,5 +62,36 @@ export const trafficService = {
     // AERO - "If no provider is configured: show: Traffic data unavailable rather than fake traffic."
     // We will return an empty array and the UI should handle lack of data appropriately.
     return [];
+  },
+
+  /**
+   * Fetch real live TomTom traffic incidents via backend proxy
+   */
+  async getTomTomIncidents(params?: { lat?: number; lng?: number; radiusKm?: number; bbox?: string }): Promise<TomTomIncident[]> {
+    try {
+      const backendUrl = import.meta.env.VITE_BACKEND_URL || 'http://localhost:3001';
+      let url = `${backendUrl}/api/traffic/incidents`;
+      const queryParts: string[] = [];
+      if (params?.bbox) {
+        queryParts.push(`bbox=${encodeURIComponent(params.bbox)}`);
+      } else if (params?.lat != null && params?.lng != null) {
+        queryParts.push(`lat=${params.lat}`);
+        queryParts.push(`lng=${params.lng}`);
+        queryParts.push(`radiusKm=${params.radiusKm || 15}`);
+      }
+      if (queryParts.length > 0) {
+        url += `?${queryParts.join('&')}`;
+      }
+      const response = await fetch(url);
+      if (!response.ok) {
+        console.warn('[trafficService] Failed to fetch TomTom incidents:', response.status);
+        return [];
+      }
+      const data = await response.json();
+      return (data.incidents || []) as TomTomIncident[];
+    } catch (err) {
+      console.warn('[trafficService] Error fetching TomTom incidents:', err);
+      return [];
+    }
   },
 };

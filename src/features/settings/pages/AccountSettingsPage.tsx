@@ -241,9 +241,9 @@ export function AccountSettingsPage() {
 
   if (profileLoading) {
     return (
-      <div className="min-h-dvh bg-bg-main flex flex-col">
+      <div className="min-h-dvh bg-aero-background flex flex-col">
         <Header title="AERO OPERATOR PROFILE" subtitle="Manage your AERO operational identity and profile." />
-        <div className="flex-1 flex flex-col items-center justify-center text-text-secondary gap-4">
+        <div className="flex-1 flex flex-col items-center justify-center text-aero-text-secondary gap-4">
           <div className="w-8 h-8 rounded-full border-2 border-cyan-600 border-t-transparent animate-spin"></div>
           <span className="text-sm font-bold tracking-widest uppercase">Loading Profile...</span>
         </div>
@@ -252,7 +252,7 @@ export function AccountSettingsPage() {
   }
 
   return (
-    <div className="min-h-dvh bg-bg-main flex flex-col">
+    <div className="min-h-dvh bg-aero-background flex flex-col">
       <Header title="AERO OPERATOR PROFILE" subtitle="Manage your AERO operational identity and profile." />
       
       <main className="flex-1 p-4 sm:p-6 lg:p-8 max-w-5xl mx-auto w-full">
@@ -272,7 +272,7 @@ export function AccountSettingsPage() {
               <span className="text-sm font-medium">{bannerState.message}</span>
             </div>
             {bannerState.type === 'error' && (
-              <button onClick={fetchProfile} className="text-xs font-bold underline hover:text-white transition-colors">
+              <button onClick={fetchProfile} className="text-xs font-bold underline hover:text-aero-text-primary transition-colors">
                 [Retry]
               </button>
             )}
@@ -283,18 +283,18 @@ export function AccountSettingsPage() {
           
           {/* Profile Card Header (Left Column) */}
           <div className="lg:col-span-1">
-            <div className="bg-bg-surface/60 border border-cyan-900/30 rounded-2xl p-6 flex flex-col items-center text-center sticky top-6 shadow-2xl backdrop-blur-sm">
+            <div className="bg-aero-surface/60 border border-cyan-900/30 rounded-2xl p-6 flex flex-col items-center text-center sticky top-6 shadow-2xl backdrop-blur-sm">
               <div className="w-24 h-24 bg-cyan-950 border border-cyan-700/50 rounded-full flex items-center justify-center text-3xl font-bold text-cyan-400 mb-4 shadow-[0_0_20px_rgba(8,145,178,0.2)]">
                 {localProfile?.full_name?.substring(0, 2).toUpperCase() || 'OP'}
               </div>
-              <h2 className="text-xl font-bold text-white mb-1">{localProfile?.full_name?.toUpperCase()}</h2>
+              <h2 className="text-xl font-bold text-aero-text-primary mb-1">{localProfile?.full_name?.toUpperCase()}</h2>
               <p className="text-sm text-cyan-500 font-medium tracking-wide mb-6">
                 {(localProfile?.role || 'Operator').replace('_', ' ').toUpperCase()}
               </p>
               
-              <div className="w-full bg-bg-main/80 rounded-xl p-4 border border-border-subtle text-left">
+              <div className="w-full bg-aero-background/80 rounded-xl p-4 border border-aero-border text-left">
                 <div className="flex items-center justify-between">
-                  <span className="text-xs text-text-secondary uppercase font-bold tracking-wider">Status</span>
+                  <span className="text-xs text-aero-text-secondary uppercase font-bold tracking-wider">Status</span>
                   <span className="text-xs font-bold text-emerald-400 flex items-center gap-1.5">
                     <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse"></span>
                     ACTIVE
@@ -308,8 +308,8 @@ export function AccountSettingsPage() {
           <div className="lg:col-span-2 space-y-6">
             <form onSubmit={handleSave} className="space-y-6">
               
-              <div className="bg-bg-surface/40 border border-border-subtle rounded-2xl shadow-xl relative z-50">
-                <div className="bg-bg-surface/80 px-6 py-4 border-b border-border-subtle rounded-t-2xl">
+              <div className="bg-aero-surface/40 border border-aero-border rounded-2xl shadow-xl relative z-50">
+                <div className="bg-aero-surface/80 px-6 py-4 border-b border-aero-border rounded-t-2xl">
                   <h3 className="text-xs font-bold text-cyan-500 uppercase tracking-widest">Operator Identity</h3>
                 </div>
                 <div className="p-6 grid gap-5">
@@ -325,7 +325,7 @@ export function AccountSettingsPage() {
                       label="Operational Role"
                       value={(localProfile?.role || '').replace('_', ' ').toUpperCase()}
                       disabled
-                      className="bg-bg-main/50 opacity-80"
+                      className="bg-aero-background/50 opacity-80"
                     />
                   </div>
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-5">
@@ -333,13 +333,13 @@ export function AccountSettingsPage() {
                       label="Email Address"
                       value={user?.email || ''}
                       disabled
-                      className="bg-bg-main/50 opacity-80"
+                      className="bg-aero-background/50 opacity-80"
                     />
                     <Input
                       label="User ID"
                       value={localProfile?.id || ''}
                       disabled
-                      className="bg-bg-main/50 opacity-80 font-mono text-[11px]"
+                      className="bg-aero-background/50 opacity-80 font-mono text-[11px]"
                     />
                   </div>
                   
@@ -347,7 +347,7 @@ export function AccountSettingsPage() {
                     <div className="grid grid-cols-1 gap-5">
                       <div className="group relative z-20">
                         <div className="flex items-center justify-between mb-2">
-                          <label className="block text-[10px] font-bold text-text-secondary uppercase tracking-widest transition-colors group-focus-within:text-white">Assigned Hospital Facility</label>
+                          <label className="block text-[10px] font-bold text-aero-text-secondary uppercase tracking-widest transition-colors group-focus-within:text-aero-text-primary">Assigned Hospital Facility</label>
                           <div className="flex gap-1">
                             {[5, 15, 25, 50].map(r => (
                               <button
@@ -356,8 +356,8 @@ export function AccountSettingsPage() {
                                 onClick={() => setSearchRadius(r * 1000)}
                                 className={`px-2 py-0.5 text-[9px] font-bold rounded transition-colors ${
                                   searchRadius === r * 1000 
-                                    ? 'bg-[#E53935] text-white' 
-                                    : 'bg-[#1A1D24] text-[#A7ADB5] hover:text-white border border-border-subtle'
+                                    ? 'bg-[#EF3B3A] text-aero-text-primary' 
+                                    : 'bg-[#1A1D24] text-aero-text-secondary hover:text-aero-text-primary border border-aero-border'
                                 }`}
                               >
                                 {r}km
@@ -379,7 +379,7 @@ export function AccountSettingsPage() {
                               setIsDropdownOpen(true);
                             }}
                             onBlur={() => setTimeout(() => setIsDropdownOpen(false), 200)}
-                            className="w-full bg-bg-main/50 border border-border-subtle rounded-lg px-4 py-3 text-sm text-white placeholder-text-secondary focus:outline-none focus:border-cyan-500 focus:ring-1 focus:ring-cyan-500/30 transition-all duration-200"
+                            className="w-full bg-aero-background/50 border border-aero-border rounded-lg px-4 py-3 text-sm text-aero-text-primary placeholder-text-secondary focus:outline-none focus:border-cyan-500 focus:ring-1 focus:ring-cyan-500/30 transition-all duration-200"
                           />
                           <AnimatePresence>
                             {isDropdownOpen && (
@@ -387,23 +387,23 @@ export function AccountSettingsPage() {
                                 initial={{ opacity: 0, y: 5 }}
                                 animate={{ opacity: 1, y: 0 }}
                                 exit={{ opacity: 0, y: 5 }}
-                                className="absolute z-[100] w-full mt-2 max-h-60 overflow-y-auto bg-bg-surface border border-border-subtle rounded-xl shadow-2xl custom-scrollbar"
+                                className="absolute z-[100] w-full mt-2 max-h-60 overflow-y-auto bg-aero-surface border border-aero-border rounded-xl shadow-2xl custom-scrollbar"
                               >
                                 {hospitalSearchTerm.trim() ? (
                                   <>
-                                    {autocompleteLoading && <div className="p-4 text-sm text-text-secondary text-center">Searching Google Places...</div>}
+                                    {autocompleteLoading && <div className="p-4 text-sm text-aero-text-secondary text-center">Searching Google Places...</div>}
                                     {!autocompleteLoading && autocompleteResults.length === 0 && (
-                                      <div className="p-4 text-sm text-text-secondary text-center">No hospitals found</div>
+                                      <div className="p-4 text-sm text-aero-text-secondary text-center">No hospitals found</div>
                                     )}
                                     {!autocompleteLoading && autocompleteResults.map((place) => (
                                       <div
                                         key={place.placePrediction.placeId}
                                         onClick={() => handleSelectAutocomplete(place.placePrediction.placeId)}
-                                        className={`p-3 hover:bg-white/5 cursor-pointer border-b border-border-subtle last:border-0 transition-colors flex justify-between items-start gap-4 ${fetchingDetailsId === place.placePrediction.placeId ? 'opacity-50 cursor-not-allowed' : ''}`}
+                                        className={`p-3 hover:bg-white/5 cursor-pointer border-b border-aero-border last:border-0 transition-colors flex justify-between items-start gap-4 ${fetchingDetailsId === place.placePrediction.placeId ? 'opacity-50 cursor-not-allowed' : ''}`}
                                       >
                                         <div className="flex-1 min-w-0">
-                                          <h4 className="text-sm font-bold text-white mb-0.5">{place.placePrediction.text.text}</h4>
-                                          <p className="text-xs text-text-secondary truncate">Google Places Result</p>
+                                          <h4 className="text-sm font-bold text-aero-text-primary mb-0.5">{place.placePrediction.text.text}</h4>
+                                          <p className="text-xs text-aero-text-secondary truncate">Google Places Result</p>
                                         </div>
                                         {fetchingDetailsId === place.placePrediction.placeId && (
                                           <div className="w-4 h-4 rounded-full border-2 border-cyan-500 border-t-transparent animate-spin"></div>
@@ -414,7 +414,7 @@ export function AccountSettingsPage() {
                                 ) : (
                                   <>
                                     {filteredHospitals.length === 0 ? (
-                                      <div className="p-4 text-sm text-text-secondary text-center">No nearby hospitals found</div>
+                                      <div className="p-4 text-sm text-aero-text-secondary text-center">No nearby hospitals found</div>
                                     ) : (
                                       filteredHospitals.map(h => (
                                         <div
@@ -424,11 +424,11 @@ export function AccountSettingsPage() {
                                             setHospitalSearchTerm('');
                                             setIsDropdownOpen(false);
                                           }}
-                                          className="p-3 hover:bg-white/5 cursor-pointer border-b border-border-subtle last:border-0 transition-colors flex justify-between items-start gap-4"
+                                          className="p-3 hover:bg-white/5 cursor-pointer border-b border-aero-border last:border-0 transition-colors flex justify-between items-start gap-4"
                                         >
                                           <div>
-                                            <div className="text-white text-sm font-medium">{h.name}</div>
-                                            {h.address && <div className="text-text-secondary text-[10px] mt-0.5 line-clamp-1">{h.address}</div>}
+                                            <div className="text-aero-text-primary text-sm font-medium">{h.name}</div>
+                                            {h.address && <div className="text-aero-text-secondary text-[10px] mt-0.5 line-clamp-1">{h.address}</div>}
                                           </div>
                                           {('distanceMeters' in h) && (
                                             <div className="text-xs font-bold text-emerald-400 shrink-0 bg-emerald-500/10 px-2 py-0.5 rounded-full">
@@ -453,8 +453,8 @@ export function AccountSettingsPage() {
                 </div>
               </div>
 
-              <div className="bg-bg-surface/40 border border-border-subtle rounded-2xl overflow-hidden shadow-xl">
-                <div className="bg-bg-surface/80 px-6 py-4 border-b border-border-subtle">
+              <div className="bg-aero-surface/40 border border-aero-border rounded-2xl overflow-hidden shadow-xl">
+                <div className="bg-aero-surface/80 px-6 py-4 border-b border-aero-border">
                   <h3 className="text-xs font-bold text-cyan-500 uppercase tracking-widest">Account Information</h3>
                 </div>
                 <div className="p-6 grid gap-5">
@@ -463,11 +463,11 @@ export function AccountSettingsPage() {
                       label="Account Created"
                       value={user?.created_at ? new Date(user.created_at).toLocaleDateString(undefined, { year: 'numeric', month: 'long', day: 'numeric' }) : 'Unknown'}
                       disabled
-                      className="bg-bg-main/50 opacity-80"
+                      className="bg-aero-background/50 opacity-80"
                     />
                     {/* Placeholder for future schema fields if added */}
                     <div className="flex flex-col justify-center">
-                      <p className="text-[10px] text-text-primary0 font-medium uppercase tracking-wider mb-1">Email Verification</p>
+                      <p className="text-[10px] text-aero-text-secondary font-medium uppercase tracking-wider mb-1">Email Verification</p>
                       <p className="text-sm font-medium text-emerald-400">Verified via Supabase Auth</p>
                     </div>
                   </div>

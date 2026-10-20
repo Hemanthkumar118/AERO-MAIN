@@ -12,7 +12,7 @@ interface IncomingEmergencyAlertProps {
 
 export function IncomingEmergencyAlert({ emergency, hospitalName, ambulanceName, onAccept, onViewDetails }: IncomingEmergencyAlertProps) {
   const distanceKm = emergency.route_distance_meters != null ? ((emergency.route_distance_meters) / 1000).toFixed(1) + ' km' : 'UNAVAILABLE';
-  const activeDuration = emergency.traffic_duration_seconds || emergency.route_duration_seconds;
+  const activeDuration = emergency.route_duration_seconds;
   const etaMins = activeDuration != null ? Math.round(activeDuration / 60) + ' min' : 'UNAVAILABLE';
   const timeSince = new Date(emergency.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
 

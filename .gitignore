@@ -9,3 +9,6 @@ build/
 .idea/
 *.log
 coverage/
+scratch/
+audit_*.png
+supabase/.temp/

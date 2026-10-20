@@ -159,27 +159,31 @@ export const policeService = {
   mapDbIncidentToEmergency(i: any): Emergency {
     return {
       id: i.id,
-      status: i.status === 'active' ? 'ACTIVE' : i.status === 'resolved' ? 'COMPLETED' : 'PENDING',
-      priority: i.priority || 'CODE_RED',
-      ambulanceId: i.ambulance_id || 'UNAVAILABLE',
-      ambulanceDisplayName: i.ambulance_id || 'AERO ALS',
-      hospital: { id: '', name: i.destination_hospital, address: '', location: { latitude: 0, longitude: 0 }, emergencyCapable: true },
-      patient: {
-        name: 'Emergency Patient',
-        category: 'CARDIAC',
-        priority: i.priority || 'CODE_RED',
-        chiefComplaint: i.description || 'Incoming Emergency',
-        vitals: { heartRate: 112, bloodPressure: '138/88', spo2: 96, respiratoryRate: 20, gcsScore: 15 }
+      status: i.status === 'active' ? 'ACTIVE' : (i.status === 'resolved' || i.status === 'arrived' ? 'COMPLETED' : 'PENDING'),
+      priority: (i.priority || 'CODE_RED').toUpperCase(),
+      ambulanceId: i.ambulance_id || 'Ambulance Unit',
+      ambulanceDisplayName: i.ambulance_id || 'AERO Unit',
+      hospital: { 
+        id: 'hosp', 
+        name: i.destination_hospital || 'Destination Hospital', 
+        address: '', 
+        location: { latitude: i.destination_latitude || 0, longitude: i.destination_longitude || 0 }, 
+        emergencyCapable: true 
       },
-      currentSpeedKmH: i.current_speed || 50,
+      patient: {
+        category: i.incident_type || 'Unspecified',
+        priority: (i.priority || 'CODE_RED').toUpperCase(),
+        chiefComplaint: i.description || 'Emergency Dispatch',
+      },
+      currentSpeedKmH: i.current_speed != null ? i.current_speed : undefined,
       route: {
-        etaSeconds: i.route_duration_seconds || 300,
+        etaSeconds: i.traffic_duration_seconds || i.route_duration_seconds || undefined,
         trafficAwareEtaSeconds: i.traffic_duration_seconds,
         trafficStatus: i.traffic_status as any,
         polyline: i.route_geometry || [],
-        distanceMeters: i.route_distance_meters || 0
+        distanceMeters: i.route_distance_meters || undefined
       },
-      vehicleNumber: i.ambulance_id || 'UNAVAILABLE',
+      vehicleNumber: i.ambulance_id || 'AERO ALS',
       createdAt: i.created_at
     } as any;
   }

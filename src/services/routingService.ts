@@ -194,27 +194,46 @@ export const routingService = {
     };
 
     let minDist = Infinity;
+    // ~0.001 deg ≈ 111m, use as cheap bounding filter to skip distant segments
+    const CHEAP_THRESHOLD = 0.005; // ~550m lat/lng box — skip if clearly far
+    const pLat = point[0];
+    const pLng = point[1];
     
     for (let i = 0; i < polyline.length - 1; i++) {
       const p1 = polyline[i];
       const p2 = polyline[i+1];
+      
+      // Cheap bounding-box pre-filter: skip segment if clearly far away
+      const segMinLat = Math.min(p1[0], p2[0]) - CHEAP_THRESHOLD;
+      const segMaxLat = Math.max(p1[0], p2[0]) + CHEAP_THRESHOLD;
+      const segMinLng = Math.min(p1[1], p2[1]) - CHEAP_THRESHOLD;
+      const segMaxLng = Math.max(p1[1], p2[1]) + CHEAP_THRESHOLD;
+      
+      if (pLat < segMinLat || pLat > segMaxLat || pLng < segMinLng || pLng > segMaxLng) {
+        continue; // Skip this segment entirely — clearly too far
+      }
       
       // Calculate cross-track distance (simplified for small distances)
       const d13 = getDist(p1, point);
       const d12 = getDist(p1, p2);
       const d23 = getDist(p2, point);
       
+      let segDist: number;
       // If point is beyond the ends of the segment, use distance to endpoints
       if (d13 * d13 > d12 * d12 + d23 * d23) {
-        minDist = Math.min(minDist, d23);
+        segDist = d23;
       } else if (d23 * d23 > d12 * d12 + d13 * d13) {
-        minDist = Math.min(minDist, d13);
+        segDist = d13;
       } else {
-        // Cross-track distance
+        // Cross-track distance via Heron's formula
         const s = (d12 + d13 + d23) / 2;
-        const area = Math.sqrt(s * (s - d12) * (s - d13) * (s - d23));
-        const crossTrack = 2 * area / d12;
-        minDist = Math.min(minDist, crossTrack);
+        const area = Math.sqrt(Math.max(0, s * (s - d12) * (s - d13) * (s - d23)));
+        segDist = d12 > 0 ? 2 * area / d12 : d13;
+      }
+      
+      if (segDist < minDist) {
+        minDist = segDist;
+        if (minDist < 10) return minDist; // Early exit: clearly on-route
       }
     }
     

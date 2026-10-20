@@ -99,6 +99,10 @@ export async function searchMappls(
       };
 
       console.log(`[MapplsProvider] Initiating nearby search...`, options);
+      if (typeof mappls.nearby !== 'function') {
+        console.warn("[MapplsProvider] mappls.nearby is not a function — SDK loaded without Nearby API");
+        return resolve([]);
+      }
       mappls.nearby(options);
       
       if (signal) {

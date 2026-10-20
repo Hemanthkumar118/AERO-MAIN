@@ -11,19 +11,19 @@ interface BadgeProps {
 }
 
 const badgeVariantClasses: Record<BadgeVariant, string> = {
-  info: 'bg-[#35C7FF]/10 text-[#35C7FF] border-[#35C7FF]/20',
-  success: 'bg-[#20D67A]/10 text-[#20D67A] border-[#20D67A]/20',
-  warning: 'bg-[#FFB020]/10 text-[#FFB020] border-[#FFB020]/20',
-  danger: 'bg-[#FF3B30]/10 text-[#FF3B30] border-[#FF3B30]/20',
-  neutral: 'bg-bg-elevated text-text-secondary border-border-subtle',
-  emergency: 'bg-[#FF3B30] text-white border-[#FF3B30]/50 shadow-[0_0_15px_rgba(255,59,48,0.3)]',
+  info: 'bg-aero-blue-soft text-aero-blue border-[#35C7FF]/20',
+  success: 'bg-aero-green-soft text-aero-green border-[#20D67A]/20',
+  warning: 'bg-aero-amber-soft text-aero-amber border-[#FFB020]/20',
+  danger: 'bg-aero-red-soft text-aero-red border-[#FF3B30]/20',
+  neutral: 'bg-aero-surface-soft text-aero-text-secondary border-aero-border',
+  emergency: 'bg-aero-red text-aero-text-primary border-[#FF3B30]/50 shadow-[0_0_15px_rgba(255,59,48,0.3)]',
 };
 
 const dotColorClasses: Record<BadgeVariant, string> = {
-  info: 'bg-[#35C7FF]',
-  success: 'bg-[#20D67A]',
-  warning: 'bg-[#FFB020]',
-  danger: 'bg-[#FF3B30]',
+  info: 'bg-aero-blue',
+  success: 'bg-aero-green',
+  warning: 'bg-aero-amber',
+  danger: 'bg-aero-red',
   neutral: 'bg-text-secondary',
   emergency: 'bg-white animate-pulse',
 };

@@ -9,10 +9,10 @@ interface CardProps {
 }
 
 export function Card({ children, variant = 'default', className = '', onClick }: CardProps) {
-  const base = 'enterprise-card';
+  const base = 'aero-card';
   const variants = {
     default: 'p-6',
-    interactive: 'p-6 cursor-pointer hover:border-brand-primary/50',
+    interactive: 'p-6 cursor-pointer hover:border-aero-red/50',
     compact: 'p-4',
   };
 
@@ -44,8 +44,8 @@ export function CardHeader({
   return (
     <div className={`flex items-start justify-between gap-4 mb-4 ${className}`}>
       <div>
-        <h3 className="text-base font-bold text-white tracking-tight">{title}</h3>
-        {subtitle && <p className="text-[13px] text-text-secondary mt-1">{subtitle}</p>}
+        <h3 className="text-base font-bold text-aero-text-primary tracking-tight">{title}</h3>
+        {subtitle && <p className="text-[13px] text-aero-text-secondary mt-1">{subtitle}</p>}
       </div>
       {action && <div className="shrink-0">{action}</div>}
     </div>

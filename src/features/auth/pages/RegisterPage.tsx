@@ -251,7 +251,7 @@ export function RegisterPage({ onRegister }: RegisterPageProps) {
     }
   };
 
-  const strengthColor = strength < 50 ? '#E53935' : strength < 75 ? '#FFB020' : '#20C997';
+  const strengthColor = strength < 50 ? '#EF3B3A' : strength < 75 ? '#FFB020' : '#12B981';
 
   return (
     <motion.div
@@ -259,7 +259,7 @@ export function RegisterPage({ onRegister }: RegisterPageProps) {
       animate={{ opacity: 1, y: 0 }}
       exit={{ opacity: 0, y: -10 }}
       transition={{ duration: 0.3, ease: 'easeOut' }}
-      className="min-h-screen flex bg-bg-main font-sans" style={{ colorScheme: 'dark' }}
+      className="min-h-screen flex bg-aero-background font-sans" style={{ colorScheme: 'dark' }}
     >
 
       {/* ── LEFT: Cinematic image panel ── */}
@@ -291,15 +291,15 @@ export function RegisterPage({ onRegister }: RegisterPageProps) {
             transition={{ duration: 0.6, ease: 'easeOut' }}
             className="flex items-center gap-3"
           >
-            <div className="w-10 h-10 rounded-xl bg-[#E53935] flex items-center justify-center shadow-[0_0_20px_rgba(229,57,53,0.4)]">
+            <div className="w-10 h-10 rounded-xl bg-[#EF3B3A] flex items-center justify-center shadow-[0_0_20px_rgba(229,57,53,0.4)]">
               <svg width="18" height="18" viewBox="0 0 24 24" fill="none">
                 <path d="M12 2L4 6v6c0 5.55 3.84 10.74 8 12 4.16-1.26 8-6.45 8-12V6l-8-4z" fill="white" opacity="0.95"/>
                 <path d="M9 12h6M12 9v6" stroke="#07090C" strokeWidth="2.5" strokeLinecap="round"/>
               </svg>
             </div>
             <div>
-              <p className="text-white font-black text-xl leading-none tracking-tight">AERO</p>
-              <p className="text-white/50 font-bold text-[9px] uppercase tracking-[0.2em] mt-0.5">Emergency Response Network</p>
+              <p className="text-aero-text-primary font-black text-xl leading-none tracking-tight">AERO</p>
+              <p className="text-aero-text-primary/50 font-bold text-[9px] uppercase tracking-[0.2em] mt-0.5">Emergency Response Network</p>
             </div>
           </motion.div>
 
@@ -308,7 +308,7 @@ export function RegisterPage({ onRegister }: RegisterPageProps) {
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
               transition={{ delay: 0.3, duration: 0.6 }}
-              className="text-white/60 text-xs font-bold uppercase tracking-widest mb-4"
+              className="text-aero-text-primary/60 text-xs font-bold uppercase tracking-widest mb-4"
             >
               Operator Onboarding
             </motion.p>
@@ -316,7 +316,7 @@ export function RegisterPage({ onRegister }: RegisterPageProps) {
               initial={{ opacity: 0, y: 10 }}
               animate={{ opacity: 1, y: 0 }}
               transition={{ delay: 0.4, duration: 0.6 }}
-              className="text-3xl font-black text-white leading-tight mb-4"
+              className="text-3xl font-black text-aero-text-primary leading-tight mb-4"
             >
               Join the<br/>response network.
             </motion.h2>
@@ -324,7 +324,7 @@ export function RegisterPage({ onRegister }: RegisterPageProps) {
               initial={{ opacity: 0, y: 10 }}
               animate={{ opacity: 1, y: 0 }}
               transition={{ delay: 0.5, duration: 0.6 }}
-              className="text-white/60 text-sm font-medium leading-relaxed max-w-xs"
+              className="text-aero-text-primary/60 text-sm font-medium leading-relaxed max-w-xs"
             >
               Register as an ambulance operator, traffic authority, hospital staff, or command center administrator.
             </motion.p>
@@ -332,10 +332,10 @@ export function RegisterPage({ onRegister }: RegisterPageProps) {
             {/* Role indicators */}
             <div className="mt-8 grid grid-cols-2 gap-2">
               {[
-                { label: 'Ambulance Units', color: '#E53935' },
+                { label: 'Ambulance Units', color: '#EF3B3A' },
                 { label: 'Traffic Police', color: '#FFB020' },
-                { label: 'Hospital ER', color: '#20C997' },
-                { label: 'Command Center', color: '#19C6D8' },
+                { label: 'Hospital ER', color: '#12B981' },
+                { label: 'Command Center', color: '#1687D9' },
               ].map((item, i) => (
                 <motion.div
                   key={item.label}
@@ -345,7 +345,7 @@ export function RegisterPage({ onRegister }: RegisterPageProps) {
                   className="flex items-center gap-2 border border-white/10 rounded-lg px-3 py-2 bg-white/5 backdrop-blur-sm"
                 >
                   <span className="w-2 h-2 rounded-full flex-shrink-0" style={{ backgroundColor: item.color }} />
-                  <span className="text-white/70 text-[10px] font-bold uppercase tracking-wider">{item.label}</span>
+                  <span className="text-aero-text-primary/70 text-[10px] font-bold uppercase tracking-wider">{item.label}</span>
                 </motion.div>
               ))}
             </div>
@@ -354,7 +354,7 @@ export function RegisterPage({ onRegister }: RegisterPageProps) {
       </div>
 
       {/* ── RIGHT: Registration panel ── */}
-      <div className="flex-1 flex flex-col justify-center px-6 py-10 lg:px-12 bg-bg-surface relative overflow-y-auto">
+      <div className="flex-1 flex flex-col justify-center px-6 py-10 lg:px-12 bg-aero-surface relative overflow-y-auto">
         {/* Subtle grid texture */}
         <div className="absolute inset-0 opacity-[0.03] pointer-events-none" style={{
           backgroundImage: 'linear-gradient(rgba(255,255,255,0.5) 1px, transparent 1px), linear-gradient(90deg, rgba(255,255,255,0.5) 1px, transparent 1px)',
@@ -364,13 +364,13 @@ export function RegisterPage({ onRegister }: RegisterPageProps) {
         <div className="relative z-10 sm:mx-auto sm:w-full sm:max-w-md py-6">
           {/* Mobile Logo */}
           <div className="flex items-center gap-3 mb-8 lg:hidden">
-            <div className="w-9 h-9 rounded-xl bg-[#E53935] flex items-center justify-center shadow-[0_0_16px_rgba(229,57,53,0.4)]">
+            <div className="w-9 h-9 rounded-xl bg-[#EF3B3A] flex items-center justify-center shadow-[0_0_16px_rgba(229,57,53,0.4)]">
               <svg width="16" height="16" viewBox="0 0 24 24" fill="none">
                 <path d="M12 2L4 6v6c0 5.55 3.84 10.74 8 12 4.16-1.26 8-6.45 8-12V6l-8-4z" fill="white"/>
                 <path d="M9 12h6M12 9v6" stroke="#07090C" strokeWidth="2.5" strokeLinecap="round"/>
               </svg>
             </div>
-            <span className="text-white font-black text-xl tracking-tight">AERO</span>
+            <span className="text-aero-text-primary font-black text-xl tracking-tight">AERO</span>
           </div>
 
           <div className="relative">
@@ -380,8 +380,8 @@ export function RegisterPage({ onRegister }: RegisterPageProps) {
               transition={{ delay: 0.05, duration: 0.3, ease: 'easeOut' }}
               className="mb-7"
             >
-              <p className="text-[#A7ADB5] text-xs font-bold uppercase tracking-widest mb-2 transition-colors focus-within:text-white">New Operator</p>
-              <h1 className="text-2xl font-black text-white tracking-tight">Create Account</h1>
+              <p className="text-aero-text-secondary text-xs font-bold uppercase tracking-widest mb-2 transition-colors focus-within:text-aero-text-primary">New Operator</p>
+              <h1 className="text-2xl font-black text-aero-text-primary tracking-tight">Create Account</h1>
             </motion.div>
 
             <AnimatePresence mode="wait">
@@ -390,7 +390,7 @@ export function RegisterPage({ onRegister }: RegisterPageProps) {
                   initial={{ opacity: 0, height: 0 }}
                   animate={{ opacity: 1, height: 'auto' }}
                   exit={{ opacity: 0, height: 0 }}
-                  className="mb-5 flex items-center gap-3 bg-[#E53935]/10 border border-[#E53935]/20 rounded-xl px-4 py-3 text-sm text-[#E53935] font-medium overflow-hidden"
+                  className="mb-5 flex items-center gap-3 bg-[#EF3B3A]/10 border border-[#EF3B3A]/20 rounded-xl px-4 py-3 text-sm text-[#EF3B3A] font-medium overflow-hidden"
                 >
                   <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" className="shrink-0">
                     <circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/>
@@ -408,14 +408,14 @@ export function RegisterPage({ onRegister }: RegisterPageProps) {
                 transition={{ delay: 0.1, duration: 0.3, ease: 'easeOut' }}
                 className="group"
               >
-                <label className="block text-[10px] font-bold text-[#A7ADB5] uppercase tracking-widest mb-2 transition-colors group-focus-within:text-white">Full Name</label>
+                <label className="block text-[10px] font-bold text-aero-text-secondary uppercase tracking-widest mb-2 transition-colors group-focus-within:text-aero-text-primary">Full Name</label>
                 <input
                   type="text"
                   placeholder="e.g. Vikram Joshi / Officer Sharma"
                   value={formData.fullName}
                   onChange={(e) => setFormData({...formData, fullName: e.target.value})}
                   required
-                  className="enterprise-input focus:border-[#E53935] focus:ring-1 focus:ring-[#E53935]/30 focus:shadow-[0_0_15px_rgba(229,57,53,0.15)] transition duration-200"
+                  className="aero-input focus:border-[#EF3B3A] focus:ring-1 focus:ring-[#EF3B3A]/30 focus:shadow-[0_0_15px_rgba(229,57,53,0.15)] transition duration-200"
                 />
               </motion.div>
 
@@ -426,14 +426,14 @@ export function RegisterPage({ onRegister }: RegisterPageProps) {
                 transition={{ delay: 0.15, duration: 0.3, ease: 'easeOut' }}
                 className="group"
               >
-                <label className="block text-[10px] font-bold text-[#A7ADB5] uppercase tracking-widest mb-2 transition-colors group-focus-within:text-white">Official Email</label>
+                <label className="block text-[10px] font-bold text-aero-text-secondary uppercase tracking-widest mb-2 transition-colors group-focus-within:text-aero-text-primary">Official Email</label>
                 <input
                   type="email"
                   placeholder="name@emergency.gov.in"
                   value={formData.email}
                   onChange={(e) => setFormData({...formData, email: e.target.value})}
                   required
-                  className="enterprise-input focus:border-[#E53935] focus:ring-1 focus:ring-[#E53935]/30 focus:shadow-[0_0_15px_rgba(229,57,53,0.15)] transition duration-200"
+                  className="aero-input focus:border-[#EF3B3A] focus:ring-1 focus:ring-[#EF3B3A]/30 focus:shadow-[0_0_15px_rgba(229,57,53,0.15)] transition duration-200"
                 />
               </motion.div>
 
@@ -444,11 +444,11 @@ export function RegisterPage({ onRegister }: RegisterPageProps) {
                 transition={{ delay: 0.2, duration: 0.3, ease: 'easeOut' }}
                 className="group"
               >
-                <label className="block text-[10px] font-bold text-[#A7ADB5] uppercase tracking-widest mb-2 transition-colors group-focus-within:text-white">Operational Role</label>
+                <label className="block text-[10px] font-bold text-aero-text-secondary uppercase tracking-widest mb-2 transition-colors group-focus-within:text-aero-text-primary">Operational Role</label>
                 <select
                   value={formData.role}
                   onChange={(e) => setFormData({...formData, role: e.target.value})}
-                  className="enterprise-input appearance-none cursor-pointer focus:border-[#E53935] focus:ring-1 focus:ring-[#E53935]/30 focus:shadow-[0_0_15px_rgba(229,57,53,0.15)] transition duration-200"
+                  className="aero-input appearance-none cursor-pointer focus:border-[#EF3B3A] focus:ring-1 focus:ring-[#EF3B3A]/30 focus:shadow-[0_0_15px_rgba(229,57,53,0.15)] transition duration-200"
                 >
                   <option value="AMBULANCE">Ambulance Operator / Paramedic</option>
                   <option value="POLICE">Traffic Police Command Officer</option>
@@ -461,28 +461,28 @@ export function RegisterPage({ onRegister }: RegisterPageProps) {
               <AnimatePresence mode="popLayout">
                 {formData.role === 'AMBULANCE' && (
                   <motion.div initial={{ opacity: 0, y: -8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -8 }} transition={{ duration: 0.3 }} className="group">
-                    <label className="block text-[10px] font-bold text-[#A7ADB5] uppercase tracking-widest mb-2 transition-colors group-focus-within:text-white">Vehicle Registration Number</label>
+                    <label className="block text-[10px] font-bold text-aero-text-secondary uppercase tracking-widest mb-2 transition-colors group-focus-within:text-aero-text-primary">Vehicle Registration Number</label>
                     <input
                       type="text"
                       placeholder="e.g. KA-01-EA-1008"
                       value={formData.vehicleNumber || ''}
                       onChange={(e) => setFormData({...formData, vehicleNumber: e.target.value})}
                       required
-                      className="enterprise-input focus:border-[#E53935] focus:ring-1 focus:ring-[#E53935]/30 focus:shadow-[0_0_15px_rgba(229,57,53,0.15)] transition duration-200"
+                      className="aero-input focus:border-[#EF3B3A] focus:ring-1 focus:ring-[#EF3B3A]/30 focus:shadow-[0_0_15px_rgba(229,57,53,0.15)] transition duration-200"
                     />
                   </motion.div>
                 )}
 
                 {formData.role === 'POLICE' && (
                   <motion.div initial={{ opacity: 0, y: -8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -8 }} transition={{ duration: 0.3 }} className="group">
-                    <label className="block text-[10px] font-bold text-[#A7ADB5] uppercase tracking-widest mb-2 transition-colors group-focus-within:text-white">Police Badge Number</label>
+                    <label className="block text-[10px] font-bold text-aero-text-secondary uppercase tracking-widest mb-2 transition-colors group-focus-within:text-aero-text-primary">Police Badge Number</label>
                     <input
                       type="text"
                       placeholder="e.g. B-4091"
                       value={formData.badgeNumber || ''}
                       onChange={(e) => setFormData({...formData, badgeNumber: e.target.value})}
                       required
-                      className="enterprise-input focus:border-[#E53935] focus:ring-1 focus:ring-[#E53935]/30 focus:shadow-[0_0_15px_rgba(229,57,53,0.15)] transition duration-200"
+                      className="aero-input focus:border-[#EF3B3A] focus:ring-1 focus:ring-[#EF3B3A]/30 focus:shadow-[0_0_15px_rgba(229,57,53,0.15)] transition duration-200"
                     />
                   </motion.div>
                 )}
@@ -490,7 +490,7 @@ export function RegisterPage({ onRegister }: RegisterPageProps) {
                 {['HOSPITAL', 'AMBULANCE'].includes(formData.role) && (
                   <motion.div initial={{ opacity: 0, y: -8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -8 }} transition={{ duration: 0.3 }} className="group relative z-20">
                     <div className="flex items-center justify-between mb-2">
-                      <label className="block text-[10px] font-bold text-[#A7ADB5] uppercase tracking-widest transition-colors group-focus-within:text-white">Assigned Hospital Facility</label>
+                      <label className="block text-[10px] font-bold text-aero-text-secondary uppercase tracking-widest transition-colors group-focus-within:text-aero-text-primary">Assigned Hospital Facility</label>
                       <div className="flex gap-1">
                         {[5, 15, 25, 50].map(r => (
                           <button
@@ -499,8 +499,8 @@ export function RegisterPage({ onRegister }: RegisterPageProps) {
                             onClick={() => setSearchRadius(r * 1000)}
                             className={`px-2 py-0.5 text-[9px] font-bold rounded transition-colors ${
                               searchRadius === r * 1000 
-                                ? 'bg-[#E53935] text-white' 
-                                : 'bg-[#1A1D24] text-[#A7ADB5] hover:text-white border border-border-subtle'
+                                ? 'bg-[#EF3B3A] text-aero-text-primary' 
+                                : 'bg-[#1A1D24] text-aero-text-secondary hover:text-aero-text-primary border border-aero-border'
                             }`}
                           >
                             {r}km
@@ -522,7 +522,7 @@ export function RegisterPage({ onRegister }: RegisterPageProps) {
                           setIsDropdownOpen(true);
                         }}
                         onBlur={() => setTimeout(() => setIsDropdownOpen(false), 200)}
-                        className="enterprise-input focus:border-[#E53935] focus:ring-1 focus:ring-[#E53935]/30 focus:shadow-[0_0_15px_rgba(229,57,53,0.15)] transition duration-200"
+                        className="aero-input focus:border-[#EF3B3A] focus:ring-1 focus:ring-[#EF3B3A]/30 focus:shadow-[0_0_15px_rgba(229,57,53,0.15)] transition duration-200"
                       />
                       <AnimatePresence>
                         {isDropdownOpen && (
@@ -530,13 +530,13 @@ export function RegisterPage({ onRegister }: RegisterPageProps) {
                             initial={{ opacity: 0, y: 5 }}
                             animate={{ opacity: 1, y: 0 }}
                             exit={{ opacity: 0, y: 5 }}
-                            className="absolute z-[100] w-full mt-2 max-h-60 overflow-y-auto bg-[#0F1218] border border-border-subtle rounded-xl shadow-2xl custom-scrollbar"
+                            className="absolute z-[100] w-full mt-2 max-h-60 overflow-y-auto bg-aero-surface border border-aero-border rounded-xl shadow-2xl custom-scrollbar"
                           >
                             {hospitalSearchTerm.trim() ? (
                               <>
-                                {autocompleteLoading && <div className="p-4 text-sm text-[#A7ADB5] text-center">Searching Google Places...</div>}
+                                {autocompleteLoading && <div className="p-4 text-sm text-aero-text-secondary text-center">Searching Google Places...</div>}
                                 {!autocompleteLoading && autocompleteResults.length === 0 && (
-                                  <div className="p-4 text-sm text-[#A7ADB5] text-center">No hospitals found</div>
+                                  <div className="p-4 text-sm text-aero-text-secondary text-center">No hospitals found</div>
                                 )}
                                 {!autocompleteLoading && autocompleteResults.map((place) => (
                                   <div
@@ -545,11 +545,11 @@ export function RegisterPage({ onRegister }: RegisterPageProps) {
                                     className={`p-3 hover:bg-white/5 cursor-pointer border-b border-white/5 last:border-0 transition-colors flex justify-between items-start gap-4 ${fetchingDetailsId === place.placePrediction.placeId ? 'opacity-50 cursor-not-allowed' : ''}`}
                                   >
                                     <div className="flex-1 min-w-0">
-                                      <h4 className="text-sm font-bold text-white mb-0.5">{place.placePrediction.text.text}</h4>
-                                      <p className="text-xs text-[#A7ADB5] truncate">Google Places Result</p>
+                                      <h4 className="text-sm font-bold text-aero-text-primary mb-0.5">{place.placePrediction.text.text}</h4>
+                                      <p className="text-xs text-aero-text-secondary truncate">Google Places Result</p>
                                     </div>
                                     {fetchingDetailsId === place.placePrediction.placeId && (
-                                      <div className="w-4 h-4 rounded-full border-2 border-[#E53935] border-t-transparent animate-spin"></div>
+                                      <div className="w-4 h-4 rounded-full border-2 border-[#EF3B3A] border-t-transparent animate-spin"></div>
                                     )}
                                   </div>
                                 ))}
@@ -557,7 +557,7 @@ export function RegisterPage({ onRegister }: RegisterPageProps) {
                             ) : (
                               <>
                                 {filteredHospitals.length === 0 ? (
-                                  <div className="p-4 text-sm text-[#A7ADB5] text-center">No nearby hospitals found</div>
+                                  <div className="p-4 text-sm text-aero-text-secondary text-center">No nearby hospitals found</div>
                                 ) : (
                                   filteredHospitals.map(h => (
                                     <div
@@ -570,11 +570,11 @@ export function RegisterPage({ onRegister }: RegisterPageProps) {
                                       className="p-3 hover:bg-white/5 cursor-pointer border-b border-white/5 last:border-0 transition-colors flex justify-between items-start gap-4"
                                     >
                                       <div>
-                                        <div className="text-white text-sm font-medium">{h.name}</div>
-                                        {h.address && <div className="text-[#A7ADB5] text-[10px] mt-0.5 line-clamp-1">{h.address}</div>}
+                                        <div className="text-aero-text-primary text-sm font-medium">{h.name}</div>
+                                        {h.address && <div className="text-aero-text-secondary text-[10px] mt-0.5 line-clamp-1">{h.address}</div>}
                                       </div>
                                       {('distanceMeters' in h) && (
-                                        <div className="text-xs font-bold text-[#20C997] shrink-0 bg-[#20C997]/10 px-2 py-0.5 rounded-full">
+                                        <div className="text-xs font-bold text-[#12B981] shrink-0 bg-[#12B981]/10 px-2 py-0.5 rounded-full">
                                           {((h as NormalizedHospital).distanceMeters / 1000).toFixed(1)} km
                                         </div>
                                       )}
@@ -588,7 +588,7 @@ export function RegisterPage({ onRegister }: RegisterPageProps) {
                       </AnimatePresence>
                     </div>
                     {mapHospitals.length > 0 && (
-                      <p className="text-[10px] text-[#20C997] mt-1.5 font-bold">📡 Loaded from Live Map Data</p>
+                      <p className="text-[10px] text-[#12B981] mt-1.5 font-bold">📡 Loaded from Live Map Data</p>
                     )}
                   </motion.div>
                 )}
@@ -602,14 +602,14 @@ export function RegisterPage({ onRegister }: RegisterPageProps) {
                 className="grid grid-cols-1 sm:grid-cols-2 gap-4"
               >
                 <div className="group">
-                  <label className="block text-[10px] font-bold text-[#A7ADB5] uppercase tracking-widest mb-2 transition-colors group-focus-within:text-white">Create Password</label>
+                  <label className="block text-[10px] font-bold text-aero-text-secondary uppercase tracking-widest mb-2 transition-colors group-focus-within:text-aero-text-primary">Create Password</label>
                   <input
                     type="password"
                     placeholder="Min 6 characters"
                     value={formData.password}
                     onChange={(e) => setFormData({...formData, password: e.target.value})}
                     required
-                    className="enterprise-input focus:border-[#E53935] focus:ring-1 focus:ring-[#E53935]/30 focus:shadow-[0_0_15px_rgba(229,57,53,0.15)] transition duration-200"
+                    className="aero-input focus:border-[#EF3B3A] focus:ring-1 focus:ring-[#EF3B3A]/30 focus:shadow-[0_0_15px_rgba(229,57,53,0.15)] transition duration-200"
                   />
                   {/* Password strength */}
                   <div className="mt-2 flex gap-1 h-1">
@@ -624,14 +624,14 @@ export function RegisterPage({ onRegister }: RegisterPageProps) {
                 </div>
 
                 <div className="group">
-                  <label className="block text-[10px] font-bold text-[#A7ADB5] uppercase tracking-widest mb-2 transition-colors group-focus-within:text-white">Confirm Password</label>
+                  <label className="block text-[10px] font-bold text-aero-text-secondary uppercase tracking-widest mb-2 transition-colors group-focus-within:text-aero-text-primary">Confirm Password</label>
                   <input
                     type="password"
                     placeholder="Re-enter password"
                     value={confirmPassword}
                     onChange={(e) => setConfirmPassword(e.target.value)}
                     required
-                    className="enterprise-input focus:border-[#E53935] focus:ring-1 focus:ring-[#E53935]/30 focus:shadow-[0_0_15px_rgba(229,57,53,0.15)] transition duration-200"
+                    className="aero-input focus:border-[#EF3B3A] focus:ring-1 focus:ring-[#EF3B3A]/30 focus:shadow-[0_0_15px_rgba(229,57,53,0.15)] transition duration-200"
                   />
                 </div>
               </motion.div>
@@ -643,7 +643,7 @@ export function RegisterPage({ onRegister }: RegisterPageProps) {
                 transition={{ delay: 0.3, duration: 0.3, ease: 'easeOut' }}
                 className="flex items-start gap-3 mt-2 cursor-pointer group"
               >
-                <div className="relative mt-0.5 flex items-center justify-center w-4 h-4 rounded border border-border-subtle bg-[#0F1218] transition-colors group-hover:border-[#E53935]/50 overflow-hidden shrink-0">
+                <div className="relative mt-0.5 flex items-center justify-center w-4 h-4 rounded border border-aero-border bg-aero-surface transition-colors group-hover:border-[#EF3B3A]/50 overflow-hidden shrink-0">
                   <input
                     type="checkbox"
                     required
@@ -658,7 +658,7 @@ export function RegisterPage({ onRegister }: RegisterPageProps) {
                         animate={{ scale: 1, opacity: 1 }}
                         exit={{ scale: 0, opacity: 0 }}
                         transition={{ duration: 0.15, ease: 'easeOut' }}
-                        className="absolute inset-0 bg-[#E53935] flex items-center justify-center"
+                        className="absolute inset-0 bg-[#EF3B3A] flex items-center justify-center"
                       >
                         <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="3.5" strokeLinecap="round" strokeLinejoin="round">
                           <polyline points="20 6 9 17 4 12" />
@@ -667,11 +667,11 @@ export function RegisterPage({ onRegister }: RegisterPageProps) {
                     )}
                   </AnimatePresence>
                 </div>
-                <span className="text-xs text-[#A7ADB5] leading-relaxed group-hover:text-text-primary transition-colors">
+                <span className="text-xs text-aero-text-secondary leading-relaxed group-hover:text-aero-text-primary transition-colors">
                   I agree to AERO's{' '}
-                  <button type="button" onClick={(e) => { e.preventDefault(); setLegalDrawerType('protocol'); setLegalDrawerOpen(true); }} className="font-bold text-[#E53935] hover:text-[#ef5350]">emergency response protocol</button>
+                  <button type="button" onClick={(e) => { e.preventDefault(); setLegalDrawerType('protocol'); setLegalDrawerOpen(true); }} className="font-bold text-[#EF3B3A] hover:text-[#D92F2F]">emergency response protocol</button>
                   {' '}&{' '}
-                  <button type="button" onClick={(e) => { e.preventDefault(); setLegalDrawerType('terms'); setLegalDrawerOpen(true); }} className="font-bold text-[#E53935] hover:text-[#ef5350]">terms of service</button>.
+                  <button type="button" onClick={(e) => { e.preventDefault(); setLegalDrawerType('terms'); setLegalDrawerOpen(true); }} className="font-bold text-[#EF3B3A] hover:text-[#D92F2F]">terms of service</button>.
                 </span>
               </motion.label>
 
@@ -683,7 +683,7 @@ export function RegisterPage({ onRegister }: RegisterPageProps) {
                 <button
                   type="submit"
                   disabled={isLoading || !agreed}
-                  className="w-full py-3.5 mt-2 rounded-xl text-sm font-black tracking-widest uppercase transition duration-200 bg-[#E53935] text-white hover:bg-[#ef5350] hover:-translate-y-[1px] hover:shadow-[0_6px_20px_rgba(229,57,53,0.3)] active:scale-[0.98] disabled:opacity-50 disabled:cursor-not-allowed disabled:shadow-none disabled:transform-none"
+                  className="w-full py-3.5 mt-2 rounded-xl text-sm font-black tracking-widest uppercase transition duration-200 bg-[#EF3B3A] text-aero-text-primary hover:bg-[#D92F2F] hover:-translate-y-[1px] hover:shadow-[0_6px_20px_rgba(229,57,53,0.3)] active:scale-[0.98] disabled:opacity-50 disabled:cursor-not-allowed disabled:shadow-none disabled:transform-none"
                 >
                   <AnimatePresence mode="wait">
                     {isLoading ? (
@@ -720,10 +720,10 @@ export function RegisterPage({ onRegister }: RegisterPageProps) {
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
               transition={{ delay: 0.4, duration: 0.3 }}
-              className="mt-6 pt-6 border-t border-border-subtle text-center"
+              className="mt-6 pt-6 border-t border-aero-border text-center"
             >
-              <span className="text-sm text-[#A7ADB5] font-medium">Already have an account? </span>
-              <button onClick={() => navigate('/login')} className="font-bold text-[#E53935] hover:text-[#ef5350] transition-colors text-sm">
+              <span className="text-sm text-aero-text-secondary font-medium">Already have an account? </span>
+              <button onClick={() => navigate('/login')} className="font-bold text-[#EF3B3A] hover:text-[#D92F2F] transition-colors text-sm">
                 Sign In
               </button>
             </motion.div>
@@ -740,12 +740,12 @@ export function RegisterPage({ onRegister }: RegisterPageProps) {
         <div className="h-full flex flex-col bg-[#070A0F] text-[#F4F7FA]">
           {/* Drawer Header */}
           <div className="flex items-center justify-between p-6 border-b border-white/[0.08]">
-            <h2 className="text-xl font-bold tracking-tight text-white">
+            <h2 className="text-xl font-bold tracking-tight text-aero-text-primary">
               {legalDrawerType === 'protocol' ? 'Emergency Protocol' : 'Terms of Service'}
             </h2>
             <button
               onClick={() => setLegalDrawerOpen(false)}
-              className="p-2 rounded-lg bg-white/5 hover:bg-white/10 text-[#A7ADB5] hover:text-white transition-colors"
+              className="p-2 rounded-lg bg-white/5 hover:bg-white/10 text-aero-text-secondary hover:text-aero-text-primary transition-colors"
             >
               <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                 <line x1="18" y1="6" x2="6" y2="18"></line>
@@ -756,7 +756,7 @@ export function RegisterPage({ onRegister }: RegisterPageProps) {
           
           {/* Drawer Content */}
           <div className="flex-1 overflow-y-auto p-6 custom-scrollbar">
-            <div className="prose prose-invert prose-red max-w-none text-sm text-[#A7ADB5] space-y-6">
+            <div className="prose prose-invert prose-red max-w-none text-sm text-aero-text-secondary space-y-6">
               {legalDrawerType === 'protocol' ? <EmergencyProtocolContent /> : <TermsOfServiceContent />}
             </div>
           </div>
@@ -769,7 +769,7 @@ export function RegisterPage({ onRegister }: RegisterPageProps) {
                 setAgreed(true);
                 setLegalDrawerOpen(false);
               }}
-              className="w-full py-3 bg-[#E53935] text-white rounded-lg font-bold text-sm hover:bg-[#ef5350] transition-colors"
+              className="w-full py-3 bg-[#EF3B3A] text-aero-text-primary rounded-lg font-bold text-sm hover:bg-[#D92F2F] transition-colors"
             >
               Accept & Continue
             </button>

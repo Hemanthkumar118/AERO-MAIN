@@ -46,6 +46,13 @@ class RealtimeService {
           this.handlePostgresChange(payload);
         }
       )
+      .on(
+        'broadcast',
+        { event: 'location_update' },
+        (payload: any) => {
+          this.handleLocationBroadcast(payload);
+        }
+      )
       .subscribe((status: string) => {
         if (status === 'SUBSCRIBED') {
           this.connectionState = 'connected';
@@ -107,6 +114,33 @@ class RealtimeService {
       (a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
     );
     this.dispatchLocal('incidents_updated', currentIncidents);
+  }
+
+  private handleLocationBroadcast(payload: any) {
+    if (!payload || !payload.payload) return;
+    const { incidentId, latitude, longitude, speed, heading } = payload.payload;
+    if (!incidentId) return;
+
+    const incident = this.incidents.get(incidentId);
+    if (incident) {
+      // Update in memory and broadcast locally for instant UI update
+      incident.current_latitude = latitude;
+      incident.current_longitude = longitude;
+      incident.current_speed = speed;
+      incident.current_heading = heading;
+      
+      this.broadcastIncidents();
+    }
+  }
+
+  public broadcastLocation(payload: any) {
+    if (this.channel && this.connectionState === 'connected') {
+      this.channel.send({
+        type: 'broadcast',
+        event: 'location_update',
+        payload
+      }).catch((e: any) => console.warn('Broadcast failed:', e));
+    }
   }
 
   // ── Event Bus ──

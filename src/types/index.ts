@@ -22,11 +22,13 @@ export type EmergencyPriority = 'CODE_RED' | 'CODE_AMBER' | 'CODE_YELLOW';
 export type EmergencyCategory = 'CARDIAC' | 'TRAUMA' | 'STROKE' | 'RESPIRATORY' | 'OBSTETRIC' | 'PEDIATRIC' | 'GENERAL';
 
 export interface PatientVitals {
-  heartRate: number; // bpm
-  bloodPressure: string; // e.g. "135/88"
-  spo2: number; // %
-  respiratoryRate: number; // breaths/min
-  gcsScore: number; // Glasgow Coma Scale 3-15
+  heartRate?: number; // bpm
+  bloodPressure?: string; // e.g. "135/88"
+  spo2?: number; // %
+  respiratoryRate?: number; // breaths/min
+  gcsScore?: number; // Glasgow Coma Scale 3-15
+  measuredAt?: string;
+  sourceDevice?: string;
 }
 
 export interface PatientInfo {
@@ -35,10 +37,45 @@ export interface PatientInfo {
   gender?: 'M' | 'F' | 'Other';
   category: EmergencyCategory;
   priority: EmergencyPriority;
-  chiefComplaint: string;
-  vitals: PatientVitals;
+  chiefComplaint?: string;
+  vitals?: PatientVitals;
   paramedicNotes?: string;
   leadDoctorAssigned?: string;
+  leadDoctorSpecialty?: string;
+  leadDoctorContact?: string;
+}
+
+export type ReadinessTaskStatus = 'PENDING' | 'IN_PROGRESS' | 'READY' | 'BLOCKED';
+
+export interface ReadinessTask {
+  id: string;
+  taskType: 'trauma_bay' | 'icu_bed' | 'emergency_ot' | 'blood_bank' | 'specialist_team' | string;
+  title: string;
+  category: 'SURGICAL' | 'CRITICAL_CARE' | 'BLOOD_BANK' | 'CLINICAL' | 'FACILITY';
+  status: ReadinessTaskStatus;
+  isMandatory: boolean;
+  assignedTo?: string | null;
+  assignedRole?: string | null;
+  updatedAt?: string;
+  updatedBy?: string | null;
+  notes?: string;
+}
+
+export interface HospitalReadinessState {
+  incidentId: string;
+  hospitalStatus: 'PENDING' | 'ACCEPTED' | 'READY';
+  bayReadinessConfirmed: boolean;
+  confirmedAt?: string | null;
+  confirmedBy?: string | null;
+  assignedSpecialist?: {
+    id?: string;
+    name: string;
+    specialty?: string;
+    contact?: string;
+    assignedAt?: string;
+  } | null;
+  tasks: ReadinessTask[];
+  lastUpdatedAt: string;
 }
 
 export interface HospitalPreparationState {
@@ -61,8 +98,14 @@ export interface Emergency {
   driverPhone?: string;
   hospital: Hospital;
   route?: RouteInfo;
+  route_distance_meters?: number;
+  route_duration_seconds?: number;
+  traffic_duration_seconds?: number;
+  isTrafficAware?: boolean;
+  route_provider?: string;
   patient?: PatientInfo;
   hospitalPrep?: HospitalPreparationState;
+  readinessState?: HospitalReadinessState;
   acceptedBy?: {
     id: string;
     displayName: string;
@@ -97,6 +140,7 @@ export interface EmergencyIncident {
   route_duration_seconds?: number;
   traffic_duration_seconds?: number;
   traffic_status?: string;
+  route_provider?: string;
 
   route_version?: number;
   last_reroute_at?: string;
@@ -129,8 +173,10 @@ export interface SOSState {
   distanceMeters?: number;
   etaSeconds?: number;
   trafficAwareEtaSeconds?: number;
+  isTrafficAware?: boolean;
+  trafficDelaySeconds?: number;
   trafficStatus?: 'LIVE' | 'UNAVAILABLE';
-  routeProvider?: 'google' | 'mapbox' | 'osrm';
+  routeProvider?: 'google' | 'mapbox' | 'osrm' | 'tomtom' | string;
   speedKmH?: number;
   startedAt?: string;
   updatedAt?: string;
@@ -183,6 +229,22 @@ export interface TrafficIncident {
   active: boolean;
 }
 
+export interface TomTomIncident {
+  id: string;
+  category: string;
+  severity: 'minor' | 'moderate' | 'major' | 'blocking' | 'unknown';
+  description: string;
+  delaySeconds: number;
+  delayMinutes?: number;
+  lengthMeters: number;
+  from?: string;
+  to?: string;
+  startTime?: string;
+  endTime?: string;
+  location: LatLng;
+  geometry?: [number, number][]; // [lat, lng] array
+}
+
 export type CongestionLevel = 'green' | 'yellow' | 'orange' | 'red';
 
 export interface CongestionSegment {
@@ -214,11 +276,17 @@ export interface RouteInfo {
   distanceMeters: number;
   etaSeconds: number;
   trafficAwareEtaSeconds?: number;
+  isTrafficAware?: boolean;
+  trafficDelaySeconds?: number;
+  staticEtaSeconds?: number;
+  calculatedAt?: string;
   trafficStatus?: 'LIVE' | 'UNAVAILABLE' | 'MODERATE' | 'HEAVY' | 'SEVERE';
   routeProvider?: string;
   waypoints?: LatLng[];
   junctions?: Junction[];
   congestionSegments?: CongestionSegment[];
+  routeIncidents?: any[];
+  alternatives?: any[];
   steps?: any[];
 }
 
@@ -236,7 +304,7 @@ export interface PoliceCoordinationMessage {
 
 // ── Connection State ──
 export type ConnectionState = 'connected' | 'disconnected' | 'reconnecting';
-export type GPSState = 'acquiring' | 'active' | 'unavailable';
+export type GPSState = 'acquiring' | 'active' | 'stale' | 'unavailable' | 'permission_denied';
 export type AvailabilityStatus = 'AVAILABLE' | 'UNAVAILABLE' | 'BUSY';
 
 // ── UI Variants ──

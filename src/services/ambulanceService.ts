@@ -1,6 +1,6 @@
 import { supabase } from '../lib/supabase';
 
-import type { Emergency, Hospital, PatientInfo, TrafficIncident } from '../types';
+import type { Emergency, Hospital, PatientInfo, TrafficIncident, RouteInfo } from '../types';
 
 export const ambulanceService = {
   async getAmbulanceState(ambulanceId: string) {
@@ -54,6 +54,7 @@ export const ambulanceService = {
     hospital: Hospital,
     patientData?: Partial<PatientInfo>,
     currentPos?: [number, number],
+    route?: RouteInfo | null,
   ): Promise<Emergency> {
     const { data: { session }, error: sessionError } = await supabase.auth.getSession();
     if (sessionError || !session?.user) {
@@ -78,8 +79,7 @@ export const ambulanceService = {
     
     const startPos = currentPos || [17.44, 78.34];
 
-    // Fast insert without waiting for route calculation or ambulance lookup
-    const { data, error } = await supabase.from('emergency_incidents').insert({
+    const insertPayload: any = {
       user_id: userId,
       incident_type: patientData?.category || 'CARDIAC',
       priority: pgPriority,
@@ -94,11 +94,66 @@ export const ambulanceService = {
       current_longitude: startPos[1],
       current_speed: 0,
       description: patientData?.chiefComplaint || 'Emergency Request'
-    }).select().single();
+    };
+
+    if (route && route.polyline && route.polyline.length > 0) {
+      insertPayload.route_geometry = route.polyline;
+      insertPayload.route_distance_meters = route.distanceMeters;
+      insertPayload.route_duration_seconds = route.etaSeconds;
+      insertPayload.traffic_duration_seconds = route.trafficAwareEtaSeconds || route.etaSeconds;
+      insertPayload.traffic_status = route.trafficStatus || (route.isTrafficAware ? 'LIVE' : 'UNAVAILABLE');
+      if (route.routeProvider) {
+        insertPayload.route_provider = route.routeProvider;
+      } else {
+        insertPayload.route_provider = 'tomtom';
+      }
+      insertPayload.route_version = 1;
+      insertPayload.route_updated_at = route.calculatedAt || new Date().toISOString();
+    }
+
+    // 1. Primary insert attempt
+    let { data, error } = await supabase.from('emergency_incidents').insert(insertPayload).select().single();
     
+    // 2. Resilient fallback: If route_provider is not in the schema cache, retry without it
+    if (error && (error.code === 'PGRST204' || error.message?.includes('route_provider') || (error as any).details?.includes('route_provider'))) {
+      console.warn('[AERO SOS] route_provider column not found in schema cache. Retrying insert without route_provider...');
+      delete insertPayload.route_provider;
+      const retryResult = await supabase.from('emergency_incidents').insert(insertPayload).select().single();
+      data = retryResult.data;
+      error = retryResult.error;
+    }
+
+    // 3. Safety fallback: If any other optional route metadata failed in schema cache, fallback to core payload
+    if (error && (error.code === 'PGRST204' || error.message?.includes('schema cache') || error.code === '42703')) {
+      console.warn('[AERO SOS] Optional route metadata schema mismatch. Retrying with essential emergency payload to protect patient transport...', error);
+      const corePayload: any = {
+        user_id: userId,
+        incident_type: insertPayload.incident_type,
+        priority: insertPayload.priority,
+        status: 'active',
+        ambulance_id: ambulanceId,
+        latitude: startPos[0],
+        longitude: startPos[1],
+        destination_hospital: hospital.name,
+        destination_latitude: hospital.location.latitude,
+        destination_longitude: hospital.location.longitude,
+        current_latitude: startPos[0],
+        current_longitude: startPos[1],
+        current_speed: 0,
+        description: insertPayload.description,
+      };
+      if (route?.polyline?.length) {
+        corePayload.route_geometry = route.polyline;
+      }
+      const coreResult = await supabase.from('emergency_incidents').insert(corePayload).select().single();
+      data = coreResult.data;
+      error = coreResult.error;
+    }
+
     if (error || !data) {
       console.error('Supabase insert failed:', error);
-      throw new Error(`Failed to create emergency incident: ${error?.message}`);
+      const sanitizedMsg = error?.message?.replace(/https?:\/\/[^\s]+/g, '[redacted]') || 'Database insert failed';
+      throw new Error(`Failed to create emergency incident: ${sanitizedMsg}`);
     }
 
     return {
@@ -116,21 +171,15 @@ export const ambulanceService = {
       distanceCoveredKm: 0,
       createdAt: data.created_at || new Date().toISOString(),
       patient: {
-        name: patientData?.name || 'Emergency Patient',
-        age: patientData?.age || 45,
-        gender: patientData?.gender || 'M',
+        name: patientData?.name,
+        age: patientData?.age,
+        gender: patientData?.gender,
         category: patientData?.category || 'CARDIAC',
         priority: patientData?.priority || 'CODE_RED',
-        chiefComplaint: patientData?.chiefComplaint || 'Acute emergency, unstable vitals',
-        vitals: patientData?.vitals || {
-          heartRate: 114,
-          bloodPressure: '152/94',
-          spo2: 92,
-          respiratoryRate: 22,
-          gcsScore: 14,
-        },
-        paramedicNotes: patientData?.paramedicNotes || 'Patient loaded. Oxygen administered.',
-        leadDoctorAssigned: 'ER Duty Team',
+        chiefComplaint: patientData?.chiefComplaint || 'Emergency Request',
+        vitals: patientData?.vitals,
+        paramedicNotes: patientData?.paramedicNotes,
+        leadDoctorAssigned: undefined,
       },
       hospitalPrep: {
         traumaBayReady: false,

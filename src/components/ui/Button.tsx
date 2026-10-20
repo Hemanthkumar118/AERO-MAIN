@@ -11,17 +11,17 @@ interface ButtonProps extends React.ButtonHTMLAttributes<HTMLButtonElement> {
 
 const variantClasses: Record<ButtonVariant, string> = {
   primary:
-    'enterprise-button-primary',
+    'aero-btn-primary',
   emergency:
-    'bg-status-error text-white hover:bg-red-600 active:scale-95 shadow-[0_0_20px_rgba(229,57,53,0.4)]',
+    'bg-status-error text-aero-text-primary hover:bg-red-600 active:scale-95 shadow-[0_0_20px_rgba(229,57,53,0.4)]',
   success:
     'bg-status-success text-[#0B0D10] font-bold hover:brightness-110 active:scale-95',
   danger:
-    'bg-status-error text-white hover:bg-red-600 active:scale-95',
+    'bg-status-error text-aero-text-primary hover:bg-red-600 active:scale-95',
   ghost:
-    'bg-transparent text-text-secondary hover:text-text-primary hover:bg-white/5 active:scale-95',
+    'bg-transparent text-aero-text-secondary hover:text-aero-text-primary hover:bg-white/5 active:scale-95',
   outline:
-    'enterprise-button-secondary',
+    'aero-btn-secondary',
 };
 
 const sizeClasses: Record<ButtonSize, string> = {

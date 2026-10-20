@@ -12,6 +12,7 @@ export interface AeroProfile {
   created_at?: string;
   updated_at?: string;
   hospital_id?: string | null;
+  organization?: string | null;
 }
 
 interface AuthContextType {
@@ -82,9 +83,18 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         }
       }
     } catch (err: any) {
-      console.error('[AuthProvider] Profile error:', err);
-      setProfileError(err.message || 'Failed to load profile');
-      setProfile(null);
+      console.warn('[AuthProvider] Profile fetch error, falling back to local user metadata:', err);
+      if (currentUser?.user_metadata?.role || currentUser?.email) {
+        setProfile({
+          id: currentUser.id,
+          role: currentUser.user_metadata?.role || 'ambulance',
+          full_name: currentUser.user_metadata?.full_name || currentUser.email?.split('@')[0] || 'AERO Operator',
+          status: 'ACTIVE',
+        } as AeroProfile);
+      } else {
+        setProfileError(err.message || 'Failed to load profile');
+        setProfile(null);
+      }
     } finally {
       setProfileLoading(false);
     }

@@ -60,18 +60,18 @@ export function GlobalEmergencyBanner({ userRole, userName }: { userRole?: strin
   const etaMins = Math.round((activeEmergency.route?.etaSeconds || 0) / 60);
 
   return (
-    <div className="relative z-30 bg-[#FF3B30]/10 border-b border-[#FF3B30]/30 px-4 py-2 flex items-center justify-between shadow-lg text-xs shrink-0">
+    <div className="relative z-30 bg-aero-red-soft border-b border-aero-red/30 px-4 py-2 flex items-center justify-between shadow-lg text-xs shrink-0">
       <div className="flex items-center gap-3">
-        <span className="w-2.5 h-2.5 rounded-full bg-[#FF3B30] animate-ping shrink-0" />
+        <span className="w-2.5 h-2.5 rounded-full bg-aero-red animate-ping shrink-0" />
         <div className="flex items-center gap-2 flex-wrap">
-          <span className="font-bold text-[#FF3B30] tracking-wider uppercase">
+          <span className="font-bold text-aero-red tracking-wider uppercase">
             LIVE EMERGENCY ({activeEmergency.id})
           </span>
-          <span className="text-[#FF3B30]/60 hidden sm:inline">•</span>
-          <span className="text-text-primary font-medium">
+          <span className="text-aero-red/60 hidden sm:inline">•</span>
+          <span className="text-aero-text-primary font-medium">
             {activeEmergency.ambulanceDisplayName} → {activeEmergency.hospital.name}
           </span>
-          <span className="bg-[#FF3B30]/20 text-[#FF3B30] px-2 py-0.5 rounded font-mono font-bold">
+          <span className="bg-aero-red-soft text-aero-red px-2 py-0.5 rounded font-mono font-bold">
             {activeEmergency.priority || 'CODE_RED'}
           </span>
         </div>
@@ -79,12 +79,12 @@ export function GlobalEmergencyBanner({ userRole, userName }: { userRole?: strin
 
       <div className="flex items-center gap-4 shrink-0">
         <div className="text-right hidden sm:block">
-          <span className="text-text-secondary block text-[10px]">CURRENT ETA</span>
-          <span className="text-[#FF3B30] font-bold font-mono text-sm">{etaMins > 0 ? `${etaMins} MINS` : '--'}</span>
+          <span className="text-aero-text-secondary block text-[10px]">CURRENT ETA</span>
+          <span className="text-aero-red font-bold font-mono text-sm">{etaMins > 0 ? `${etaMins} MINS` : '--'}</span>
         </div>
         <div className="text-right">
-          <span className="text-text-secondary block text-[10px]">SPEED</span>
-          <span className="text-[#20D67A] font-bold font-mono text-sm">{(activeEmergency.currentSpeedKmH || 0) > 0 ? `${Math.round(activeEmergency.currentSpeedKmH || 0)} km/h` : '0 km/h'}</span>
+          <span className="text-aero-text-secondary block text-[10px]">SPEED</span>
+          <span className="text-aero-green font-bold font-mono text-sm">{(activeEmergency.currentSpeedKmH || 0) > 0 ? `${Math.round(activeEmergency.currentSpeedKmH || 0)} km/h` : '0 km/h'}</span>
         </div>
       </div>
     </div>

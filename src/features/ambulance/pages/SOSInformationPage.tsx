@@ -138,7 +138,7 @@ export function SOSInformationPage() {
   if (loading) {
     return (
       <AppShell userRole="AMBULANCE" userName="Ambulance" connectionState={connState} gpsState="active">
-        <div className="flex h-full items-center justify-center bg-bg-main text-white">
+        <div className="flex h-full items-center justify-center bg-aero-background text-aero-text-primary">
            Loading SOS Information...
         </div>
       </AppShell>
@@ -148,13 +148,13 @@ export function SOSInformationPage() {
   if (!incident || !sosState || sosState.status === 'ABORTED' || sosState.status === 'COMPLETED') {
     return (
       <AppShell userRole="AMBULANCE" userName="Ambulance" connectionState={connState} gpsState="active">
-        <div className="flex flex-col h-full items-center justify-center bg-bg-main p-6 text-center">
+        <div className="flex flex-col h-full items-center justify-center bg-aero-background p-6 text-center">
           <AlertTriangle className="w-16 h-16 text-yellow-500 mb-4" />
-          <h2 className="text-2xl font-bold text-white mb-2">NO ACTIVE SOS</h2>
-          <p className="text-text-secondary mb-6 max-w-md">No active emergency is currently associated with this ambulance. If you just completed or aborted an emergency, it has been logged securely.</p>
+          <h2 className="text-2xl font-bold text-aero-text-primary mb-2">NO ACTIVE SOS</h2>
+          <p className="text-aero-text-secondary mb-6 max-w-md">No active emergency is currently associated with this ambulance. If you just completed or aborted an emergency, it has been logged securely.</p>
           <button 
             onClick={() => navigate('/ambulance')}
-            className="bg-bg-surface hover:bg-bg-elevated text-white px-6 py-3 rounded-lg border border-border-subtle transition-colors font-bold"
+            className="bg-aero-surface hover:bg-aero-surface-soft text-aero-text-primary px-6 py-3 rounded-lg border border-aero-border transition-colors font-bold"
           >
             BACK TO AMBULANCE DASHBOARD
           </button>
@@ -165,20 +165,20 @@ export function SOSInformationPage() {
 
   return (
     <AppShell userRole="AMBULANCE" userName="Ambulance" connectionState={connState} gpsState="active">
-      <div className="flex flex-col h-full bg-bg-main overflow-y-auto">
+      <div className="flex flex-col h-full bg-aero-background overflow-y-auto">
         {/* Header */}
-        <div className="sticky top-0 z-10 bg-bg-main/80 backdrop-blur-md border-b border-border-subtle p-4">
+        <div className="sticky top-0 z-10 bg-aero-background/80 backdrop-blur-md border-b border-aero-border p-4">
           <div className="max-w-4xl mx-auto flex items-center justify-between">
              <button 
                onClick={() => navigate('/ambulance')}
-               className="flex items-center gap-2 text-text-secondary hover:text-white transition-colors"
+               className="flex items-center gap-2 text-aero-text-secondary hover:text-aero-text-primary transition-colors"
              >
                <ArrowLeft className="w-5 h-5" />
                <span className="font-medium text-sm">Map View</span>
              </button>
-             <h1 className="text-lg font-bold text-white tracking-widest">SOS INFORMATION</h1>
-             <div className="flex items-center gap-2 text-xs font-bold text-[#FF3B30] bg-[#FF3B30]/10 px-3 py-1.5 rounded-full border border-[#FF3B30]/20 animate-pulse">
-               <span className="w-2 h-2 rounded-full bg-[#FF3B30]" />
+             <h1 className="text-lg font-bold text-aero-text-primary tracking-widest">SOS INFORMATION</h1>
+             <div className="flex items-center gap-2 text-xs font-bold text-aero-red bg-aero-red-soft px-3 py-1.5 rounded-full border border-[#FF3B30]/20 animate-pulse">
+               <span className="w-2 h-2 rounded-full bg-aero-red" />
                ACTIVE
              </div>
           </div>
@@ -186,19 +186,19 @@ export function SOSInformationPage() {
 
         <div className="p-4 md:p-8 max-w-4xl mx-auto w-full space-y-6">
           {/* Section: EMERGENCY */}
-          <section className="bg-bg-surface border border-border-subtle rounded-xl overflow-hidden">
-            <div className="bg-bg-elevated border-b border-border-subtle px-4 py-3 flex items-center gap-2">
-               <Activity className="w-4 h-4 text-[#35C7FF]" />
-               <h2 className="text-sm font-bold text-white uppercase tracking-wider">Emergency</h2>
+          <section className="bg-aero-surface border border-aero-border rounded-xl overflow-hidden">
+            <div className="bg-aero-surface-soft border-b border-aero-border px-4 py-3 flex items-center gap-2">
+               <Activity className="w-4 h-4 text-aero-blue" />
+               <h2 className="text-sm font-bold text-aero-text-primary uppercase tracking-wider">Emergency</h2>
             </div>
             <div className="p-4 grid grid-cols-1 md:grid-cols-2 gap-4">
                <div>
-                 <div className="text-xs text-text-secondary uppercase">Emergency ID</div>
-                 <div className="font-mono text-sm text-white mt-1">{incident.id}</div>
+                 <div className="text-xs text-aero-text-secondary uppercase">Emergency ID</div>
+                 <div className="font-mono text-sm text-aero-text-primary mt-1">{incident.id}</div>
                </div>
                <div>
-                 <div className="text-xs text-text-secondary uppercase">Started</div>
-                 <div className="text-sm text-white mt-1">
+                 <div className="text-xs text-aero-text-secondary uppercase">Started</div>
+                 <div className="text-sm text-aero-text-primary mt-1">
                     {new Intl.DateTimeFormat('en-GB', { 
                         day: '2-digit', month: 'short', year: 'numeric', 
                         hour: '2-digit', minute: '2-digit', hour12: true 
@@ -206,48 +206,48 @@ export function SOSInformationPage() {
                  </div>
                </div>
                <div>
-                 <div className="text-xs text-text-secondary uppercase">Category</div>
-                 <div className="text-sm font-bold text-white mt-1">{incident.incident_type}</div>
+                 <div className="text-xs text-aero-text-secondary uppercase">Category</div>
+                 <div className="text-sm font-bold text-aero-text-primary mt-1">{incident.incident_type}</div>
                </div>
                <div>
-                 <div className="text-xs text-text-secondary uppercase">Priority</div>
-                 <div className="text-sm font-bold text-[#FF3B30] mt-1">{incident.priority?.toUpperCase()}</div>
+                 <div className="text-xs text-aero-text-secondary uppercase">Priority</div>
+                 <div className="text-sm font-bold text-aero-red mt-1">{incident.priority?.toUpperCase()}</div>
                </div>
             </div>
           </section>
 
           {/* Section: DESTINATION & NAVIGATION */}
-          <section className="bg-bg-surface border border-border-subtle rounded-xl overflow-hidden">
-            <div className="bg-bg-elevated border-b border-border-subtle px-4 py-3 flex items-center gap-2">
-               <Target className="w-4 h-4 text-[#20D67A]" />
-               <h2 className="text-sm font-bold text-white uppercase tracking-wider">Destination & Navigation</h2>
+          <section className="bg-aero-surface border border-aero-border rounded-xl overflow-hidden">
+            <div className="bg-aero-surface-soft border-b border-aero-border px-4 py-3 flex items-center gap-2">
+               <Target className="w-4 h-4 text-aero-green" />
+               <h2 className="text-sm font-bold text-aero-text-primary uppercase tracking-wider">Destination & Navigation</h2>
             </div>
             <div className="p-4 grid grid-cols-1 md:grid-cols-2 gap-4">
                <div className="md:col-span-2">
-                 <div className="text-xs text-text-secondary uppercase">Hospital</div>
-                 <div className="text-base font-bold text-white mt-1">{incident.destination_hospital}</div>
-                 {/* {incident.destination_address && <div className="text-xs text-text-secondary mt-1">{incident.destination_address}</div>} */}
+                 <div className="text-xs text-aero-text-secondary uppercase">Hospital</div>
+                 <div className="text-base font-bold text-aero-text-primary mt-1">{incident.destination_hospital}</div>
+                 {/* {incident.destination_address && <div className="text-xs text-aero-text-secondary mt-1">{incident.destination_address}</div>} */}
                </div>
                <div>
-                 <div className="text-xs text-text-secondary uppercase">Distance Remaining</div>
-                 <div className="text-xl font-bold text-white mt-1">
+                 <div className="text-xs text-aero-text-secondary uppercase">Distance Remaining</div>
+                 <div className="text-xl font-bold text-aero-text-primary mt-1">
                    {incident.route_distance_meters ? (incident.route_distance_meters / 1000).toFixed(1) + ' km' : 'Calculating...'}
                  </div>
                </div>
                <div>
-                 <div className="text-xs text-text-secondary uppercase flex items-center gap-2">
+                 <div className="text-xs text-aero-text-secondary uppercase flex items-center gap-2">
                    ETA
                    {incident.traffic_status === 'LIVE' && (
-                     <span className="text-[9px] bg-[#34C759]/20 text-[#34C759] px-1 py-0.5 rounded border border-[#34C759]/30 font-bold">LIVE TRAFFIC</span>
+                     <span className="text-[9px] bg-aero-surface-soft text-aero-text-secondary px-1 py-0.5 rounded border border-aero-border font-bold uppercase">ROUTE ETA</span>
                    )}
                  </div>
-                 <div className="text-xl font-bold text-white mt-1">
+                 <div className="text-xl font-bold text-aero-text-primary mt-1">
                    {(incident.traffic_duration_seconds || incident.route_duration_seconds) ? Math.round((incident.traffic_duration_seconds || incident.route_duration_seconds!) / 60) + ' min' : 'Calculating...'}
                  </div>
                </div>
                <div className="md:col-span-2">
-                 <div className="text-xs text-text-secondary uppercase">Navigation Status</div>
-                 <div className="text-sm font-bold text-[#35C7FF] mt-1 flex items-center gap-2">
+                 <div className="text-xs text-aero-text-secondary uppercase">Navigation Status</div>
+                 <div className="text-sm font-bold text-aero-blue mt-1 flex items-center gap-2">
                     <ChevronRight className="w-4 h-4" />
                     {sosState.routeStatus === 'SUCCESS' ? 'ON ROUTE' : (sosState.routeStatus === 'ERROR' ? 'ROUTE ERROR' : 'REROUTING / PENDING')}
                  </div>
@@ -256,33 +256,33 @@ export function SOSInformationPage() {
           </section>
 
           {/* Section: AMBULANCE TELEMETRY */}
-          <section className="bg-bg-surface border border-border-subtle rounded-xl overflow-hidden">
-            <div className="bg-bg-elevated border-b border-border-subtle px-4 py-3 flex items-center gap-2">
+          <section className="bg-aero-surface border border-aero-border rounded-xl overflow-hidden">
+            <div className="bg-aero-surface-soft border-b border-aero-border px-4 py-3 flex items-center gap-2">
                <Activity className="w-4 h-4 text-purple-400" />
-               <h2 className="text-sm font-bold text-white uppercase tracking-wider">Ambulance Telemetry</h2>
+               <h2 className="text-sm font-bold text-aero-text-primary uppercase tracking-wider">Ambulance Telemetry</h2>
             </div>
             <div className="p-4 grid grid-cols-2 gap-4">
                <div className="col-span-2 md:col-span-1">
-                 <div className="text-xs text-text-secondary uppercase">Current Location</div>
-                 <div className="font-mono text-sm text-[#35C7FF] mt-1">
+                 <div className="text-xs text-aero-text-secondary uppercase">Current Location</div>
+                 <div className="font-mono text-sm text-aero-blue mt-1">
                     {incident.current_latitude?.toFixed(5) || '--'}, {incident.current_longitude?.toFixed(5) || '--'}
                  </div>
                </div>
                <div>
-                 <div className="text-xs text-text-secondary uppercase">GPS Accuracy</div>
-                 <div className="text-sm text-white mt-1">
+                 <div className="text-xs text-aero-text-secondary uppercase">GPS Accuracy</div>
+                 <div className="text-sm text-aero-text-primary mt-1">
                     {incident.current_accuracy ? `${Math.round(incident.current_accuracy)} m` : 'Active'}
                  </div>
                </div>
                <div>
-                 <div className="text-xs text-text-secondary uppercase">Speed</div>
-                 <div className="text-sm font-bold text-white mt-1">
+                 <div className="text-xs text-aero-text-secondary uppercase">Speed</div>
+                 <div className="text-sm font-bold text-aero-text-primary mt-1">
                     {incident.current_speed ? `${Math.round(incident.current_speed)} km/h` : '0 km/h'}
                  </div>
                </div>
                <div>
-                 <div className="text-xs text-text-secondary uppercase">Heading</div>
-                 <div className="text-sm text-white mt-1">
+                 <div className="text-xs text-aero-text-secondary uppercase">Heading</div>
+                 <div className="text-sm text-aero-text-primary mt-1">
                     {incident.current_heading !== undefined && incident.current_heading !== null ? `${Math.round(incident.current_heading)}°` : '--'}
                  </div>
                </div>
@@ -290,27 +290,27 @@ export function SOSInformationPage() {
           </section>
 
           {/* Section: COORDINATION */}
-          <section className="bg-bg-surface border border-border-subtle rounded-xl overflow-hidden">
-            <div className="bg-bg-elevated border-b border-border-subtle px-4 py-3 flex items-center gap-2">
+          <section className="bg-aero-surface border border-aero-border rounded-xl overflow-hidden">
+            <div className="bg-aero-surface-soft border-b border-aero-border px-4 py-3 flex items-center gap-2">
                <Shield className="w-4 h-4 text-orange-400" />
-               <h2 className="text-sm font-bold text-white uppercase tracking-wider">Coordination</h2>
+               <h2 className="text-sm font-bold text-aero-text-primary uppercase tracking-wider">Coordination</h2>
             </div>
             <div className="p-4 grid grid-cols-1 sm:grid-cols-2 gap-4">
                <div>
-                 <div className="text-xs text-text-secondary uppercase">Police Status</div>
+                 <div className="text-xs text-aero-text-secondary uppercase">Police Status</div>
                  <div className={`text-sm font-bold mt-1 flex items-center gap-2 ${
-                    sosState.policeStatus === 'DELIVERED' ? 'text-[#20D67A]' : 
-                    sosState.policeStatus === 'SENT' ? 'text-yellow-400' : 'text-text-secondary'
+                    sosState.policeStatus === 'DELIVERED' ? 'text-aero-green' : 
+                    sosState.policeStatus === 'SENT' ? 'text-aero-amber' : 'text-aero-text-secondary'
                  }`}>
                    {sosState.policeStatus === 'DELIVERED' ? <CheckCircle2 className="w-4 h-4" /> : <Clock className="w-4 h-4" />}
                    {sosState.policeStatus === 'DELIVERED' ? 'ACKNOWLEDGED' : (sosState.policeStatus === 'SENT' ? 'NOTIFIED' : 'PENDING')}
                  </div>
                </div>
                <div>
-                 <div className="text-xs text-text-secondary uppercase">Hospital Status</div>
+                 <div className="text-xs text-aero-text-secondary uppercase">Hospital Status</div>
                  <div className={`text-sm font-bold mt-1 flex items-center gap-2 ${
-                    sosState.hospitalStatus === 'DELIVERED' ? 'text-[#20D67A]' : 
-                    sosState.hospitalStatus === 'SENT' ? 'text-yellow-400' : 'text-text-secondary'
+                    sosState.hospitalStatus === 'DELIVERED' ? 'text-aero-green' : 
+                    sosState.hospitalStatus === 'SENT' ? 'text-aero-amber' : 'text-aero-text-secondary'
                  }`}>
                    {sosState.hospitalStatus === 'DELIVERED' ? <CheckCircle2 className="w-4 h-4" /> : <Clock className="w-4 h-4" />}
                    {sosState.hospitalStatus === 'DELIVERED' ? 'ACKNOWLEDGED' : (sosState.hospitalStatus === 'SENT' ? 'NOTIFIED' : 'PENDING')}
@@ -319,16 +319,16 @@ export function SOSInformationPage() {
             </div>
           </section>
           
-          <div className="pt-4 border-t border-border-subtle flex items-center justify-between">
+          <div className="pt-4 border-t border-aero-border flex items-center justify-between">
              <button
                onClick={handleAbort}
-               className="px-6 py-3 rounded-lg bg-bg-surface hover:bg-red-500/10 text-red-500 border border-red-500/20 transition-colors font-bold text-sm"
+               className="px-6 py-3 rounded-lg bg-aero-surface hover:bg-aero-red-soft text-aero-red border border-aero-red/20 transition-colors font-bold text-sm"
              >
                ABORT EMERGENCY
              </button>
              <button
                onClick={handleComplete}
-               className="px-6 py-3 rounded-lg bg-[#20D67A]/10 hover:bg-[#20D67A]/20 text-[#20D67A] border border-[#20D67A]/30 transition-colors font-bold text-sm"
+               className="px-6 py-3 rounded-lg bg-aero-green-soft hover:bg-aero-green-soft text-aero-green border border-aero-green/30 transition-colors font-bold text-sm"
              >
                MARK ARRIVED
              </button>

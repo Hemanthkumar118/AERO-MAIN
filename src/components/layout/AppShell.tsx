@@ -24,7 +24,7 @@ export function AppShell({
   gpsTimestamp,
 }: AppShellProps) {
   return (
-    <div className="flex flex-col h-dvh overflow-hidden bg-bg-main font-sans">
+    <div className="flex flex-col h-dvh overflow-hidden bg-aero-background font-sans">
       <StatusBar
         userRole={userRole}
         userName={userName}
@@ -43,11 +43,11 @@ export function AppShell({
             initial={{ height: 0, opacity: 0 }}
             animate={{ height: 'auto', opacity: 1 }}
             exit={{ height: 0, opacity: 0 }}
-            className="bg-[#E53935]/10 border-b border-[#E53935]/20 px-4 py-1.5 flex items-center justify-between shrink-0 overflow-hidden"
+            className="bg-[#EF3B3A]/10 border-b border-[#EF3B3A]/20 px-4 py-1.5 flex items-center justify-between shrink-0 overflow-hidden"
           >
             <div className="flex items-center gap-2">
-              <span className="w-2 h-2 rounded-full bg-red-500 animate-pulse" />
-              <span className="text-[12px] font-medium text-[#E53935]" role="alert">
+              <span className="w-2 h-2 rounded-full bg-aero-red animate-pulse" />
+              <span className="text-[12px] font-medium text-[#EF3B3A]" role="alert">
                 Network connection disconnected. Retrying real-time connection...
               </span>
             </div>
@@ -58,10 +58,10 @@ export function AppShell({
             initial={{ height: 0, opacity: 0 }}
             animate={{ height: 'auto', opacity: 1 }}
             exit={{ height: 0, opacity: 0 }}
-            className="bg-[#FFB020]/10 border-b border-[#FFB020]/20 px-4 py-1.5 flex items-center gap-2 shrink-0 overflow-hidden"
+            className="bg-aero-amber-soft border-b border-[#FFB020]/20 px-4 py-1.5 flex items-center gap-2 shrink-0 overflow-hidden"
           >
             <span className="w-2 h-2 rounded-full bg-amber-500 animate-pulse-soft shrink-0" aria-hidden="true" />
-            <span className="text-[12px] text-[#FFB020] font-medium">
+            <span className="text-[12px] text-aero-amber font-medium">
               Reconnecting to AERO central network...
             </span>
           </motion.div>
@@ -69,7 +69,7 @@ export function AppShell({
       </AnimatePresence>
 
       {/* Main content */}
-      <main className="flex-1 overflow-hidden relative z-0 min-h-0 bg-bg-main">
+      <main className="flex-1 overflow-hidden relative z-0 min-h-0 bg-aero-background">
         <motion.div 
           initial={{ opacity: 0, y: 10 }}
           animate={{ opacity: 1, y: 0 }}

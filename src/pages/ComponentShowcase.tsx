@@ -23,7 +23,7 @@ import type { AvailabilityStatus, EmergencyStatus, ConnectionState } from '../ty
 function Section({ title, children }: { title: string; children: React.ReactNode }) {
   return (
     <section className="mb-10">
-      <h2 className="text-lg font-semibold text-text-primary mb-4 pb-2 border-b border-border-subtle">
+      <h2 className="text-lg font-semibold text-aero-text-primary mb-4 pb-2 border-b border-aero-border">
         {title}
       </h2>
       {children}
@@ -34,7 +34,7 @@ function Section({ title, children }: { title: string; children: React.ReactNode
 function SubSection({ title, children }: { title: string; children: React.ReactNode }) {
   return (
     <div className="mb-6">
-      <h3 className="text-[13px] font-semibold text-text-secondary uppercase tracking-[0.05em] mb-3">{title}</h3>
+      <h3 className="text-[13px] font-semibold text-aero-text-secondary uppercase tracking-[0.05em] mb-3">{title}</h3>
       {children}
     </div>
   );
@@ -48,13 +48,13 @@ export function ComponentShowcase() {
   const [availability, setAvailability] = useState<AvailabilityStatus>('AVAILABLE');
 
   return (
-    <div className="min-h-dvh bg-bg-main">
+    <div className="min-h-dvh bg-aero-background">
       {/* Header */}
-      <div className="bg-bg-surface border-b border-border-subtle px-6 py-5">
-        <h1 className="text-xl font-bold text-text-primary">
+      <div className="bg-aero-surface border-b border-aero-border px-6 py-5">
+        <h1 className="text-xl font-bold text-aero-text-primary">
           LIFE<span className="text-info-400">LANE</span> — Design System
         </h1>
-        <p className="text-sm text-text-secondary mt-1">Component showcase &amp; living reference</p>
+        <p className="text-sm text-aero-text-secondary mt-1">Component showcase &amp; living reference</p>
       </div>
 
       <div className="max-w-4xl mx-auto px-4 sm:px-6 py-8">
@@ -191,15 +191,15 @@ export function ComponentShowcase() {
           <div className="grid gap-3 sm:grid-cols-2">
             <Card>
               <CardHeader title="Default Card" subtitle="Standard card component" />
-              <p className="text-sm text-text-secondary">Card content goes here. Used for grouping related information.</p>
+              <p className="text-sm text-aero-text-secondary">Card content goes here. Used for grouping related information.</p>
             </Card>
             <Card variant="interactive" onClick={() => addToast({ variant: 'info', message: 'Card clicked!' })}>
               <CardHeader title="Interactive Card" subtitle="Click me" />
-              <p className="text-sm text-text-secondary">Hover and click interaction.</p>
+              <p className="text-sm text-aero-text-secondary">Hover and click interaction.</p>
             </Card>
             <Card variant="compact">
               <div className="flex items-center justify-between">
-                <span className="text-sm text-text-secondary">Compact Card</span>
+                <span className="text-sm text-aero-text-secondary">Compact Card</span>
                 <Badge variant="success" dot size="sm">Online</Badge>
               </div>
             </Card>
@@ -227,17 +227,17 @@ export function ComponentShowcase() {
           <Button variant="outline" size="sm" onClick={() => setDrawerOpen(true)}>Open Bottom Drawer</Button>
           <Drawer open={drawerOpen} onClose={() => setDrawerOpen(false)} title="Emergency Details">
             <div className="space-y-3">
-              <p className="text-sm text-text-secondary">Drawer content — bottom sheet on mobile, side panel on desktop.</p>
+              <p className="text-sm text-aero-text-secondary">Drawer content — bottom sheet on mobile, side panel on desktop.</p>
               <Card variant="compact">
                 <div className="flex justify-between">
-                  <span className="text-sm text-text-secondary">Ambulance Unit 01</span>
+                  <span className="text-sm text-aero-text-secondary">Ambulance Unit 01</span>
                   <StatusBadge status="ACTIVE" />
                 </div>
               </Card>
               <Card variant="compact">
                 <div className="flex justify-between">
-                  <span className="text-sm text-text-secondary">ETA</span>
-                  <span className="text-sm font-semibold text-text-primary">7 min</span>
+                  <span className="text-sm text-aero-text-secondary">ETA</span>
+                  <span className="text-sm font-semibold text-aero-text-primary">7 min</span>
                 </div>
               </Card>
             </div>
@@ -247,9 +247,9 @@ export function ComponentShowcase() {
         {/* ═══════ TABS ═══════ */}
         <Section title="Tabs">
           <Tabs tabs={[
-            { id: 'active', label: 'Active', badge: 2, content: <p className="text-sm text-text-secondary">Active emergencies content.</p> },
-            { id: 'pending', label: 'Pending', badge: 1, content: <p className="text-sm text-text-secondary">Pending emergencies content.</p> },
-            { id: 'completed', label: 'Completed', content: <p className="text-sm text-text-secondary">Completed emergencies content.</p> },
+            { id: 'active', label: 'Active', badge: 2, content: <p className="text-sm text-aero-text-secondary">Active emergencies content.</p> },
+            { id: 'pending', label: 'Pending', badge: 1, content: <p className="text-sm text-aero-text-secondary">Pending emergencies content.</p> },
+            { id: 'completed', label: 'Completed', content: <p className="text-sm text-aero-text-secondary">Completed emergencies content.</p> },
             { id: 'disabled', label: 'Disabled', disabled: true, content: <p>Disabled tab</p> },
           ]} />
         </Section>
@@ -341,15 +341,15 @@ export function ComponentShowcase() {
           <div className="flex flex-wrap gap-8 items-start">
             <div className="text-center">
               <SOSButton onConfirm={() => addToast({ variant: 'success', message: 'SOS Sent!' })} />
-              <p className="text-[11px] text-text-primary0 mt-2">Enabled</p>
+              <p className="text-[11px] text-aero-text-secondary mt-2">Enabled</p>
             </div>
             <div className="text-center">
               <SOSButton onConfirm={() => {}} disabled disabledReason="Select a hospital first" />
-              <p className="text-[11px] text-text-primary0 mt-2">Disabled</p>
+              <p className="text-[11px] text-aero-text-secondary mt-2">Disabled</p>
             </div>
             <div className="text-center">
               <SOSButton onConfirm={() => {}} loading />
-              <p className="text-[11px] text-text-primary0 mt-2">Loading</p>
+              <p className="text-[11px] text-aero-text-secondary mt-2">Loading</p>
             </div>
           </div>
         </Section>
@@ -383,7 +383,7 @@ export function ComponentShowcase() {
         <Section title="Color Palette">
           <SubSection title="Navy">
             <div className="flex gap-1">
-              {['bg-bg-main','bg-bg-surface','bg-bg-elevated','bg-white/5','bg-white/10','bg-white/15','bg-white/20','bg-white/30','bg-white/40','bg-white/60','bg-white/80'].map((c) => (
+              {['bg-aero-background','bg-aero-surface','bg-aero-surface-soft','bg-white/5','bg-white/10','bg-white/15','bg-white/20','bg-white/30','bg-white/40','bg-white/60','bg-white/80'].map((c) => (
                 <Tooltip key={c} content={c}><div className={`w-10 h-10 rounded ${c}`} /></Tooltip>
               ))}
             </div>
@@ -391,13 +391,13 @@ export function ComponentShowcase() {
           <SubSection title="Semantic">
             <div className="space-y-2">
               {[
-                { name: 'Emergency', colors: ['bg-[#FF3B30]/20','bg-[#FF3B30]/80','bg-[#FF3B30]','bg-[#FF3B30]','bg-[#FF3B30]/60','bg-[#FF3B30]/40'] },
+                { name: 'Emergency', colors: ['bg-aero-red-soft','bg-[#FF3B30]/80','bg-aero-red','bg-aero-red','bg-[#FF3B30]/60','bg-[#FF3B30]/40'] },
                 { name: 'Warning', colors: ['bg-warning-900','bg-warning-700','bg-warning-600','bg-warning-500','bg-warning-400','bg-warning-300'] },
                 { name: 'Success', colors: ['bg-success-900','bg-success-700','bg-success-600','bg-success-500','bg-success-400','bg-success-300'] },
                 { name: 'Info', colors: ['bg-info-900','bg-info-700','bg-info-600','bg-info-500','bg-info-400','bg-info-300'] },
               ].map((group) => (
                 <div key={group.name} className="flex items-center gap-3">
-                  <span className="text-[12px] text-text-secondary w-20">{group.name}</span>
+                  <span className="text-[12px] text-aero-text-secondary w-20">{group.name}</span>
                   <div className="flex gap-1">
                     {group.colors.map((c) => (
                       <Tooltip key={c} content={c}><div className={`w-8 h-8 rounded ${c}`} /></Tooltip>
@@ -412,14 +412,14 @@ export function ComponentShowcase() {
         {/* ═══════ TYPOGRAPHY ═══════ */}
         <Section title="Typography">
           <div className="space-y-3">
-            <p className="text-[30px] font-bold leading-[1.2] text-text-primary">Display — 30px Bold</p>
-            <p className="text-2xl font-semibold text-text-primary">Heading LG — 24px Semibold</p>
-            <p className="text-xl font-semibold text-text-primary">Heading — 20px Semibold</p>
-            <p className="text-base font-semibold text-text-primary">Heading SM — 16px Semibold</p>
-            <p className="text-sm text-text-secondary">Body — 14px Regular</p>
-            <p className="text-[13px] text-text-secondary">Body SM — 13px Regular</p>
-            <p className="text-[12px] font-medium text-text-secondary">Caption — 12px Medium</p>
-            <p className="text-[11px] font-medium text-text-primary0">Caption SM — 11px Medium</p>
+            <p className="text-[30px] font-bold leading-[1.2] text-aero-text-primary">Display — 30px Bold</p>
+            <p className="text-2xl font-semibold text-aero-text-primary">Heading LG — 24px Semibold</p>
+            <p className="text-xl font-semibold text-aero-text-primary">Heading — 20px Semibold</p>
+            <p className="text-base font-semibold text-aero-text-primary">Heading SM — 16px Semibold</p>
+            <p className="text-sm text-aero-text-secondary">Body — 14px Regular</p>
+            <p className="text-[13px] text-aero-text-secondary">Body SM — 13px Regular</p>
+            <p className="text-[12px] font-medium text-aero-text-secondary">Caption — 12px Medium</p>
+            <p className="text-[11px] font-medium text-aero-text-secondary">Caption SM — 11px Medium</p>
             <p className="text-[13px] font-medium font-mono text-info-400">Monospace — 13px (coordinates, IDs)</p>
           </div>
         </Section>

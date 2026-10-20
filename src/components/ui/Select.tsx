@@ -31,7 +31,7 @@ export function Select({
       {label && (
         <label
           htmlFor={selectId}
-          className="text-xs font-bold uppercase tracking-wider text-text-secondary mb-1"
+          className="text-xs font-bold uppercase tracking-wider text-aero-text-secondary mb-1"
         >
           {label}
         </label>
@@ -40,7 +40,7 @@ export function Select({
         <select
           id={selectId}
           className={`
-            enterprise-input appearance-none cursor-pointer pr-10
+            aero-input appearance-none cursor-pointer pr-10
             ${error
               ? 'border-status-error focus:ring-status-error/50'
               : ''
@@ -50,7 +50,7 @@ export function Select({
           aria-describedby={error ? `${selectId}-error` : hint ? `${selectId}-hint` : undefined}
           {...props}
         >
-          <option value="" disabled className="text-text-secondary">
+          <option value="" disabled className="text-aero-text-secondary">
             {placeholder}
           </option>
           {options.map((opt) => (
@@ -60,7 +60,7 @@ export function Select({
           ))}
         </select>
         <svg
-          className="absolute right-3 top-1/2 -translate-y-1/2 text-text-secondary pointer-events-none"
+          className="absolute right-3 top-1/2 -translate-y-1/2 text-aero-text-secondary pointer-events-none"
           width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor"
           strokeWidth="2" strokeLinecap="round" aria-hidden="true"
         >
@@ -73,7 +73,7 @@ export function Select({
         </p>
       )}
       {hint && !error && (
-        <p id={`${selectId}-hint`} className="text-[12px] text-text-secondary mt-1">
+        <p id={`${selectId}-hint`} className="text-[12px] text-aero-text-secondary mt-1">
           {hint}
         </p>
       )}

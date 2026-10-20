@@ -4,56 +4,31 @@ import {
   MapView,
   HospitalMarker,
   RoutePolyline,
-  RadiusCircle,
 } from '../../../components/map';
 import { AmbulanceGPSMarker } from '../components/AmbulanceGPSMarker';
-import { SOSController } from '../components/SOSController';
 import { HospitalSearchPanel } from '../components/HospitalSearchPanel';
 import { HospitalPins } from '../components/HospitalPins';
+import { AmbulanceNavigationPanel } from '../components/AmbulanceNavigationPanel';
 import { SOSInformationPanel } from '../components/SOSInformationPanel';
 import { realtimeService } from '../../../services/realtimeService';
 import { routingService } from '../../../services/routingService';
 import { TrafficAwareRoutingProvider } from '../../../services/TrafficAwareRoutingProvider';
 import { geolocationService } from '../../../services/geolocationService';
-import { discoverHospitals, getDistanceMeters } from '../../../services/hospitalSearch';
+import { discoverHospitals } from '../../../services/hospitalSearch';
 import type { NormalizedHospital } from '../../../services/hospitalSearch/types';
 import type {
   EmergencyIncident,
-  EmergencyCategory,
-  EmergencyPriority,
   Hospital,
 } from '../../../types';
 import { supabase } from '../../../lib/supabase';
-import { motion } from 'framer-motion';
 import { useAuth } from '../../../providers/AuthProvider';
-import { useGoogleMap } from '../../../components/map/GoogleMapContext';
-
-function MapPanner({ targetPos }: { targetPos: [number, number] | null }) {
-  const { map } = useGoogleMap();
-  const lastPos = useRef<string | null>(null);
-
-  useEffect(() => {
-    if (!map || !targetPos) return;
-    const posKey = `${targetPos[0]},${targetPos[1]}`;
-    if (lastPos.current !== posKey) {
-      try {
-        map.panTo({ lat: targetPos[0], lng: targetPos[1] });
-        map.setZoom(15);
-        lastPos.current = posKey;
-      } catch (err) {
-        console.warn("Error panning map", err);
-      }
-    }
-  }, [map, targetPos]);
-  return null;
-}
 
 export function AmbulanceDashboard() {
   const { user, profile } = useAuth();
   const [ambulance] = useState({
     id: user?.id || 'unknown-id',
     name: profile?.full_name || 'Ambulance Operator',
-    vehicleNumber: 'AERO ALS-01', // Removed profile?.organization as it doesn't exist
+    vehicleNumber: profile?.organization || 'Unknown Vehicle',
     heading: 0,
     speedKmH: 0,
   });
@@ -62,17 +37,71 @@ export function AmbulanceDashboard() {
   const [baseLocation, setBaseLocation] = useState<[number, number] | null>(null);
   const [gpsError, setGpsError] = useState<string | null>(null);
   const [gpsEnabled, setGpsEnabled] = useState(false);
-  const [gpsTimestamp, setGpsTimestamp] = useState<Date | null>(null);
-  const [mapCenterOverride, setMapCenterOverride] = useState<[number, number] | null>(null);
+  const [lastGpsTimestamp, setLastGpsTimestamp] = useState<number | null>(null);
 
   // Hospital & Routing state
   const [radiusKm, setRadiusKm] = useState<number>(5);
   const [loadingHospitals, setLoadingHospitals] = useState(false);
-  const [hospitalError, setHospitalError] = useState<string | null>(null);
   const [hospitalResults, setHospitalResults] = useState<NormalizedHospital[]>([]);
-
   const [selectedHospital, setSelectedHospital] = useState<Hospital | null>(null);
   const [routeInfo, setRouteInfo] = useState<any | null>(null);
+  const [routingLoading, setRoutingLoading] = useState(false);
+  const [routingError, setRoutingError] = useState<string | null>(null);
+  const [selectedAlternativeIndex, setSelectedAlternativeIndex] = useState(0);
+  // Centralized Route & Traffic Calculation
+  const calculateRouteForHospital = async (
+    hosp: Hospital, 
+    originCoords?: [number, number] | null,
+    forceRefresh: boolean = false
+  ) => {
+    const origin = originCoords || currentLiveLocation.current || baseLocation;
+    if (!origin) return;
+
+    if (routingLoading && !forceRefresh) return;
+    setRoutingLoading(true);
+    setRoutingError(null);
+
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 10000);
+
+    try {
+      const destCoords: [number, number] = [hosp.location.latitude, hosp.location.longitude];
+      const route = await TrafficAwareRoutingProvider.getFastestRoute(origin, destCoords);
+      clearTimeout(timeoutId);
+
+      if (route && route.polyline && route.polyline.length > 0) {
+        setRouteInfo(route);
+        setSelectedAlternativeIndex(0);
+        lastRouteCalculationTime.current = Date.now();
+        setNavigationStatus(activeIncident ? 'active' : 'idle');
+      } else {
+        setRouteInfo(null);
+        setRoutingError('Route could not be calculated. Try another hospital.');
+      }
+    } catch (err: any) {
+      clearTimeout(timeoutId);
+      console.warn('[AERO ROUTING] Route calculation failed:', err.message);
+      setRoutingError(err.message || 'Failed to fetch live route. Tap retry.');
+    } finally {
+      setRoutingLoading(false);
+    }
+  };
+
+  const handleSelectAlternative = (index: number) => {
+    setSelectedAlternativeIndex(index);
+    if (routeInfo && routeInfo.alternatives && routeInfo.alternatives[index]) {
+      const selectedAlt = routeInfo.alternatives[index];
+      setRouteInfo({
+        ...routeInfo,
+        polyline: selectedAlt.polyline,
+        distanceMeters: selectedAlt.distanceMeters,
+        etaSeconds: selectedAlt.durationSeconds,
+        trafficAwareEtaSeconds: selectedAlt.durationSeconds,
+        trafficDelaySeconds: selectedAlt.trafficDelaySeconds || 0,
+      });
+    }
+  };
+
   
   // Navigation State
   const [navigationStatus, setNavigationStatus] = useState<'idle' | 'active' | 'rerouting' | 'arrived' | 'error'>('idle');
@@ -82,16 +111,12 @@ export function AmbulanceDashboard() {
 
   // UI state
   const [followLiveLocation, setFollowLiveLocation] = useState(true);
-  const [connectionState, setConnectionState] = useState<any>(realtimeService.getConnectionState());
-  const [hasManuallySearched, setHasManuallySearched] = useState(false);
 
   // Emergency State
-  const [category] = useState<EmergencyCategory>('CARDIAC');
-  const [priority] = useState<EmergencyPriority>('CODE_RED');
   const [activeIncident, setActiveIncident] = useState<EmergencyIncident | null>(null);
 
-  const abortRef = useRef<AbortController | null>(null);
-  const [currentAccuracy, setCurrentAccuracy] = useState<number | undefined>(undefined);
+  const locationUpdateInterval = useRef<any>(null);
+  const currentAccuracy = 5;
 
   // 1. Initialize Realtime Services
   useEffect(() => {
@@ -100,7 +125,7 @@ export function AmbulanceDashboard() {
       const { data } = await supabase
         .from('emergency_incidents')
         .select('*')
-        .eq('user_id', user?.id || ambulance.id)
+        .eq('ambulance_id', ambulance.id)
         .in('status', ['active', 'dispatched', 'en_route'])
         .maybeSingle();
       if (data) setActiveIncident(data as EmergencyIncident);
@@ -108,22 +133,14 @@ export function AmbulanceDashboard() {
     fetchInitial();
 
     const unsub = realtimeService.on('incidents_updated', (incidents: EmergencyIncident[]) => {
-      const myActive = incidents.find(inc => ['active', 'dispatched', 'en_route'].includes(inc.status) && inc.user_id === (user?.id || ambulance.id));
+      const myActive = incidents.find(inc => ['active', 'dispatched', 'en_route'].includes(inc.status) && inc.ambulance_id === ambulance.id);
       setActiveIncident(myActive || null);
       if (!myActive) {
         setNavigationStatus('idle');
         setRouteInfo(null);
       }
     });
-
-    const unsubConn = realtimeService.on('connection_change', (state) => {
-      setConnectionState(state);
-    });
-
-    return () => {
-      unsub();
-      unsubConn();
-    };
+    return () => unsub();
   }, [ambulance.id]);
 
   const handleAbort = async () => {
@@ -163,13 +180,9 @@ export function AmbulanceDashboard() {
     geolocationService.getCurrentPosition()
       .then(pos => {
         setBaseLocation([pos.latitude, pos.longitude]);
-        if (!mapCenterOverride) {
-          setMapCenterOverride([pos.latitude, pos.longitude]);
-        }
-        setCurrentAccuracy(pos.accuracy);
         setGpsEnabled(true);
         setGpsError(null);
-        setGpsTimestamp(new Date());
+        setLastGpsTimestamp(Date.now());
       })
       .catch(err => {
         setGpsError(err.message || 'GPS denied or unavailable');
@@ -181,82 +194,107 @@ export function AmbulanceDashboard() {
     return () => geolocationService.stopWatching();
   }, []);
 
-  // We no longer sync to Supabase in a setInterval. We will do it in `handleLocationUpdate`
-  // when the GPS actually changes significantly, reducing database load and matching GPS reality.
-
-  // To prevent constant re-searches on tiny GPS updates
-  const [searchCenter, setSearchCenter] = useState<[number, number] | null>(null);
-
+  // Sync GPS to Supabase actively if emergency is active (bypassing React state)
   useEffect(() => {
-    if (!baseLocation) return;
-    if (!searchCenter) {
-      setSearchCenter(baseLocation);
-    } else if (currentLiveLocation.current) {
-      const dist = getDistanceMeters(searchCenter[0], searchCenter[1], currentLiveLocation.current[0], currentLiveLocation.current[1]);
-      if (dist > 500) {
-        setSearchCenter([...currentLiveLocation.current] as [number, number]);
+    if (activeIncident) {
+      if (locationUpdateInterval.current) clearInterval(locationUpdateInterval.current);
+      
+      locationUpdateInterval.current = setInterval(() => {
+        geolocationService.getCurrentPosition().then(pos => {
+          supabase.from('emergency_incidents').update({
+            current_latitude: pos.latitude,
+            current_longitude: pos.longitude,
+            current_speed: (pos.speed || 0) * 3.6,
+            current_heading: (pos as any).heading || 0,
+          }).eq('id', activeIncident.id).then(({ error }: any) => {
+            if (error) console.error("Failed to sync GPS to Supabase:", error);
+          });
+        }).catch(() => {});
+      }, 5000); // Throttled
+    } else {
+      if (locationUpdateInterval.current) {
+        clearInterval(locationUpdateInterval.current);
+        locationUpdateInterval.current = null;
       }
     }
-  }, [baseLocation, gpsTimestamp]);
 
+    return () => {
+      if (locationUpdateInterval.current) clearInterval(locationUpdateInterval.current);
+    };
+  }, [activeIncident?.id]);
+
+  // Monotonic sequence reference to prevent stale responses from overwriting active radius
+  const searchSeqRef = useRef(0);
+
+  // 3. Auto-discover Hospitals
   useEffect(() => {
-    if (!searchCenter || activeIncident) return;
+    if (!baseLocation || activeIncident) return;
+
+    const currentSeq = ++searchSeqRef.current;
+    const abortController = new AbortController();
 
     const fetchAndRankHospitals = async () => {
       setLoadingHospitals(true);
-      abortRef.current?.abort();
-      abortRef.current = new AbortController();
 
       try {
-        setHospitalError(null);
-        // Only auto-expand if it's the very first automatic search
-        const autoExpand = !hasManuallySearched && radiusKm === 5;
-        const res = await discoverHospitals(searchCenter[0], searchCenter[1], radiusKm * 1000, autoExpand);
-        
-        if (res.results.length > 0) {
-          if (res.radius / 1000 !== radiusKm) {
-             setRadiusKm(res.radius / 1000);
-          }
-          setHospitalResults(res.results);
+        const { results } = await discoverHospitals(
+          baseLocation[0],
+          baseLocation[1],
+          radiusKm * 1000,
+          false,
+          abortController.signal
+        );
 
-          // Auto-select the nearest one if nothing selected yet
-          if (!selectedHospital) {
-            const best = res.results[0];
-            setSelectedHospital({
+        if (currentSeq !== searchSeqRef.current) return; // Ignore stale response
+
+        if (results.length > 0) {
+          const ranked = await routingService.rankHospitalsByTravelTime(baseLocation, results);
+          if (currentSeq !== searchSeqRef.current) return;
+
+          setHospitalResults(ranked);
+
+          // Retain selected hospital if still in results, otherwise pick nearest
+          setSelectedHospital(prev => {
+            if (prev && ranked.some(h => h.id === prev.id)) {
+              return prev;
+            }
+            const best = ranked[0];
+            const autoHosp: any = {
               id: best.id,
               name: best.name,
               address: best.address || best.name,
               location: { latitude: best.lat, longitude: best.lng },
               phone: best.phone || '',
               emergencyCapable: true,
-              totalBeds: 0, availableIcuBeds: 0, traumaBaysAvailable: 0, doctorsOnDuty: 0,
-              distanceKm: parseFloat(((best.distanceMeters ?? 0) / 1000).toFixed(1)),
-            } as any);
-          }
+              totalBeds: 0,
+              availableIcuBeds: 0,
+              traumaBaysAvailable: 0,
+              doctorsOnDuty: 0,
+              distanceKm: parseFloat(((best as any).drivingDistanceMeters / 1000).toFixed(1)),
+              drivingEtaSeconds: (best as any).drivingEtaSeconds
+            };
+            calculateRouteForHospital(autoHosp, baseLocation);
+            return autoHosp;
+          });
         } else {
-          setHospitalResults([]);
-          // Do not force radius to 50 if user manually selected a radius and got 0 results.
-          if (!hasManuallySearched && radiusKm !== 50) {
-             setRadiusKm(50);
-          }
+          if (currentSeq === searchSeqRef.current) setHospitalResults([]);
         }
       } catch (err: any) {
-        console.warn(err);
-        setHospitalError(err.message || 'HOSPITAL SEARCH ERROR');
+        if (err.name !== 'AbortError' && currentSeq === searchSeqRef.current) {
+          console.warn('[HospitalSearch]', err);
+        }
       } finally {
-        setLoadingHospitals(false);
+        if (currentSeq === searchSeqRef.current) {
+          setLoadingHospitals(false);
+        }
       }
     };
 
     fetchAndRankHospitals();
+    return () => {
+      abortController.abort();
+    };
   }, [baseLocation, radiusKm, activeIncident]);
-
-  const handleRadiusChange = (newRadius: number) => {
-    setHasManuallySearched(true);
-    setRadiusKm(newRadius);
-  };
-
-  const filteredHospitals = hospitalResults;
 
   const handleSearchSelect = async (h: NormalizedHospital) => {
     const hosp: any = {
@@ -266,59 +304,17 @@ export function AmbulanceDashboard() {
       location: { latitude: h.lat, longitude: h.lng },
       phone: h.phone || '',
       emergencyCapable: true,
-      distanceKm: parseFloat(((h.distanceMeters ?? 0) / 1000).toFixed(1)),
+      distanceKm: parseFloat((h.distanceMeters / 1000).toFixed(1)),
     };
     
     setSelectedHospital(hosp);
-    setFollowLiveLocation(false);
-    setMapCenterOverride([h.lat, h.lng]);
-    
-    // Immediately calculate and show the preview route
-    if (baseLocation) {
-      try {
-        const route = await TrafficAwareRoutingProvider.getFastestRoute(baseLocation, [h.lat, h.lng]);
-        if (route && route.polyline.length > 0) {
-          setRouteInfo(route);
-          setNavigationStatus('idle'); // not active emergency yet
-          lastRouteCalculationTime.current = Date.now();
-        } else {
-          setRouteInfo(null);
-          setNavigationStatus('error');
-        }
-      } catch (err) {
-        setRouteInfo(null);
-        setNavigationStatus('error');
-      }
-    } else {
-      setRouteInfo(null);
-      setNavigationStatus('idle');
-    }
+    calculateRouteForHospital(hosp, currentLiveLocation.current || baseLocation);
   };
 
   // Live Location Update & Off-Route Detection
-  const lastSupabaseSyncTime = useRef<number>(0);
-
-  const handleLocationUpdate = async (gpsData: any) => {
-    const pos: [number, number] = [gpsData.latitude, gpsData.longitude];
+  const handleLocationUpdate = async (pos: [number, number]) => {
     currentLiveLocation.current = pos;
-    setGpsTimestamp(new Date());
-    setCurrentAccuracy(gpsData.accuracy);
-    
-    // Sync to Supabase if we have an active emergency (throttle to every 3 seconds to avoid spam)
-    if (activeIncident) {
-      const now = Date.now();
-      if (now - lastSupabaseSyncTime.current > 3000) {
-        lastSupabaseSyncTime.current = now;
-        supabase.from('emergency_incidents').update({
-          current_latitude: gpsData.latitude,
-          current_longitude: gpsData.longitude,
-          current_speed: gpsData.speed != null ? (gpsData.speed * 3.6) : null,
-          current_heading: gpsData.heading || 0,
-        }).eq('id', activeIncident.id).then(({ error }: any) => {
-          if (error) console.error("Failed to sync GPS to Supabase:", error);
-        });
-      }
-    }
+    setLastGpsTimestamp(Date.now());
     
     // If navigation is active and we have a route
     if ((activeIncident || selectedHospital) && routeInfo?.polyline && routeInfo.polyline.length > 0) {
@@ -337,18 +333,11 @@ export function AmbulanceDashboard() {
 
       // 2. Off-route detection (threshold 100 meters)
       const distToRoute = routingService.getDistanceToRoute(pos, routeInfo.polyline);
-      const isOffRoute = distToRoute > parseInt(import.meta.env.VITE_REROUTE_DISTANCE_METERS || '100');
       
-      const shouldReroute = TrafficAwareRoutingProvider.shouldReroute(
-        routeInfo, lastRouteCalculationTime.current, isOffRoute
-      );
-      
-      if (shouldReroute && !isRouting.current && navigationStatus !== 'arrived') {
+      if (distToRoute > 100 && !isRouting.current && navigationStatus !== 'arrived') {
         const now = Date.now();
-        // Debounce rerouting by configured minimum interval
-        const minInterval = parseInt(import.meta.env.VITE_REROUTE_MIN_INTERVAL_SECONDS || '10') * 1000;
-        
-        if (now - lastRouteCalculationTime.current > minInterval) {
+        // Debounce rerouting by 10 seconds to avoid spamming router
+        if (now - lastRouteCalculationTime.current > 10000) {
           isRouting.current = true;
           setNavigationStatus('rerouting');
           
@@ -356,34 +345,32 @@ export function AmbulanceDashboard() {
              if (dest) {
                const newRoute = await TrafficAwareRoutingProvider.getFastestRoute(pos, dest);
                if (newRoute && newRoute.polyline.length > 0) {
-                 const currentEta = routeInfo?.trafficAwareEtaSeconds || routeInfo?.etaSeconds || Infinity;
-                 const newEta = newRoute.trafficAwareEtaSeconds || newRoute.etaSeconds;
-                 const etaImprovementThreshold = parseInt(import.meta.env.VITE_ETA_IMPROVEMENT_THRESHOLD_SECONDS || '120');
-                 const isSignificantlyBetter = (currentEta - newEta) > etaImprovementThreshold;
+                 setRouteInfo(newRoute);
+                 setNavigationStatus('active');
+                 lastRouteCalculationTime.current = Date.now();
 
-                 if (isOffRoute || isSignificantlyBetter) {
-                   setRouteInfo(newRoute);
-                   setNavigationStatus('active');
-                   lastRouteCalculationTime.current = Date.now();
-                   
-                   // If it's an active incident, also update the route on Supabase
-                   if (activeIncident) {
-                     const newVersion = (activeIncident.route_version || 1) + 1;
-                     supabase.from('emergency_incidents').update({
-                       route_geometry: newRoute.polyline,
-                       route_distance_meters: newRoute.distanceMeters,
-                       route_duration_seconds: newRoute.etaSeconds,
-                       traffic_duration_seconds: newRoute.trafficAwareEtaSeconds || newRoute.etaSeconds,
-                       traffic_status: newRoute.trafficStatus || 'UNAVAILABLE',
-                       route_version: newVersion,
-                       last_reroute_at: new Date().toISOString(),
-                       route_updated_at: new Date().toISOString()
-                     }).eq('id', activeIncident.id).then();
-                   }
-                 } else {
-                   // Keep existing route if not significantly better and not off-route
-                   setNavigationStatus('active');
-                 }
+                  if (activeIncident) {
+                    const updatePayload: any = {
+                      route_geometry: newRoute.polyline,
+                      route_distance_meters: newRoute.distanceMeters,
+                      route_duration_seconds: newRoute.etaSeconds,
+                      traffic_duration_seconds: newRoute.trafficAwareEtaSeconds || newRoute.etaSeconds,
+                      traffic_status: newRoute.trafficStatus || (newRoute.isTrafficAware ? 'LIVE' : 'UNAVAILABLE'),
+                      route_version: (activeIncident.route_version || 1) + 1,
+                      last_reroute_at: new Date().toISOString(),
+                    };
+                    if (newRoute.routeProvider) {
+                      updatePayload.route_provider = newRoute.routeProvider;
+                    }
+                    supabase.from('emergency_incidents').update(updatePayload).eq('id', activeIncident.id).then(async ({ error }: { error: any }) => {
+                      if (error && (error.message?.includes('route_provider') || error.code === 'PGRST204')) {
+                        delete updatePayload.route_provider;
+                        await supabase.from('emergency_incidents').update(updatePayload).eq('id', activeIncident.id);
+                      } else if (error) {
+                        console.warn('[AERO ROUTING] Failed to sync reroute to DB:', error);
+                      }
+                    });
+                  }
                } else {
                  setNavigationStatus('error');
                }
@@ -402,62 +389,48 @@ export function AmbulanceDashboard() {
     ? [selectedHospital.location.latitude, selectedHospital.location.longitude]
     : null;
 
+  const currentGpsState: import('../../../types').GPSState = (() => {
+    if (gpsError?.toLowerCase().includes('denied') || (gpsError as any)?.code === 1) return 'permission_denied';
+    if (gpsError) return 'unavailable';
+    if (!gpsEnabled || !baseLocation) return 'acquiring';
+    if (lastGpsTimestamp && Date.now() - lastGpsTimestamp > 60000) return 'stale';
+    return 'active';
+  })();
+
   return (
     <AppShell
       userRole="AMBULANCE"
       userName={`${ambulance.name} (${ambulance.vehicleNumber})`}
-      connectionState={connectionState}
-      gpsState={gpsEnabled ? 'active' : (gpsError ? 'unavailable' : 'acquiring')}
+      connectionState={realtimeService.getConnectionState()}
+      gpsState={currentGpsState}
       gpsAccuracy={currentAccuracy}
-      gpsTimestamp={gpsTimestamp}
+      gpsTimestamp={lastGpsTimestamp ? new Date(lastGpsTimestamp) : null}
     >
       <div className="flex flex-col h-full overflow-hidden relative">
 
         {/* ── Map ── */}
-        <div className="flex-1 relative min-h-0 bg-bg-main">
-          {gpsError && !baseLocation && (
-            <div className="absolute inset-0 z-[80] bg-[#0F1218]/95 backdrop-blur-md flex flex-col items-center justify-center p-6 text-center">
-              <div className="w-16 h-16 rounded-full bg-[#E53935]/10 flex items-center justify-center mb-4">
-                <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#E53935" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-                  <path d="M12 2v20M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6" />
-                </svg>
-              </div>
-              <h2 className="text-xl font-black text-white tracking-wider mb-2">GPS UNAVAILABLE</h2>
-              <p className="text-sm text-text-secondary max-w-md">{gpsError}</p>
-              <p className="text-xs text-text-muted mt-4 font-bold tracking-widest uppercase">Please enable location services to find nearby hospitals.</p>
-            </div>
-          )}
-          
+        <div className="flex-1 relative min-h-0 bg-slate-100">
           <MapView 
-            center={mapCenterOverride || baseLocation || [0, 0]} 
+            center={baseLocation || [17.44, 78.34]} 
             zoom={15} 
             showLiveLocation={false}
           >
             <HospitalSearchPanel
-              hospitals={filteredHospitals}
+              hospitals={hospitalResults}
               loading={loadingHospitals}
-              error={hospitalError}
               onSelect={handleSearchSelect}
               selectedHospitalId={selectedHospital?.id}
               radiusKm={radiusKm}
-              onRadiusChange={handleRadiusChange}
-              centerLocation={currentLiveLocation.current || baseLocation || [0,0]}
+              onRadiusChange={setRadiusKm}
+              centerLocation={baseLocation || [17.44, 78.34]}
               gpsEnabled={gpsEnabled}
             />
 
             <HospitalPins 
-              hospitals={filteredHospitals}
+              hospitals={hospitalResults}
               selectedHospitalId={selectedHospital?.id}
               onSelect={handleSearchSelect}
             />
-
-            {searchCenter && (
-              <>
-                <RadiusCircle center={searchCenter} radiusMeters={radiusKm * 1000} />
-              </>
-            )}
-
-            <MapPanner targetPos={destinationPos} />
 
             <AmbulanceGPSMarker
               ambulance={ambulance}
@@ -501,74 +474,53 @@ export function AmbulanceDashboard() {
             <SOSInformationPanel
               incident={activeIncident}
               navigationStatus={navigationStatus}
+              routeInfo={routeInfo}
               onAbort={handleAbort}
               onComplete={handleComplete}
             />
           )}
 
           {/* Floating Action / Hospital Panel at Bottom Right */}
-          {/* Floating Action / Hospital Panel at Bottom Right */}
-          <div className="absolute bottom-[100px] md:bottom-8 right-4 md:right-6 z-30 flex flex-col gap-4 items-end pointer-events-none">
+          <div className="absolute bottom-6 right-6 z-[1000] flex flex-col gap-4 items-end pointer-events-none">
             {/* Checkbox */}
             <div className="bg-bg-surface/90 backdrop-blur border border-border-subtle rounded-lg px-3 py-2 pointer-events-auto shadow-lg">
               <label className="flex items-center gap-2 cursor-pointer">
                 <input 
                   type="checkbox" 
                   checked={followLiveLocation}
-                  onChange={(e) => {
-                    setFollowLiveLocation(e.target.checked);
-                    if (e.target.checked) setMapCenterOverride(null);
-                  }}
+                  onChange={(e) => setFollowLiveLocation(e.target.checked)}
                   className="w-4 h-4 rounded border-gray-600 bg-bg-surface text-[#35C7FF] focus:ring-[#35C7FF]/50"
                 />
                 <span className="text-xs font-bold text-gray-300">Follow Ambulance</span>
               </label>
             </div>
 
-            {/* Selected Hospital Card with SOS */}
+            {/* Google Maps-Style Live Navigation Panel */}
             {selectedHospital && !activeIncident && (
-              <motion.div 
-                initial={{ scale: 0.95, opacity: 0 }}
-                animate={{ scale: 1, opacity: 1 }}
-                className="w-[350px] max-w-[calc(100vw-3rem)] rounded-xl bg-bg-main border border-border-subtle overflow-hidden shadow-xl flex flex-col pointer-events-auto"
-              >
-                <div className="p-4 flex flex-col gap-3">
-                  <div>
-                    <h4 className="text-lg font-bold text-white">{selectedHospital.name}</h4>
-                    <p className="text-xs text-text-secondary mt-0.5 line-clamp-1">{selectedHospital.address}</p>
-                  </div>
-                  
-                  <div className="pt-2">
-                    <SOSController
-                      hospital={selectedHospital}
-                      ambulanceId={ambulance.id}
-                      currentPos={currentLiveLocation.current || baseLocation || [0, 0]}
-                      patientData={{ category, priority, chiefComplaint: `${category} — ${priority}` }}
-                      onEmergencyActive={(emergency) => {
-                        setActiveIncident(emergency as any);
-                        if (routeInfo && routeInfo.polyline.length > 0) {
-                          setNavigationStatus('active');
-                          // Push the pre-calculated route to the newly created emergency incident
-                          supabase.from('emergency_incidents').update({
-                            route_geometry: routeInfo.polyline,
-                            route_distance_meters: routeInfo.distanceMeters,
-                            route_duration_seconds: routeInfo.etaSeconds,
-                            traffic_duration_seconds: routeInfo.trafficAwareEtaSeconds || routeInfo.etaSeconds,
-                            traffic_status: routeInfo.trafficStatus || 'UNAVAILABLE',
-                            route_version: 1,
-                            last_reroute_at: new Date().toISOString(),
-                            route_updated_at: new Date().toISOString()
-                          }).eq('id', emergency.id).then();
-                        } else {
-                          // Force a reroute on the next tick if we don't have one
-                          setNavigationStatus('rerouting');
-                          lastRouteCalculationTime.current = 0; 
-                        }
-                      }}
-                    />
-                  </div>
-                </div>
-              </motion.div>
+              <AmbulanceNavigationPanel
+                hospital={selectedHospital}
+                ambulanceId={ambulance.id}
+                currentPos={currentLiveLocation.current || baseLocation || [17.44, 78.34]}
+                routeInfo={routeInfo}
+                loading={routingLoading}
+                error={routingError}
+                onRefresh={() => calculateRouteForHospital(selectedHospital, currentLiveLocation.current || baseLocation, true)}
+                onSelectAlternative={handleSelectAlternative}
+                selectedAlternativeIndex={selectedAlternativeIndex}
+                onEmergencyActive={(emergency) => {
+                  if (emergency.route) {
+                    setRouteInfo(emergency.route);
+                    lastRouteCalculationTime.current = Date.now();
+                    setNavigationStatus('active');
+                  }
+                }}
+                onCancelDestination={() => {
+                  if (!activeIncident) {
+                    setSelectedHospital(null);
+                    setRouteInfo(null);
+                  }
+                }}
+              />
             )}
             
           </div>

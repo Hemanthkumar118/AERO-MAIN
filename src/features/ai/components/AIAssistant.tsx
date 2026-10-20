@@ -172,7 +172,7 @@ export function AIAssistant() {
       {/* Launcher Button */}
       <button
         onClick={() => setIsOpen(true)}
-        className={`fixed bottom-6 right-6 z-[999] w-14 h-14 bg-bg-elevated hover:bg-cyan-900 border border-cyan-500/50 text-cyan-400 rounded-full shadow-[0_0_20px_rgba(8,145,178,0.3)] flex items-center justify-center transition-all hover:scale-105 ${isOpen ? 'scale-0 opacity-0 pointer-events-none' : 'scale-100 opacity-100'}`}
+        className={`fixed bottom-6 right-6 z-[999] w-14 h-14 bg-aero-surface-soft hover:bg-cyan-900 border border-cyan-500/50 text-cyan-400 rounded-full shadow-[0_0_20px_rgba(8,145,178,0.3)] flex items-center justify-center transition-all hover:scale-105 ${isOpen ? 'scale-0 opacity-0 pointer-events-none' : 'scale-100 opacity-100'}`}
       >
         <div className="absolute inset-0 rounded-full animate-ping bg-cyan-400/20" style={{ animationDuration: '3s' }}></div>
         <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -183,14 +183,14 @@ export function AIAssistant() {
 
       {/* Main Chat Panel */}
       <div
-        className={`fixed bottom-6 right-6 sm:bottom-8 sm:right-8 z-[1000] w-full sm:w-[420px] max-w-[calc(100vw-32px)] h-[calc(100vh-64px)] sm:h-[650px] max-h-[800px] bg-bg-main/95 backdrop-blur-md border border-cyan-800/40 rounded-2xl shadow-2xl flex flex-col overflow-hidden transition-all duration-300 origin-bottom-right ${isOpen ? 'scale-100 opacity-100' : 'scale-95 opacity-0 pointer-events-none'}`}
+        className={`fixed bottom-6 right-6 sm:bottom-8 sm:right-8 z-[1000] w-full sm:w-[420px] max-w-[calc(100vw-32px)] h-[calc(100vh-64px)] sm:h-[650px] max-h-[800px] bg-aero-background/95 backdrop-blur-md border border-cyan-800/40 rounded-2xl shadow-2xl flex flex-col overflow-hidden transition-all duration-300 origin-bottom-right ${isOpen ? 'scale-100 opacity-100' : 'scale-95 opacity-0 pointer-events-none'}`}
       >
         {/* Header */}
-        <div className="bg-bg-surface/80 p-3.5 border-b border-cyan-900/40 flex items-center justify-between shrink-0">
+        <div className="bg-aero-surface/80 p-3.5 border-b border-cyan-900/40 flex items-center justify-between shrink-0">
           <div className="flex items-center gap-3">
             <button 
               onClick={() => setShowHistory(!showHistory)}
-              className="p-1.5 text-text-secondary hover:text-cyan-400 hover:bg-bg-elevated rounded transition-colors"
+              className="p-1.5 text-aero-text-secondary hover:text-cyan-400 hover:bg-aero-surface-soft rounded transition-colors"
               title="Conversation History"
             >
               <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><line x1="3" y1="12" x2="21" y2="12"></line><line x1="3" y1="6" x2="21" y2="6"></line><line x1="3" y1="18" x2="21" y2="18"></line></svg>
@@ -202,7 +202,7 @@ export function AIAssistant() {
               <span className="absolute -bottom-0.5 -right-0.5 w-2.5 h-2.5 bg-emerald-500 border-2 border-bg-surface rounded-full"></span>
             </div>
             <div>
-              <h3 className="font-bold text-text-primary text-[13px] tracking-wide">AERO INTELLIGENCE</h3>
+              <h3 className="font-bold text-aero-text-primary text-[13px] tracking-wide">AERO INTELLIGENCE</h3>
               <p className="text-[10px] text-emerald-400 font-semibold tracking-wider flex items-center gap-1">
                 <span className="w-1.5 h-1.5 bg-emerald-500 rounded-full animate-pulse"></span>
                 OPERATIONAL
@@ -210,10 +210,10 @@ export function AIAssistant() {
             </div>
           </div>
           <div className="flex items-center gap-1">
-            <button onClick={createNewChat} className="p-1.5 text-text-secondary hover:text-cyan-400 transition-colors" title="New Chat">
+            <button onClick={createNewChat} className="p-1.5 text-aero-text-secondary hover:text-cyan-400 transition-colors" title="New Chat">
               <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg>
             </button>
-            <button onClick={() => setIsOpen(false)} className="p-1.5 text-text-secondary hover:text-red-400 transition-colors" title="Close">
+            <button onClick={() => setIsOpen(false)} className="p-1.5 text-aero-text-secondary hover:text-red-400 transition-colors" title="Close">
               <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M18 6L6 18M6 6l12 12"></path></svg>
             </button>
           </div>
@@ -221,26 +221,26 @@ export function AIAssistant() {
 
         <div className="flex-1 relative overflow-hidden flex flex-col">
           {/* History Sidebar */}
-          <div className={`absolute inset-y-0 left-0 w-64 bg-bg-surface/95 border-r border-border-subtle z-10 transition-transform duration-300 overflow-y-auto ${showHistory ? 'translate-x-0' : '-translate-x-full'}`}>
+          <div className={`absolute inset-y-0 left-0 w-64 bg-aero-surface/95 border-r border-aero-border z-10 transition-transform duration-300 overflow-y-auto ${showHistory ? 'translate-x-0' : '-translate-x-full'}`}>
             <div className="p-4">
-              <h4 className="text-xs font-bold text-text-secondary uppercase tracking-wider mb-4">Chat History</h4>
+              <h4 className="text-xs font-bold text-aero-text-secondary uppercase tracking-wider mb-4">Chat History</h4>
               {conversations.length === 0 ? (
-                <p className="text-sm text-text-primary0 text-center py-4">No recent conversations.</p>
+                <p className="text-sm text-aero-text-secondary text-center py-4">No recent conversations.</p>
               ) : (
                 <div className="space-y-1">
                   {conversations.map(conv => (
                     <div 
                       key={conv.id}
                       onClick={() => loadConversation(conv.id)}
-                      className={`group flex items-center justify-between p-2.5 rounded-lg cursor-pointer transition-colors ${activeConversationId === conv.id ? 'bg-cyan-900/30 border border-cyan-800/50' : 'hover:bg-bg-elevated'}`}
+                      className={`group flex items-center justify-between p-2.5 rounded-lg cursor-pointer transition-colors ${activeConversationId === conv.id ? 'bg-cyan-900/30 border border-cyan-800/50' : 'hover:bg-aero-surface-soft'}`}
                     >
                       <div className="truncate flex-1 min-w-0">
-                        <p className="text-sm text-text-primary truncate font-medium">{conv.title}</p>
-                        <p className="text-[10px] text-text-primary0">{new Date(conv.created_at).toLocaleDateString()}</p>
+                        <p className="text-sm text-aero-text-primary truncate font-medium">{conv.title}</p>
+                        <p className="text-[10px] text-aero-text-secondary">{new Date(conv.created_at).toLocaleDateString()}</p>
                       </div>
                       <button 
                         onClick={(e) => deleteConversation(e, conv.id)}
-                        className="opacity-0 group-hover:opacity-100 p-1.5 text-text-primary0 hover:text-red-400 transition-all shrink-0"
+                        className="opacity-0 group-hover:opacity-100 p-1.5 text-aero-text-secondary hover:text-red-400 transition-all shrink-0"
                       >
                         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M3 6h18M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6m3 0V4a2 2 0 012-2h4a2 2 0 012 2v2"></path></svg>
                       </button>
@@ -260,17 +260,17 @@ export function AIAssistant() {
                     <circle cx="12" cy="12" r="10" strokeDasharray="30"></circle>
                   </svg>
                 </div>
-                <h3 className="text-lg font-bold text-white mb-2">AERO INTELLIGENCE</h3>
-                <p className="text-sm text-text-secondary max-w-[250px] mb-8">Connecting to secure AERO session...</p>
+                <h3 className="text-lg font-bold text-aero-text-primary mb-2">AERO INTELLIGENCE</h3>
+                <p className="text-sm text-aero-text-secondary max-w-[250px] mb-8">Connecting to secure AERO session...</p>
               </div>
             ) : !session ? (
               <div className="h-full flex flex-col items-center justify-center text-center opacity-80 mt-8">
-                <div className="w-16 h-16 rounded-2xl bg-cyan-900/20 border border-red-500/20 flex items-center justify-center mb-4 text-red-400">
+                <div className="w-16 h-16 rounded-2xl bg-cyan-900/20 border border-aero-red/20 flex items-center justify-center mb-4 text-red-400">
                   <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
                     <rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect><path d="M7 11V7a5 5 0 0 1 10 0v4"></path>
                   </svg>
                 </div>
-                <h3 className="text-lg font-bold text-white mb-2">AERO INTELLIGENCE</h3>
+                <h3 className="text-lg font-bold text-aero-text-primary mb-2">AERO INTELLIGENCE</h3>
                 <p className="text-sm text-red-400 max-w-[250px] mb-8">Not authenticated.<br/><br/>Sign in to use personalized AERO Intelligence.</p>
               </div>
             ) : (
@@ -282,15 +282,15 @@ export function AIAssistant() {
                         <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path>
                       </svg>
                     </div>
-                    <h3 className="text-lg font-bold text-white mb-2">AERO Intelligence</h3>
-                    <p className="text-sm text-text-secondary max-w-[250px] mb-8">Your emergency operations copilot. How can I assist with your coordination today?</p>
+                    <h3 className="text-lg font-bold text-aero-text-primary mb-2">AERO Intelligence</h3>
+                    <p className="text-sm text-aero-text-secondary max-w-[250px] mb-8">Your emergency operations copilot. How can I assist with your coordination today?</p>
                     
                     <div className="flex flex-col gap-2 w-full max-w-[300px]">
                       {quickActions.map(action => (
                         <button
                           key={action}
                           onClick={() => handleSend(action)}
-                          className="bg-bg-elevated/50 hover:bg-cyan-900/30 border border-border-subtle hover:border-cyan-700/50 text-cyan-300 text-xs px-4 py-2.5 rounded-xl transition-colors font-medium text-left flex items-center justify-between group"
+                          className="bg-aero-surface-soft/50 hover:bg-cyan-900/30 border border-aero-border hover:border-cyan-700/50 text-cyan-300 text-xs px-4 py-2.5 rounded-xl transition-colors font-medium text-left flex items-center justify-between group"
                         >
                           {action}
                           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="opacity-0 group-hover:opacity-100 transition-opacity"><path d="M5 12h14M12 5l7 7-7 7"></path></svg>
@@ -313,8 +313,8 @@ export function AIAssistant() {
                 <div
                   className={`max-w-[88%] rounded-2xl p-3.5 text-[13px] leading-relaxed shadow-sm ${
                     msg.role === 'user'
-                      ? 'bg-cyan-600 text-white rounded-tr-sm'
-                      : 'bg-bg-elevated border border-border-subtle text-text-primary rounded-tl-sm'
+                      ? 'bg-cyan-600 text-aero-text-primary rounded-tr-sm'
+                      : 'bg-aero-surface-soft border border-aero-border text-aero-text-primary rounded-tl-sm'
                   }`}
                 >
                   {msg.role === 'assistant' ? (
@@ -336,8 +336,8 @@ export function AIAssistant() {
                     </div>
                     <span className="text-[10px] font-bold text-cyan-400 uppercase tracking-wider">AERO SYSTEM</span>
                   </div>
-                <div className="bg-bg-elevated border border-border-subtle rounded-2xl rounded-tl-sm p-4 flex items-center gap-2">
-                  <span className="text-xs text-text-secondary mr-2 font-medium">Analyzing context...</span>
+                <div className="bg-aero-surface-soft border border-aero-border rounded-2xl rounded-tl-sm p-4 flex items-center gap-2">
+                  <span className="text-xs text-aero-text-secondary mr-2 font-medium">Analyzing context...</span>
                   <span className="w-1.5 h-1.5 bg-cyan-500 rounded-full animate-bounce"></span>
                   <span className="w-1.5 h-1.5 bg-cyan-500 rounded-full animate-bounce" style={{ animationDelay: '0.2s' }}></span>
                   <span className="w-1.5 h-1.5 bg-cyan-500 rounded-full animate-bounce" style={{ animationDelay: '0.4s' }}></span>
@@ -346,10 +346,10 @@ export function AIAssistant() {
             )}
 
             {error && (
-              <div className="bg-red-500/10 border border-red-500/20 p-4 rounded-xl text-center">
+              <div className="bg-aero-red-soft border border-aero-red/20 p-4 rounded-xl text-center">
                 <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#ef4444" strokeWidth="2" className="mx-auto mb-2"><circle cx="12" cy="12" r="10"></circle><line x1="12" y1="8" x2="12" y2="12"></line><line x1="12" y1="16" x2="12.01" y2="16"></line></svg>
                 <p className="text-red-400 text-xs font-medium mb-3">{error}</p>
-                <button onClick={() => setError('')} className="bg-red-500/20 px-4 py-1.5 rounded-lg text-red-300 font-bold text-xs hover:bg-red-500/30 transition-colors">
+                <button onClick={() => setError('')} className="bg-aero-red/20 px-4 py-1.5 rounded-lg text-red-300 font-bold text-xs hover:bg-aero-red/30 transition-colors">
                   Dismiss
                 </button>
               </div>
@@ -361,14 +361,14 @@ export function AIAssistant() {
         </div>
 
         {/* Input Area */}
-        <div className="p-3 bg-bg-surface/80 border-t border-cyan-900/40 shrink-0">
-          <div className="relative flex items-end bg-bg-main border border-border-subtle rounded-xl focus-within:border-cyan-600 focus-within:ring-1 focus-within:ring-cyan-600/50 transition-all">
+        <div className="p-3 bg-aero-surface/80 border-t border-cyan-900/40 shrink-0">
+          <div className="relative flex items-end bg-aero-background border border-aero-border rounded-xl focus-within:border-cyan-600 focus-within:ring-1 focus-within:ring-cyan-600/50 transition-all">
             <textarea
               value={input}
               onChange={(e) => setInput(e.target.value)}
               onKeyDown={handleKeyDown}
               placeholder={authLoading ? "Connecting..." : !session ? "Sign in to use AERO Intelligence" : "Ask AERO Intelligence..."}
-              className="w-full bg-transparent p-3.5 text-[13px] text-white placeholder-text-secondary focus:outline-none resize-none max-h-[120px] scrollbar-thin disabled:opacity-50"
+              className="w-full bg-transparent p-3.5 text-[13px] text-aero-text-primary placeholder-text-secondary focus:outline-none resize-none max-h-[120px] scrollbar-thin disabled:opacity-50"
               rows={input.split('\n').length > 1 ? Math.min(input.split('\n').length, 4) : 1}
               disabled={isLoading || authLoading || !session}
             />
@@ -383,7 +383,7 @@ export function AIAssistant() {
             </button>
           </div>
           <div className="flex justify-between items-center mt-2 px-1">
-            <span className="text-[9px] text-text-primary0 font-medium">ENTER to send, SHIFT+ENTER for new line</span>
+            <span className="text-[9px] text-aero-text-secondary font-medium">ENTER to send, SHIFT+ENTER for new line</span>
           </div>
         </div>
       </div>

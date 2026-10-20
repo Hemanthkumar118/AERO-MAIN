@@ -26,10 +26,10 @@ export function useToast() {
 
 /* ── Toast Item ── */
 const toastVariantClasses: Record<ToastVariant, string> = {
-  info: 'bg-bg-elevated border-[#35C7FF]/40 text-[#35C7FF]',
-  success: 'bg-bg-elevated border-[#20D67A]/40 text-[#20D67A]',
-  warning: 'bg-bg-elevated border-[#FFB020]/40 text-[#FFB020]',
-  error: 'bg-bg-elevated border-[#FF3B30]/40 text-[#FF3B30]',
+  info: 'bg-aero-surface-soft border-[#35C7FF]/40 text-aero-blue',
+  success: 'bg-aero-surface-soft border-[#20D67A]/40 text-aero-green',
+  warning: 'bg-aero-surface-soft border-[#FFB020]/40 text-aero-amber',
+  error: 'bg-aero-surface-soft border-[#FF3B30]/40 text-aero-red',
 };
 
 const toastIcons: Record<ToastVariant, React.ReactNode> = {

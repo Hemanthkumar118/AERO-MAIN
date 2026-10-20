@@ -1,195 +1,311 @@
 import { useState, useEffect } from 'react';
 import { AppShell } from '../../../components/layout/AppShell';
 import { PageHeader } from '../../../components/layout/PageHeader';
-import { Card } from '../../../components/ui/Card';
-import { analyticsService } from '../../../services/analyticsService';
+import { analyticsService, type AdminAnalyticsDataset } from '../../../services/analyticsService';
 import { realtimeService } from '../../../services/realtimeService';
 import type { ConnectionState } from '../../../types';
 import { 
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip as RechartsTooltip, ResponsiveContainer,
-  PieChart, Pie, Cell, LineChart, Line, Legend
+  PieChart, Pie, Cell, Legend
 } from 'recharts';
+import { 
+  Activity, 
+  Clock, 
+  CheckCircle2, 
+  BarChart3, 
+  PieChart as PieIcon, 
+  RefreshCw,
+  Inbox
+} from 'lucide-react';
+
+const CATEGORY_COLORS = ['#38bdf8', '#34d399', '#f87171', '#fbbf24', '#a78bfa', '#ec4899', '#94a3b8'];
 
 export function AdminAnalytics() {
-  const [data, setData] = useState<{
-    overview: any;
-    emergencyVolume: any[];
-    statusDistribution: any[];
-    categoryDistribution: any[];
-    responseTimes: any[];
-    junctionClearanceMetrics: any[];
-  } | null>(null);
-
+  const [dataset, setDataset] = useState<AdminAnalyticsDataset | null>(null);
+  const [loading, setLoading] = useState(true);
   const [connectionState, setConnectionState] = useState<ConnectionState>(realtimeService.getConnectionState());
 
+  const fetchAnalytics = async () => {
+    setLoading(true);
+    try {
+      const data = await analyticsService.getAnalyticsData();
+      setDataset(data);
+    } catch (err) {
+      console.warn('[AdminAnalytics] Error loading dataset:', err);
+    } finally {
+      setLoading(false);
+    }
+  };
+
   useEffect(() => {
-    analyticsService.getAnalyticsData().then(setData);
+    fetchAnalytics();
     
-    return realtimeService.on('connection_change', (state) => {
+    const unsub = realtimeService.on('connection_change', (state) => {
       setConnectionState(state);
     });
+
+    return () => {
+      unsub();
+    };
   }, []);
 
   return (
     <AppShell userRole="ADMIN" userName="Central Command Admin" connectionState={connectionState}>
-      <div className="h-full overflow-y-auto pb-10">
-        <PageHeader
-          title="Operations Analytics & Performance"
-          subtitle="Real-time metrics on ambulance transit times, junction clearance speeds, and multi-agency response"
-        />
+      <div className="h-full overflow-y-auto pb-10 bg-[#07090C] text-slate-200">
+        
+        {/* Page Header */}
+        <div className="px-4 sm:px-6 pt-6 pb-4 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 border-b border-slate-800/80 mb-6 bg-[#0D111A]/50 backdrop-blur-md">
+          <PageHeader
+            title="Operations Analytics & Performance"
+            subtitle="Verified emergency dispatch history, response-time calculations, and multi-agency metrics"
+          />
+          <button
+            onClick={fetchAnalytics}
+            disabled={loading}
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-[#131826] hover:bg-slate-800 text-slate-300 text-xs font-semibold border border-slate-700 transition-colors cursor-pointer"
+          >
+            <RefreshCw className={`w-3.5 h-3.5 ${loading ? 'animate-spin' : ''}`} />
+            <span>Refresh Analytics</span>
+          </button>
+        </div>
 
-        {!data ? (
-          <div className="flex justify-center py-10">
-            <span className="text-text-secondary">Loading analytics dataset...</span>
+        {!dataset || loading ? (
+          <div className="flex flex-col items-center justify-center py-20 text-slate-400 gap-3">
+            <RefreshCw className="w-6 h-6 animate-spin text-cyan-400" />
+            <span className="text-sm font-medium">Aggregating database analytics...</span>
           </div>
         ) : (
           <div className="px-4 sm:px-6 space-y-6">
             
             {/* KPI Highlight Strip */}
-            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-              <Card variant="compact">
-                <span className="text-[10px] font-bold text-text-secondary uppercase block">Average Transit Time</span>
-                <span className="text-2xl font-bold text-emerald-400 font-mono">
-                  {data.overview.avgResponseTimeMinutes} mins
+            <div className="grid grid-cols-2 lg:grid-cols-4 gap-3.5">
+              
+              <div className="bg-[#0D111A] border border-slate-800 rounded-xl p-4 shadow-sm flex flex-col justify-between">
+                <div>
+                  <div className="flex items-center justify-between mb-1">
+                    <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">Average Transit Time</span>
+                    <Clock className="w-4 h-4 text-emerald-400" />
+                  </div>
+                  <span className="text-2xl font-black text-white font-mono tracking-tight">
+                    {dataset.overview.hasResponseTimeData && dataset.overview.avgResponseTimeMins !== null
+                      ? `${dataset.overview.avgResponseTimeMins} mins`
+                      : 'Not recorded'}
+                  </span>
+                </div>
+                <span className="text-[10px] text-slate-400 mt-2 block">
+                  {dataset.overview.hasResponseTimeData ? 'Computed from completed incident logs' : 'Awaiting completed trips with arrival timestamps'}
                 </span>
-                <span className="text-[10px] text-emerald-300/80 block mt-0.5">↓ 62% faster than city traffic</span>
-              </Card>
+              </div>
 
-              <Card variant="compact">
-                <span className="text-[10px] font-bold text-text-secondary uppercase block">Time Saved Per Trip</span>
-                <span className="text-2xl font-bold text-cyan-400 font-mono">
-                  {data.overview.timeSavedVsNormalTrafficMins} mins
+              <div className="bg-[#0D111A] border border-slate-800 rounded-xl p-4 shadow-sm flex flex-col justify-between">
+                <div>
+                  <div className="flex items-center justify-between mb-1">
+                    <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">Total Dispatches</span>
+                    <Activity className="w-4 h-4 text-cyan-400" />
+                  </div>
+                  <span className="text-2xl font-black text-cyan-300 font-mono tracking-tight">
+                    {dataset.overview.totalIncidents} Runs
+                  </span>
+                </div>
+                <span className="text-[10px] text-slate-400 mt-2 block">
+                  {dataset.overview.activeEmergencies} active • {dataset.overview.completedIncidents} completed
                 </span>
-                <span className="text-[10px] text-text-secondary block mt-0.5">Golden Hour Preservation</span>
-              </Card>
+              </div>
 
-              <Card variant="compact">
-                <span className="text-[10px] font-bold text-text-secondary uppercase block">Junction Clearance Rate</span>
-                <span className="text-2xl font-bold text-purple-400 font-mono">
-                  {data.overview.junctionClearanceSuccessRatePercent}%
+              <div className="bg-[#0D111A] border border-slate-800 rounded-xl p-4 shadow-sm flex flex-col justify-between">
+                <div>
+                  <div className="flex items-center justify-between mb-1">
+                    <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">Corridor Clearance Rate</span>
+                    <CheckCircle2 className="w-4 h-4 text-purple-400" />
+                  </div>
+                  <span className="text-2xl font-black text-purple-300 font-mono tracking-tight">
+                    {dataset.overview.hasCorridorData && dataset.overview.corridorClearanceRatePercent !== null
+                      ? `${dataset.overview.corridorClearanceRatePercent}%`
+                      : 'Not recorded'}
+                  </span>
+                </div>
+                <span className="text-[10px] text-slate-400 mt-2 block">
+                  {dataset.overview.hasCorridorData ? 'Verified police green-wave actions' : 'Awaiting police corridor updates'}
                 </span>
-                <span className="text-[10px] text-text-secondary block mt-0.5">Police-Assisted Green Wave</span>
-              </Card>
+              </div>
 
-              <Card variant="compact">
-                <span className="text-[10px] font-bold text-text-secondary uppercase block">Total Dispatches Today</span>
-                <span className="text-2xl font-bold text-[#FF3B30] font-mono">
-                  {data.overview.totalEmergenciesToday} Runs
+              <div className="bg-[#0D111A] border border-slate-800 rounded-xl p-4 shadow-sm flex flex-col justify-between">
+                <div>
+                  <div className="flex items-center justify-between mb-1">
+                    <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">Registered Facilities</span>
+                    <Activity className="w-4 h-4 text-amber-400" />
+                  </div>
+                  <span className="text-2xl font-black text-amber-300 font-mono tracking-tight">
+                    {dataset.overview.partnerHospitals} Hospitals
+                  </span>
+                </div>
+                <span className="text-[10px] text-slate-400 mt-2 block">
+                  Active database network destinations
                 </span>
-                <span className="text-[10px] text-text-secondary block mt-0.5">Across 4 Network Hospitals</span>
-              </Card>
+              </div>
+
             </div>
 
-            {/* Charts Row 1: Volume & Weekly Response Times */}
+            {/* Charts Row 1: Volume Timeline & Verified Response Times */}
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
               
-              {/* Emergency Volume by Time of Day */}
-              <Card>
-                <h3 className="text-sm font-bold text-text-primary mb-1">Emergency Volume by Time of Day</h3>
-                <p className="text-xs text-text-secondary mb-4">Total calls vs Police green-wave assisted corridors</p>
-                <div className="h-64">
-                  <ResponsiveContainer width="100%" height="100%">
-                    <BarChart data={data.emergencyVolume} margin={{ top: 5, right: 10, left: -20, bottom: 0 }}>
-                      <CartesianGrid strokeDasharray="3 3" stroke="#1e293b" vertical={false} />
-                      <XAxis dataKey="time" stroke="#64748b" fontSize={11} tickLine={false} axisLine={false} />
-                      <YAxis stroke="#64748b" fontSize={11} tickLine={false} axisLine={false} />
-                      <RechartsTooltip 
-                        contentStyle={{ backgroundColor: '#0f172a', borderColor: '#334155', borderRadius: '8px' }}
-                        itemStyle={{ color: '#f8fafc' }}
-                      />
-                      <Legend wrapperStyle={{ fontSize: '11px', color: '#94a3b8' }} />
-                      <Bar dataKey="count" name="Total Emergencies" fill="#3b82f6" radius={[4, 4, 0, 0]} />
-                      <Bar dataKey="clearedByPolice" name="Police Cleared" fill="#10b981" radius={[4, 4, 0, 0]} />
-                    </BarChart>
-                  </ResponsiveContainer>
+              {/* Emergency Volume by Date */}
+              <div className="bg-[#0D111A] border border-slate-800 rounded-xl p-4 shadow-sm">
+                <div className="flex items-center justify-between mb-3">
+                  <div>
+                    <h3 className="text-sm font-bold text-white flex items-center gap-1.5">
+                      <BarChart3 className="w-4 h-4 text-cyan-400" />
+                      <span>Emergency Dispatch Volume by Date</span>
+                    </h3>
+                    <p className="text-xs text-slate-400 mt-0.5">Total incidents logged vs confirmed cleared corridors</p>
+                  </div>
                 </div>
-              </Card>
 
-              {/* Response Time Comparison vs Traffic Baseline */}
-              <Card>
-                <h3 className="text-sm font-bold text-text-primary mb-1">Transit Time Comparison (Minutes)</h3>
-                <p className="text-xs text-text-secondary mb-4">AERO Corridor vs Standard Urban Congestion</p>
-                <div className="h-64">
-                  <ResponsiveContainer width="100%" height="100%">
-                    <LineChart data={data.responseTimes} margin={{ top: 5, right: 10, left: -20, bottom: 0 }}>
-                      <CartesianGrid strokeDasharray="3 3" stroke="#1e293b" vertical={false} />
-                      <XAxis dataKey="day" stroke="#64748b" fontSize={11} tickLine={false} axisLine={false} />
-                      <YAxis stroke="#64748b" fontSize={11} tickLine={false} axisLine={false} />
-                      <RechartsTooltip 
-                        contentStyle={{ backgroundColor: '#0f172a', borderColor: '#334155', borderRadius: '8px' }}
-                      />
-                      <Legend wrapperStyle={{ fontSize: '11px', color: '#94a3b8' }} />
-                      <Line type="monotone" dataKey="standardTrafficMins" name="Without Coordination" stroke="#ef4444" strokeWidth={2} strokeDasharray="4 4" />
-                      <Line type="monotone" dataKey="avgResponseMins" name="AERO Clearance" stroke="#10b981" strokeWidth={3} dot={{ fill: '#10b981', r: 4 }} />
-                    </LineChart>
-                  </ResponsiveContainer>
+                <div className="h-64 flex items-center justify-center">
+                  {dataset.timelineVolume.length === 0 ? (
+                    <div className="text-center py-10 text-slate-500">
+                      <Inbox className="w-8 h-8 mx-auto mb-2 opacity-50" />
+                      <p className="text-xs font-semibold">No emergency volume recorded yet</p>
+                      <p className="text-[11px] text-slate-600 mt-0.5">Data appears as incidents are created</p>
+                    </div>
+                  ) : (
+                    <ResponsiveContainer width="100%" height="100%">
+                      <BarChart data={dataset.timelineVolume} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
+                        <CartesianGrid strokeDasharray="3 3" stroke="#1e293b" vertical={false} />
+                        <XAxis dataKey="date" stroke="#64748b" fontSize={11} tickLine={false} axisLine={false} />
+                        <YAxis stroke="#64748b" fontSize={11} tickLine={false} axisLine={false} allowDecimals={false} />
+                        <RechartsTooltip 
+                          contentStyle={{ backgroundColor: '#0f172a', borderColor: '#334155', borderRadius: '8px', color: '#fff' }}
+                        />
+                        <Legend wrapperStyle={{ fontSize: '11px', color: '#94a3b8' }} />
+                        <Bar dataKey="count" name="Total Incidents" fill="#0284c7" radius={[4, 4, 0, 0]} />
+                        <Bar dataKey="cleared" name="Police Cleared" fill="#10b981" radius={[4, 4, 0, 0]} />
+                      </BarChart>
+                    </ResponsiveContainer>
+                  )}
                 </div>
-              </Card>
+              </div>
+
+              {/* Transit Times (Verified Records) */}
+              <div className="bg-[#0D111A] border border-slate-800 rounded-xl p-4 shadow-sm">
+                <div className="flex items-center justify-between mb-3">
+                  <div>
+                    <h3 className="text-sm font-bold text-white flex items-center gap-1.5">
+                      <Clock className="w-4 h-4 text-emerald-400" />
+                      <span>Verified Trip Transit Times (Minutes)</span>
+                    </h3>
+                    <p className="text-xs text-slate-400 mt-0.5">Calculated strictly from resolved incident start-to-arrival logs</p>
+                  </div>
+                </div>
+
+                <div className="h-64 flex items-center justify-center">
+                  {dataset.responseTimesList.length === 0 ? (
+                    <div className="text-center py-10 text-slate-500">
+                      <Clock className="w-8 h-8 mx-auto mb-2 opacity-50" />
+                      <p className="text-xs font-semibold">No completed trips with arrival timestamps yet</p>
+                      <p className="text-[11px] text-slate-600 mt-0.5">Transit times will populate once ambulances mark arrival</p>
+                    </div>
+                  ) : (
+                    <ResponsiveContainer width="100%" height="100%">
+                      <BarChart data={dataset.responseTimesList} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
+                        <CartesianGrid strokeDasharray="3 3" stroke="#1e293b" vertical={false} />
+                        <XAxis dataKey="id" stroke="#64748b" fontSize={11} tickLine={false} axisLine={false} />
+                        <YAxis stroke="#64748b" fontSize={11} tickLine={false} axisLine={false} />
+                        <RechartsTooltip 
+                          contentStyle={{ backgroundColor: '#0f172a', borderColor: '#334155', borderRadius: '8px', color: '#fff' }}
+                        />
+                        <Legend wrapperStyle={{ fontSize: '11px', color: '#94a3b8' }} />
+                        <Bar dataKey="durationMinutes" name="Actual Transit Time (min)" fill="#10b981" radius={[4, 4, 0, 0]} />
+                        <Bar dataKey="estimatedEtaMinutes" name="Estimated Route ETA (min)" fill="#64748b" radius={[4, 4, 0, 0]} />
+                      </BarChart>
+                    </ResponsiveContainer>
+                  )}
+                </div>
+              </div>
 
             </div>
 
-            {/* Charts Row 2: Category Distribution & Junction Clearance Speeds */}
+            {/* Charts Row 2: Category Distribution & Status Distribution */}
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
               
               {/* Emergency Category Distribution */}
-              <Card>
-                <h3 className="text-sm font-bold text-text-primary mb-1">Emergency Category Distribution</h3>
-                <p className="text-xs text-text-secondary mb-4">Breakdown by emergency triage pathology</p>
-                <div className="h-64 flex items-center justify-center">
-                  <ResponsiveContainer width="100%" height="100%">
-                    <PieChart>
-                      <Pie
-                        data={data.categoryDistribution}
-                        innerRadius={60}
-                        outerRadius={85}
-                        paddingAngle={5}
-                        dataKey="value"
-                      >
-                        {data.categoryDistribution.map((entry, index) => (
-                          <Cell key={`cell-${index}`} fill={entry.fill} stroke="transparent" />
-                        ))}
-                      </Pie>
-                      <RechartsTooltip 
-                        contentStyle={{ backgroundColor: '#0f172a', borderColor: '#334155', borderRadius: '8px' }}
-                        itemStyle={{ color: '#f8fafc' }}
-                      />
-                    </PieChart>
-                  </ResponsiveContainer>
+              <div className="bg-[#0D111A] border border-slate-800 rounded-xl p-4 shadow-sm">
+                <div className="mb-3">
+                  <h3 className="text-sm font-bold text-white flex items-center gap-1.5">
+                    <PieIcon className="w-4 h-4 text-purple-400" />
+                    <span>Emergency Category Distribution</span>
+                  </h3>
+                  <p className="text-xs text-slate-400 mt-0.5">Breakdown by emergency medical triage category</p>
                 </div>
-                <div className="flex flex-wrap justify-center gap-3 mt-2">
-                  {data.categoryDistribution.map((entry, index) => (
-                    <div key={index} className="flex items-center gap-1.5 text-xs">
-                      <span className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: entry.fill }} />
-                      <span className="text-text-secondary">{entry.name} ({entry.value})</span>
-                    </div>
-                  ))}
-                </div>
-              </Card>
 
-              {/* Junction Clearance Speeds */}
-              <Card>
-                <h3 className="text-sm font-bold text-text-primary mb-1">Junction Clearance Speed (Seconds)</h3>
-                <p className="text-xs text-text-secondary mb-4">Average police clearance time before ambulance arrival</p>
-                <div className="h-64">
-                  <ResponsiveContainer width="100%" height="100%">
-                    <BarChart data={data.junctionClearanceMetrics} layout="vertical" margin={{ top: 5, right: 15, left: 40, bottom: 0 }}>
-                      <CartesianGrid strokeDasharray="3 3" stroke="#1e293b" horizontal={false} />
-                      <XAxis type="number" stroke="#64748b" fontSize={11} tickLine={false} axisLine={false} />
-                      <YAxis type="category" dataKey="junction" stroke="#64748b" fontSize={11} tickLine={false} axisLine={false} />
-                      <RechartsTooltip 
-                        contentStyle={{ backgroundColor: '#0f172a', borderColor: '#334155', borderRadius: '8px' }}
-                        itemStyle={{ color: '#f8fafc' }}
-                      />
-                      <Bar dataKey="avgClearanceSecs" name="Avg Clearance (Seconds)" fill="#06b6d4" radius={[0, 4, 4, 0]} />
-                    </BarChart>
-                  </ResponsiveContainer>
+                <div className="h-64 flex items-center justify-center">
+                  {dataset.categoryDistribution.length === 0 ? (
+                    <div className="text-center py-10 text-slate-500">
+                      <PieIcon className="w-8 h-8 mx-auto mb-2 opacity-50" />
+                      <p className="text-xs font-semibold">No emergency categories recorded</p>
+                      <p className="text-[11px] text-slate-600 mt-0.5">Database has 0 categorized incidents</p>
+                    </div>
+                  ) : (
+                    <ResponsiveContainer width="100%" height="100%">
+                      <PieChart>
+                        <Pie
+                          data={dataset.categoryDistribution}
+                          innerRadius={55}
+                          outerRadius={80}
+                          paddingAngle={4}
+                          dataKey="value"
+                        >
+                          {dataset.categoryDistribution.map((_, index) => (
+                            <Cell key={`cat-${index}`} fill={CATEGORY_COLORS[index % CATEGORY_COLORS.length]} stroke="transparent" />
+                          ))}
+                        </Pie>
+                        <RechartsTooltip 
+                          contentStyle={{ backgroundColor: '#0f172a', borderColor: '#334155', borderRadius: '8px', color: '#fff' }}
+                        />
+                        <Legend wrapperStyle={{ fontSize: '11px', color: '#94a3b8' }} />
+                      </PieChart>
+                    </ResponsiveContainer>
+                  )}
                 </div>
-              </Card>
+              </div>
+
+              {/* Status Breakdown */}
+              <div className="bg-[#0D111A] border border-slate-800 rounded-xl p-4 shadow-sm">
+                <div className="mb-3">
+                  <h3 className="text-sm font-bold text-white flex items-center gap-1.5">
+                    <Activity className="w-4 h-4 text-cyan-400" />
+                    <span>Incident Operational Lifecycle Distribution</span>
+                  </h3>
+                  <p className="text-xs text-slate-400 mt-0.5">Distribution across Active, Arrived, Resolved, and Cancelled</p>
+                </div>
+
+                <div className="h-64 flex items-center justify-center">
+                  {dataset.statusDistribution.length === 0 ? (
+                    <div className="text-center py-10 text-slate-500">
+                      <Activity className="w-8 h-8 mx-auto mb-2 opacity-50" />
+                      <p className="text-xs font-semibold">No incident lifecycle records</p>
+                    </div>
+                  ) : (
+                    <ResponsiveContainer width="100%" height="100%">
+                      <BarChart data={dataset.statusDistribution} layout="vertical" margin={{ top: 5, right: 20, left: 20, bottom: 0 }}>
+                        <CartesianGrid strokeDasharray="3 3" stroke="#1e293b" horizontal={false} />
+                        <XAxis type="number" stroke="#64748b" fontSize={11} tickLine={false} axisLine={false} allowDecimals={false} />
+                        <YAxis type="category" dataKey="name" stroke="#64748b" fontSize={11} tickLine={false} axisLine={false} />
+                        <RechartsTooltip 
+                          contentStyle={{ backgroundColor: '#0f172a', borderColor: '#334155', borderRadius: '8px', color: '#fff' }}
+                        />
+                        <Bar dataKey="value" name="Incidents" fill="#38bdf8" radius={[0, 4, 4, 0]} />
+                      </BarChart>
+                    </ResponsiveContainer>
+                  )}
+                </div>
+              </div>
 
             </div>
 
           </div>
         )}
+
       </div>
     </AppShell>
   );

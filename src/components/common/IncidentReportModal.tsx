@@ -62,17 +62,17 @@ export function IncidentReportModal({
   };
 
   return (
-    <div className="fixed inset-0 z-[70] flex items-center justify-center p-4 bg-bg-main/80 backdrop-blur-sm animate-fade-in">
-      <div className="w-full max-w-lg bg-bg-elevated border border-border-subtle rounded-2xl p-6 shadow-2xl space-y-4">
-        <div className="flex items-center justify-between border-b border-border-subtle pb-3">
+    <div className="fixed inset-0 z-[70] flex items-center justify-center p-4 bg-aero-background/80 backdrop-blur-sm animate-fade-in">
+      <div className="w-full max-w-lg bg-aero-surface-soft border border-aero-border rounded-2xl p-6 shadow-2xl space-y-4">
+        <div className="flex items-center justify-between border-b border-aero-border pb-3">
           <div className="flex items-center gap-2.5">
             <span className="w-8 h-8 rounded-lg bg-orange-500/20 text-orange-400 flex items-center justify-center text-lg">⚠️</span>
             <div>
-              <h2 className="text-base font-bold text-text-primary">Report Traffic Incident</h2>
-              <p className="text-xs text-text-secondary">Broadcast blockage or accident to emergency units</p>
+              <h2 className="text-base font-bold text-aero-text-primary">Report Traffic Incident</h2>
+              <p className="text-xs text-aero-text-secondary">Broadcast blockage or accident to emergency units</p>
             </div>
           </div>
-          <button onClick={onClose} className="text-text-secondary hover:text-text-primary text-lg">✕</button>
+          <button onClick={onClose} className="text-aero-text-secondary hover:text-aero-text-primary text-lg">✕</button>
         </div>
 
         <form onSubmit={handleSubmit} className="space-y-4">
@@ -111,18 +111,18 @@ export function IncidentReportModal({
           />
 
           <div className="space-y-1.5">
-            <label className="block text-[13px] font-medium text-text-primary">Details & Diversion Guidance</label>
+            <label className="block text-[13px] font-medium text-aero-text-primary">Details & Diversion Guidance</label>
             <textarea
               rows={3}
               placeholder="Provide exact landmarks, lane blocked, or suggested alternate street..."
               value={description}
               onChange={(e) => setDescription(e.target.value)}
               required
-              className="w-full px-3 py-2 bg-bg-main border border-border-subtle rounded-lg text-sm text-text-primary placeholder-text-secondary focus:border-brand-primary focus:ring-1 focus:ring-brand-primary outline-none transition-shadow"
+              className="w-full px-3 py-2 bg-aero-background border border-aero-border rounded-lg text-sm text-aero-text-primary placeholder-text-secondary focus:border-aero-red focus:ring-1 focus:ring-brand-primary outline-none transition-shadow"
             />
           </div>
 
-          <div className="bg-bg-main p-2.5 rounded-lg border border-border-subtle flex items-center justify-between text-xs text-text-secondary">
+          <div className="bg-aero-background p-2.5 rounded-lg border border-aero-border flex items-center justify-between text-xs text-aero-text-secondary">
             <span>Reporter: <strong>{reporterName}</strong></span>
             <span>Coordinates: {defaultPosition[0].toFixed(4)}, {defaultPosition[1].toFixed(4)}</span>
           </div>

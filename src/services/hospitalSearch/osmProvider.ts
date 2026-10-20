@@ -1,79 +1,95 @@
 import type { RawHospitalResult } from './types';
 
+// Overpass API public endpoint (use responsibly)
+const OVERPASS_URL = 'https://overpass-api.de/api/interpreter';
+
 export async function searchOSMOverpass(
   lat: number,
   lng: number,
   radiusMeters: number,
   signal: AbortSignal
 ): Promise<RawHospitalResult[]> {
-  const query = `
-    [out:json][timeout:25];
-    (
-      node["amenity"="hospital"](around:${radiusMeters},${lat},${lng});
-      way["amenity"="hospital"](around:${radiusMeters},${lat},${lng});
-      relation["amenity"="hospital"](around:${radiusMeters},${lat},${lng});
-      node["amenity"="clinic"](around:${radiusMeters},${lat},${lng});
-      way["amenity"="clinic"](around:${radiusMeters},${lat},${lng});
-      relation["amenity"="clinic"](around:${radiusMeters},${lat},${lng});
-    );
-    out center;
-  `;
+  const results: RawHospitalResult[] = [];
 
-  const endpoints = [
-    'https://overpass-api.de/api/interpreter',
-    'https://overpass.kumi.systems/api/interpreter',
-    'https://z.overpass-api.de/api/interpreter'
-  ];
+  // Create a bounding box query based on radius. 
+  // ~111km per degree of latitude.
+  const latDelta = radiusMeters / 111000;
+  const lngDelta = radiusMeters / (111000 * Math.cos(lat * Math.PI / 180));
 
-  let lastError = null;
+  const s = lat - latDelta;
+  const n = lat + latDelta;
+  const w = lng - lngDelta;
+  const e = lng + lngDelta;
 
-  for (const endpoint of endpoints) {
-    try {
-      const response = await fetch(endpoint, {
-        method: 'POST',
-        body: query,
-        signal
-      });
+  try {
+    // Query for nodes, ways, and relations tagged as hospital or healthcare=hospital
+    const query = `
+      [out:json][timeout:8];
+      (
+        node["amenity"="hospital"](${s},${w},${n},${e});
+        way["amenity"="hospital"](${s},${w},${n},${e});
+        node["healthcare"="hospital"](${s},${w},${n},${e});
+        way["healthcare"="hospital"](${s},${w},${n},${e});
+      );
+      out center;
+    `;
 
-      if (!response.ok) {
-        throw new Error(`OSM Overpass API error from ${endpoint}: ${response.status}`);
-      }
+    // Timeout protection: 6s max
+    const timeoutController = new AbortController();
+    const timeoutId = setTimeout(() => timeoutController.abort(), 6000);
+    
+    const onAbort = () => timeoutController.abort();
+    if (signal) signal.addEventListener('abort', onAbort);
 
-      const data = await response.json();
-      const results: RawHospitalResult[] = [];
+    const response = await fetch(OVERPASS_URL, {
+      method: 'POST',
+      headers: {
+        'Accept': 'application/json',
+        'User-Agent': 'AERO-Emergency-App/1.0 (emergency-routing@aero.local)',
+        'Content-Type': 'application/x-www-form-urlencoded'
+      },
+      body: new URLSearchParams({ data: query }).toString(),
+      signal: timeoutController.signal
+    });
+    
+    clearTimeout(timeoutId);
+    if (signal) signal.removeEventListener('abort', onAbort);
 
-      if (data && data.elements) {
-        for (const el of data.elements) {
-          const resultLat = el.lat || el.center?.lat;
-          const resultLng = el.lon || el.center?.lon;
-          
-          if (resultLat && resultLng) {
-            const name = el.tags?.name || el.tags?.['name:en'] || 'Unknown Hospital';
-            results.push({
-              providerId: `osm_${el.id}`,
-              provider: 'osm',
-              name: name,
-              lat: resultLat,
-              lng: resultLng,
-              address: el.tags?.['addr:full'] || el.tags?.['addr:street'] || undefined,
-              phone: el.tags?.phone || el.tags?.['contact:phone'] || undefined,
-              types: ['hospital'],
-            });
-          }
-        }
-      }
-
+    if (!response.ok) {
+      console.warn(`[OSMProvider] Overpass API failed with status ${response.status}`);
       return results;
-    } catch (error) {
-      lastError = error;
-      if ((error as any).name === 'AbortError') {
-        return [];
-      }
-      console.warn(`[OSMProvider] Endpoint ${endpoint} failed:`, error);
-      // Try next endpoint
     }
+
+    const data = await response.json();
+    const elements = data.elements || [];
+
+    for (const el of elements) {
+      const elLat = el.lat || el.center?.lat;
+      const elLng = el.lon || el.center?.lon;
+      
+      if (!elLat || !elLng) continue;
+
+      const tags = el.tags || {};
+      const name = tags.name || tags['name:en'] || 'Unknown Facility (OSM)';
+      
+      const type = tags.amenity || 'hospital';
+
+      results.push({
+        providerId: `osm_${el.type}_${el.id}`,
+        provider: 'osm',
+        name: name,
+        lat: elLat,
+        lng: elLng,
+        address: [tags['addr:street'], tags['addr:city']].filter(Boolean).join(', ') || undefined,
+        phone: tags.phone || tags['contact:phone'] || undefined,
+        types: [type]
+      });
+    }
+
+  } catch (err: any) {
+    if (err.name === 'AbortError') throw err;
+    console.warn(`[OSMProvider] Error during Overpass Search:`, err);
   }
 
-  console.error("[OSMProvider] All endpoints failed. Last error:", lastError);
-  return [];
+  return results;
 }

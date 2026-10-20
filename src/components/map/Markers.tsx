@@ -84,10 +84,10 @@ export function AmbulanceMarker({
   return (
     <GoogleMapMarker 
       position={position} 
-      html={`<div style="transform: rotate(${heading || 0}deg); font-size: 24px; filter: drop-shadow(0 2px 4px rgba(0,0,0,0.3));">🚑</div>`}
-      width={32}
-      height={32}
-      offset={[16, 16]}
+      html={`<div style="transform: rotate(${heading || 0}deg); width: 44px; height: 44px; border-radius: 50%; background-color: white; border: 4px solid #ef4444; display: flex; align-items: center; justify-content: center; box-shadow: 0 4px 6px -1px rgba(0,0,0,0.1), 0 2px 4px -1px rgba(0,0,0,0.06); font-size: 24px;">🚑</div>`}
+      width={44}
+      height={44}
+      offset={[22, 22]}
       popupContent={popupContent} 
     />
   );

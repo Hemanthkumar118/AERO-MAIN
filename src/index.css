@@ -1,24 +1,74 @@
 @import "tailwindcss";
 
 @theme {
-  --color-brand-primary: #FF3B30;
-  --color-bg-main: #070A0F;
-  --color-bg-surface: #0D1219;
-  --color-bg-elevated: #121923;
-  --color-text-primary: #F4F7FA;
-  --color-text-secondary: #8D98A6;
-  --color-border-subtle: rgba(255, 255, 255, 0.07);
-  --color-border-strong: rgba(255, 255, 255, 0.13);
-  
-  --color-status-success: #20D67A;
-  --color-status-warning: #FFB020;
-  --color-status-error: #FF3B30;
-  --color-status-info: #35C7FF;
+  /* Core AERO Brand & Surfaces */
+  --color-brand-primary: #EF4444;
+  --color-bg-main: #080D1A;
+  --color-bg-surface: #0F172A;
+  --color-bg-elevated: #1E293B;
+  --color-bg-card: #131D31;
+  --color-bg-input: #0B1220;
+
+  --color-border-subtle: rgba(255, 255, 255, 0.08);
+  --color-border-strong: rgba(255, 255, 255, 0.16);
+
+  --color-text-primary: #F8FAFC;
+  --color-text-secondary: #94A3B8;
+  --color-text-muted: #64748B;
+
+  /* Semantic Status */
+  --color-status-success: #22C55E;
+  --color-status-warning: #F59E0B;
+  --color-status-error: #EF4444;
+  --color-status-info: #38BDF8;
+
+  /* AERO Specific Design Tokens */
+  --color-aero-background: #080D1A;
+  --color-aero-surface: #0F172A;
+  --color-aero-surface-soft: #182338;
+  --color-aero-surface-hover: #1E2D47;
+  --color-aero-card: #131D31;
+
+  --color-aero-border: rgba(255, 255, 255, 0.10);
+  --color-aero-border-light: rgba(255, 255, 255, 0.18);
+  --color-aero-border-focus: #38BDF8;
+
+  --color-aero-text-primary: #F8FAFC;
+  --color-aero-text-secondary: #94A3B8;
+  --color-aero-text-muted: #64748B;
+
+  --color-aero-red: #EF4444;
+  --color-aero-red-hover: #DC2626;
+  --color-aero-red-dark: #991B1B;
+  --color-aero-red-soft: rgba(239, 68, 68, 0.16);
+
+  --color-aero-blue: #38BDF8;
+  --color-aero-blue-dark: #0284C7;
+  --color-aero-blue-soft: rgba(56, 189, 248, 0.16);
+
+  --color-aero-green: #22C55E;
+  --color-aero-green-dark: #16A34A;
+  --color-aero-green-soft: rgba(34, 197, 94, 0.16);
+
+  --color-aero-amber: #F59E0B;
+  --color-aero-amber-dark: #D97706;
+  --color-aero-amber-soft: rgba(245, 158, 11, 0.16);
+
+  /* Elevation Shadows */
+  --shadow-modal: 0 25px 60px -15px rgba(0, 0, 0, 0.85), 0 0 0 1px rgba(255, 255, 255, 0.12);
+  --shadow-card: 0 10px 25px -5px rgba(0, 0, 0, 0.5), 0 0 0 1px rgba(255, 255, 255, 0.08);
+  --shadow-emergency: 0 0 35px rgba(239, 68, 68, 0.45);
 }
 
 @layer base {
   :root {
     color-scheme: dark;
+    --app-bg: #080D1A;
+    --app-surface: #0F172A;
+    --app-surface-soft: #182338;
+    --app-text: #F8FAFC;
+    --app-text-muted: #94A3B8;
+    --app-border: rgba(255, 255, 255, 0.10);
   }
   
   html {
@@ -29,15 +79,20 @@
   }
 
   body {
-    @apply bg-bg-main text-text-primary font-sans selection:bg-brand-primary/30 selection:text-white overflow-x-hidden;
+    background-color: var(--color-bg-main);
+    color: var(--color-text-primary);
+    font-family: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+    overflow-x: hidden;
   }
 
-  /* Headings typography adjustments */
+  /* Headings typography */
   h1, h2, h3, h4, h5, h6 {
-    @apply tracking-tight font-bold text-white;
+    font-weight: 700;
+    letter-spacing: -0.02em;
+    color: #F8FAFC;
   }
 
-  /* Custom Premium Scrollbar */
+  /* Custom Command-Center Scrollbar */
   ::-webkit-scrollbar {
     width: 6px;
     height: 6px;
@@ -46,100 +101,206 @@
     background: var(--color-bg-main);
   }
   ::-webkit-scrollbar-thumb {
-    background: rgba(255, 255, 255, 0.1);
+    background: rgba(255, 255, 255, 0.15);
     border-radius: 10px;
   }
   ::-webkit-scrollbar-thumb:hover {
-    background: rgba(255, 59, 48, 0.5); /* AERO red subtle hover */
+    background: rgba(239, 68, 68, 0.5); /* AERO red hover */
   }
 }
 
 @layer components {
-  /* Cinematic Enterprise Component Primitives */
-  .enterprise-card {
-    @apply bg-bg-surface border border-border-subtle rounded-xl shadow-2xl transition-all duration-300 hover:border-border-strong relative overflow-hidden;
+  /* AERO Design System Primitives */
+  .aero-card {
+    background-color: var(--color-aero-surface);
+    border: 1px solid var(--color-aero-border);
+    border-radius: 0.75rem;
+    box-shadow: var(--shadow-card);
+    color: var(--color-aero-text-primary);
+    transition: all 0.2s ease;
   }
-  
-  .enterprise-input {
-    @apply w-full bg-[#0F1218] border border-border-subtle rounded-lg px-4 py-3 text-sm text-text-primary outline-none transition-all placeholder:text-text-secondary focus:border-brand-primary focus:ring-1 focus:ring-brand-primary/50;
-  }
-  
-  .enterprise-button-primary {
-    @apply inline-flex items-center justify-center px-6 py-3 bg-brand-primary text-white rounded-lg text-sm font-bold tracking-wide transition-all hover:bg-red-600 hover:shadow-[0_0_20px_rgba(229,57,53,0.3)] active:scale-95 disabled:opacity-50 disabled:pointer-events-none;
-  }
-  
-  .enterprise-button-secondary {
-    @apply inline-flex items-center justify-center px-6 py-3 bg-transparent border border-border-strong text-text-primary rounded-lg text-sm font-bold tracking-wide transition-all hover:bg-white/5 hover:border-white/30 active:scale-95 disabled:opacity-50 disabled:pointer-events-none;
+  .aero-card:hover {
+    border-color: var(--color-aero-border-light);
   }
 
-  .enterprise-badge {
-    @apply inline-flex items-center px-2.5 py-1 rounded-md text-[10px] font-bold uppercase tracking-widest border border-border-subtle bg-[#0F1218] text-text-secondary;
+  .aero-btn-primary {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    padding: 0.5rem 1rem;
+    background-color: var(--color-aero-red);
+    color: #ffffff;
+    font-weight: 700;
+    font-size: 0.875rem;
+    border-radius: 0.5rem;
+    letter-spacing: 0.025em;
+    transition: all 0.15s ease;
+    cursor: pointer;
+    border: none;
   }
-  
-  /* Specific Layout Overrides */
-  .glass-panel {
-    @apply bg-[#0B0D10]/80 backdrop-blur-md border border-border-subtle shadow-2xl;
+  .aero-btn-primary:hover {
+    background-color: var(--color-aero-red-hover);
+    box-shadow: 0 0 20px rgba(239, 68, 68, 0.45);
+  }
+  .aero-btn-primary:active {
+    transform: scale(0.97);
+  }
+  .aero-btn-primary:disabled {
+    opacity: 0.5;
+    pointer-events: none;
   }
 
-  /* Custom Scrollbar */
-  ::-webkit-scrollbar {
-    width: 6px;
-    height: 6px;
+  .aero-btn-secondary {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    padding: 0.5rem 1rem;
+    background-color: var(--color-aero-surface-soft);
+    border: 1px solid var(--color-aero-border-light);
+    color: var(--color-aero-text-primary);
+    font-weight: 600;
+    font-size: 0.875rem;
+    border-radius: 0.5rem;
+    letter-spacing: 0.025em;
+    transition: all 0.15s ease;
+    cursor: pointer;
   }
-  
-  ::-webkit-scrollbar-track {
-    background: var(--color-bg-main);
+  .aero-btn-secondary:hover {
+    background-color: var(--color-aero-surface-hover);
+    border-color: rgba(255, 255, 255, 0.3);
   }
-  
-  ::-webkit-scrollbar-thumb {
-    @apply bg-white/10 rounded-full;
+  .aero-btn-secondary:active {
+    transform: scale(0.97);
   }
-  
-  ::-webkit-scrollbar-thumb:hover {
-    @apply bg-white/20;
+  .aero-btn-secondary:disabled {
+    opacity: 0.5;
+    pointer-events: none;
   }
 
-  /* Telemetry panel */
-  .telemetry-panel {
-    border: 1px solid rgba(255,255,255,0.06);
-    background: rgba(13,18,25,0.85);
-    backdrop-filter: blur(8px);
-    -webkit-backdrop-filter: blur(8px);
-    color: #8D98A6;
-    font-family: 'JetBrains Mono', 'Fira Code', 'Cascadia Code', ui-monospace, monospace;
+  .aero-input {
+    width: 100%;
+    background-color: var(--color-aero-surface-soft);
+    border: 1px solid var(--color-aero-border);
+    border-radius: 0.5rem;
+    padding: 0.625rem 0.875rem;
+    font-size: 0.875rem;
+    color: var(--color-aero-text-primary);
+    outline: none;
+    transition: all 0.2s ease;
+  }
+  .aero-input::placeholder {
+    color: var(--color-aero-text-secondary);
+  }
+  .aero-input:focus {
+    border-color: var(--color-aero-blue);
+    box-shadow: 0 0 0 1px rgba(56, 189, 248, 0.4);
+  }
+  .aero-input:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
   }
 
   .telemetry-label {
-    @apply text-[9px] tracking-[0.22em] uppercase font-bold;
-    color: #8D98A6;
+    font-size: 9px;
+    letter-spacing: 0.2em;
+    text-transform: uppercase;
+    font-weight: 700;
+    color: var(--color-aero-text-secondary);
   }
 
   .telemetry-value {
-    font-family: 'JetBrains Mono', 'Fira Code', ui-monospace, monospace;
-    @apply font-bold;
-    color: #F4F7FA;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+    font-weight: 700;
+    color: var(--color-aero-text-primary);
   }
 
-  .cinematic-h1 {
-    font-size: clamp(3.2rem, 8.5vw, 7.5rem);
-    font-weight: 900;
-    line-height: 0.88;
-    letter-spacing: -0.03em;
-    color: #F4F7FA;
+  .telemetry-panel {
+    background-color: rgba(15, 23, 42, 0.92);
+    border: 1px solid var(--color-aero-border);
+    border-radius: 0.75rem;
+    padding: 0.75rem;
+    backdrop-filter: blur(8px);
+    -webkit-backdrop-filter: blur(8px);
+    box-shadow: var(--shadow-card);
   }
 
-  .cinematic-h2 {
-    font-size: clamp(2rem, 5.5vw, 5rem);
-    font-weight: 900;
-    line-height: 0.9;
-    letter-spacing: -0.025em;
-    color: #F4F7FA;
+  /* Backward Compatibility Primitives */
+  .enterprise-card {
+    background-color: var(--color-bg-surface);
+    border: 1px solid var(--color-border-subtle);
+    border-radius: 0.75rem;
+    box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.5);
+    transition: all 0.3s ease;
+  }
+  .enterprise-card:hover {
+    border-color: var(--color-border-strong);
+  }
+
+  .enterprise-input {
+    width: 100%;
+    background-color: var(--color-bg-input);
+    border: 1px solid var(--color-border-subtle);
+    border-radius: 0.5rem;
+    padding: 0.75rem 1rem;
+    font-size: 0.875rem;
+    color: var(--color-text-primary);
+    outline: none;
+    transition: all 0.2s ease;
+  }
+  .enterprise-input:focus {
+    border-color: var(--color-brand-primary);
+    box-shadow: 0 0 0 1px rgba(239, 68, 68, 0.5);
+  }
+
+  .enterprise-button-primary {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    padding: 0.75rem 1.5rem;
+    background-color: var(--color-brand-primary);
+    color: #ffffff;
+    border-radius: 0.5rem;
+    font-size: 0.875rem;
+    font-weight: 700;
+    letter-spacing: 0.025em;
+    transition: all 0.2s ease;
+  }
+  .enterprise-button-primary:hover {
+    background-color: #DC2626;
+    box-shadow: 0 0 20px rgba(239, 68, 68, 0.35);
+  }
+
+  .enterprise-button-secondary {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    padding: 0.75rem 1.5rem;
+    background-color: transparent;
+    border: 1px solid var(--color-border-strong);
+    color: var(--color-text-primary);
+    border-radius: 0.5rem;
+    font-size: 0.875rem;
+    font-weight: 700;
+    letter-spacing: 0.025em;
+    transition: all 0.2s ease;
+  }
+  .enterprise-button-secondary:hover {
+    background-color: rgba(255, 255, 255, 0.05);
+    border-color: rgba(255, 255, 255, 0.3);
+  }
+
+  .glass-panel {
+    background-color: rgba(15, 23, 42, 0.85);
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
+    border: 1px solid var(--color-border-subtle);
+    box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.5);
   }
 }
 
-/* Base Maps overrides for cinematic theme */
+/* Leaflet and Map overrides */
 .leaflet-container {
-  background: #f4f7fa !important;
+  background: #080D1A !important;
   font-family: inherit !important;
 }
 
@@ -152,18 +313,19 @@
   filter: invert(100%) hue-rotate(180deg) brightness(95%) contrast(90%);
   transition: filter 0.3s ease;
 }
+
 .leaflet-popup-content-wrapper, .leaflet-popup-tip {
-  background-color: #ffffff !important;
-  color: #1a1f26 !important;
-  border: 1px solid rgba(0,0,0,0.1) !important;
-  box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.15) !important;
+  background-color: #0F172A !important;
+  color: #F8FAFC !important;
+  border: 1px solid rgba(255, 255, 255, 0.12) !important;
+  box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.5) !important;
   border-radius: 12px !important;
 }
 .leaflet-popup-content {
   margin: 12px !important;
 }
 
-/* ─── Accessibility: Reduced Motion ─── */
+/* Reduced Motion */
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after {
     animation-duration: 0.01ms !important;
@@ -172,21 +334,48 @@
   }
 }
 
-
-/* Ambulance Map Marker Realistic Styling */
+/* Emergency lights animation */
 @keyframes ambulanceEmergencyLights {
-    0%, 100% {
-        filter: drop-shadow(0 0 2px rgba(255,0,0,0.3)) drop-shadow(0 0 4px rgba(0,0,255,0.3));
-    }
-    50% {
-        filter: drop-shadow(0 0 10px rgba(255,0,0,0.8)) drop-shadow(0 0 12px rgba(0,0,255,0.8));
-    }
+  0%, 100% {
+    filter: drop-shadow(0 0 2px rgba(239,68,68,0.4)) drop-shadow(0 0 4px rgba(56,189,248,0.4));
+  }
+  50% {
+    filter: drop-shadow(0 0 12px rgba(239,68,68,0.9)) drop-shadow(0 0 14px rgba(56,189,248,0.9));
+  }
 }
 
 .ambulance-emergency-mode img {
-    animation: ambulanceEmergencyLights 0.5s infinite ease-in-out;
+  animation: ambulanceEmergencyLights 0.5s infinite ease-in-out;
 }
 
 .ambulance-selected-mode img {
-    filter: drop-shadow(0 0 8px rgba(59, 130, 246, 0.9)); /* Tailwind blue-500 */
+  filter: drop-shadow(0 0 8px rgba(56, 189, 248, 0.9));
 }
+
+/* MapLibre Dark Popups for AERO */
+.maplibregl-popup-content {
+  background: rgba(15, 23, 42, 0.95) !important;
+  backdrop-filter: blur(12px) !important;
+  border: 1px solid rgba(51, 65, 85, 0.8) !important;
+  border-radius: 12px !important;
+  padding: 0 !important;
+  box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.5), 0 8px 10px -6px rgba(0, 0, 0, 0.5) !important;
+  color: #f1f5f9 !important;
+}
+
+.maplibregl-popup-tip {
+  border-top-color: rgba(15, 23, 42, 0.95) !important;
+  border-bottom-color: rgba(15, 23, 42, 0.95) !important;
+}
+
+.maplibregl-popup-close-button {
+  color: #94a3b8 !important;
+  font-size: 16px !important;
+  padding: 4px 8px !important;
+}
+
+.maplibregl-popup-close-button:hover {
+  color: #ffffff !important;
+  background: transparent !important;
+}
+

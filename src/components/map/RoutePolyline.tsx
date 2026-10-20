@@ -1,136 +1,170 @@
 import { useEffect, useRef } from 'react';
 import type { CongestionSegment } from '../../types';
-import { useGoogleMap } from './GoogleMapContext';
+import { useTomTomMap } from './TomTomMapContext';
 
 interface RoutePolylineProps {
-  positions: [number, number][];
+  positions: [number, number][]; // [lat, lng]
   active?: boolean;
   congestionSegments?: CongestionSegment[];
 }
+
+const CONGESTION_COLORS: Record<string, string> = {
+  green: '#10b981',  // Free flow
+  yellow: '#eab308', // Minor delay
+  orange: '#f97316', // Moderate congestion
+  red: '#ef4444',    // Heavy / Gridlock
+};
 
 export function RoutePolyline({
   positions,
   active = true,
   congestionSegments,
 }: RoutePolylineProps) {
-  const { map } = useGoogleMap();
-  const outerLineRef = useRef<google.maps.Polyline | null>(null);
-  const baseLineRef = useRef<google.maps.Polyline | null>(null);
-  const congestionLinesRef = useRef<google.maps.Polyline[]>([]);
-  const mainLineRef = useRef<google.maps.Polyline | null>(null);
-  const pulseLineRef = useRef<google.maps.Polyline | null>(null);
-
-  // Color mapping for traffic congestion
-  const congestionColors: Record<string, string> = {
-    green: '#10b981', // Smooth flow (40-60 km/h)
-    yellow: '#eab308', // Moderate (25-40 km/h)
-    orange: '#f97316', // Heavy (10-25 km/h)
-    red: '#ef4444', // Gridlock (< 10 km/h)
-  };
+  const { map } = useTomTomMap();
+  const sourceIdRef = useRef(`aero-route-${Math.random().toString(36).substring(2, 7)}`);
+  const congestionSourceIdRef = useRef(`aero-cong-${Math.random().toString(36).substring(2, 7)}`);
 
   useEffect(() => {
     if (!map || !positions || positions.length < 2) return;
 
-    const path = positions.map(pos => ({ lat: pos[0], lng: pos[1] }));
+    const sourceId = sourceIdRef.current;
+    const casingLayerId = `${sourceId}-casing`;
+    const glowLayerId = `${sourceId}-glow`;
+    const baseLayerId = `${sourceId}-base`;
 
-    // Cleanup previous lines
-    const removePolyline = (polyline: google.maps.Polyline | null) => {
-      if (polyline) {
-        polyline.setMap(null);
-      }
-    };
+    const congSourceId = congestionSourceIdRef.current;
+    const congLayerId = `${congSourceId}-layer`;
+
+    // Coordinates in MapLibre format: [lng, lat]
+    const coordinates = positions.map(([lat, lng]) => [lng, lat]);
 
     const cleanup = () => {
-      removePolyline(outerLineRef.current);
-      outerLineRef.current = null;
-      removePolyline(baseLineRef.current);
-      baseLineRef.current = null;
-      congestionLinesRef.current.forEach(line => removePolyline(line));
-      congestionLinesRef.current = [];
-      removePolyline(mainLineRef.current);
-      mainLineRef.current = null;
-      removePolyline(pulseLineRef.current);
-      pulseLineRef.current = null;
+      try {
+        if (!map) return;
+        if (map.getLayer(congLayerId)) map.removeLayer(congLayerId);
+        if (map.getSource(congSourceId)) map.removeSource(congSourceId);
+
+        if (map.getLayer(baseLayerId)) map.removeLayer(baseLayerId);
+        if (map.getLayer(glowLayerId)) map.removeLayer(glowLayerId);
+        if (map.getLayer(casingLayerId)) map.removeLayer(casingLayerId);
+        if (map.getSource(sourceId)) map.removeSource(sourceId);
+      } catch (e) {
+        // Map may have already been destroyed
+      }
     };
 
     cleanup();
 
-    const createPolyline = (options: {
-      path?: google.maps.LatLngLiteral[];
-      strokeColor: string;
-      strokeOpacity: number;
-      strokeWeight: number;
-      isDashed?: boolean;
-    }): google.maps.Polyline => {
-      const polylineOptions: google.maps.PolylineOptions = {
-        map,
-        path: options.path || path,
-        strokeColor: options.strokeColor,
-        strokeOpacity: options.strokeOpacity,
-        strokeWeight: options.strokeWeight,
-        geodesic: true,
-      };
-
-      if (options.isDashed) {
-        polylineOptions.strokeOpacity = 0;
-        polylineOptions.icons = [
-          {
-            icon: {
-              path: 'M 0,-1 0,1',
-              strokeOpacity: options.strokeOpacity || 0.8,
-              strokeColor: options.strokeColor,
-              scale: options.strokeWeight / 2,
-            },
-            offset: '0',
-            repeat: '12px',
+    try {
+      // 1. Add Main Route Source
+      map.addSource(sourceId, {
+        type: 'geojson',
+        data: {
+          type: 'Feature',
+          properties: {},
+          geometry: {
+            type: 'LineString',
+            coordinates,
           },
-        ];
+        },
+      });
+
+      // 2. Add Crisp Contrasting Outer Casing (Google Maps style casing for light map)
+      map.addLayer({
+        id: casingLayerId,
+        type: 'line',
+        source: sourceId,
+        layout: {
+          'line-join': 'round',
+          'line-cap': 'round',
+        },
+        paint: {
+          'line-color': '#ffffff',
+          'line-width': 10,
+          'line-opacity': 0.95,
+        },
+      });
+
+      // 3. Add Base Solid Route Line
+      map.addLayer({
+        id: baseLayerId,
+        type: 'line',
+        source: sourceId,
+        layout: {
+          'line-join': 'round',
+          'line-cap': 'round',
+        },
+        paint: {
+          'line-color': active ? '#dc2626' : '#2563eb',
+          'line-width': 6,
+          'line-opacity': 0.95,
+        },
+      });
+
+      // 4. Add Live Traffic Congestion Segments
+      if (congestionSegments && congestionSegments.length > 0) {
+        const segmentFeatures = congestionSegments
+          .filter(seg => seg.polyline && seg.polyline.length >= 2)
+          .map((seg, idx) => ({
+            type: 'Feature' as const,
+            id: idx,
+            properties: {
+              color: CONGESTION_COLORS[seg.level] || '#10b981',
+              level: seg.level,
+            },
+            geometry: {
+              type: 'LineString' as const,
+              coordinates: seg.polyline.map(([lat, lng]) => [lng, lat]),
+            },
+          }));
+
+        if (segmentFeatures.length > 0) {
+          map.addSource(congSourceId, {
+            type: 'geojson',
+            data: {
+              type: 'FeatureCollection',
+              features: segmentFeatures,
+            },
+          });
+
+          map.addLayer({
+            id: congLayerId,
+            type: 'line',
+            source: congSourceId,
+            layout: {
+              'line-join': 'round',
+              'line-cap': 'round',
+            },
+            paint: {
+              'line-color': ['get', 'color'],
+              'line-width': 6,
+              'line-opacity': 0.95,
+            },
+          });
+        }
       }
 
-      return new google.maps.Polyline(polylineOptions);
-    };
+      // 5. Fit Map Bounds to Route
+      const lngs = coordinates.map(c => c[0]);
+      const lats = coordinates.map(c => c[1]);
+      const minLng = Math.min(...lngs);
+      const maxLng = Math.max(...lngs);
+      const minLat = Math.min(...lats);
+      const maxLat = Math.max(...lats);
 
-    // Outer Neon Glow Layer
-    outerLineRef.current = createPolyline({
-      strokeColor: active ? '#ef4444' : '#94a3b8',
-      strokeWeight: 10,
-      strokeOpacity: active ? 0.3 : 0.15,
-    });
-
-    // Base Solid Route Line
-    baseLineRef.current = createPolyline({
-      strokeColor: active ? '#1e293b' : '#cbd5e1',
-      strokeWeight: 6,
-      strokeOpacity: 0.8,
-    });
-
-    if (congestionSegments && congestionSegments.length > 0) {
-      congestionSegments.forEach((segment) => {
-        const segPath = segment.polyline.map(pos => ({ lat: pos[0], lng: pos[1] }));
-        const segLine = createPolyline({
-          path: segPath,
-          strokeColor: congestionColors[segment.level] || '#06b6d4',
-          strokeWeight: 4,
-          strokeOpacity: 0.95,
-        });
-        congestionLinesRef.current.push(segLine);
-      });
-    } else {
-      mainLineRef.current = createPolyline({
-        strokeColor: active ? '#06b6d4' : '#64748b',
-        strokeWeight: 4,
-        strokeOpacity: active ? 0.95 : 0.6,
-        isDashed: !active,
-      });
-    }
-
-    if (active) {
-      pulseLineRef.current = createPolyline({
-        strokeColor: '#ffffff',
-        strokeWeight: 2,
-        strokeOpacity: 0.8,
-        isDashed: true,
-      });
+      map.fitBounds(
+        [
+          [minLng, minLat],
+          [maxLng, maxLat],
+        ],
+        {
+          padding: 80,
+          duration: 1200,
+          maxZoom: 16,
+        }
+      );
+    } catch (err) {
+      console.error('[RoutePolyline] Error adding route layers:', err);
     }
 
     return cleanup;

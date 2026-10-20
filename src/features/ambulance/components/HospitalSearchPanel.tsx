@@ -20,14 +20,14 @@ class SearchErrorBoundary extends Component<{ children: ReactNode }, { hasError:
   render() {
     if (this.state.hasError) {
       return (
-        <div className="absolute top-4 left-3 right-3 md:right-auto md:left-4 z-30 md:w-[360px] bg-white p-4 rounded-xl shadow-lg border border-red-200 pointer-events-auto">
-          <p className="text-red-600 font-bold text-sm mb-1">Search Panel Error</p>
-          <p className="text-slate-600 text-xs">{this.state.error?.message || 'An unexpected error occurred.'}</p>
+        <div className="absolute top-4 left-3 right-3 md:right-auto md:left-4 z-30 md:w-[360px] bg-[#0F172A] p-4 rounded-xl shadow-2xl border border-red-500/50 pointer-events-auto">
+          <p className="text-red-400 font-bold text-sm mb-1">Search Panel Notice</p>
+          <p className="text-slate-300 text-xs">{this.state.error?.message || 'An unexpected error occurred.'}</p>
           <button 
             onClick={() => this.setState({ hasError: false, error: null })}
-            className="mt-3 bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-bold py-1 px-3 rounded"
+            className="mt-3 bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-bold py-1 px-3 rounded border border-slate-700 cursor-pointer"
           >
-            Recover
+            Retry
           </button>
         </div>
       );
@@ -52,13 +52,12 @@ interface HospitalSearchPanelProps {
 function getHospitalSearchErrorMessage(err: any): string {
   const msg = err?.message || err?.status || err?.code || String(err);
   if (typeof msg === 'string') {
-    if (msg.includes('PERMISSION_DENIED')) return "Google Places API permission denied. Check Places API (New) and API restrictions.";
-    if (msg.includes('RESOURCE_EXHAUSTED')) return "Google Places quota exhausted.";
-    if (msg.includes('INVALID_ARGUMENT')) return "Invalid Google Places search request.";
-    if (msg.includes('FAILED_PRECONDITION')) return "Google Maps/Places configuration is incomplete.";
-    if (msg.includes('NETWORK') || msg.includes('Failed to fetch')) return "Unable to reach Google Places.";
+    if (msg.includes('PERMISSION_DENIED') || msg.includes('403')) return "Places search permission denied. Check API configuration.";
+    if (msg.includes('RESOURCE_EXHAUSTED') || msg.includes('429')) return "Search quota or rate limit reached.";
+    if (msg.includes('INVALID_ARGUMENT') || msg.includes('400')) return "Invalid search request.";
+    if (msg.includes('NETWORK') || msg.includes('Failed to fetch')) return "Unable to reach search service.";
   }
-  return "Hospital search failed. Check browser console.";
+  return "Hospital search failed. Check network connection or configuration.";
 }
 
 export function HospitalSearchPanelInner({
@@ -104,7 +103,7 @@ export function HospitalSearchPanelInner({
         setTextSearchResults(results);
       } catch (err: any) {
         if (err.name !== 'AbortError') {
-          console.error("[Hospital Text Search] Google API error", err);
+          console.error("[Hospital Text Search] Provider error", err);
           setTextSearchError(getHospitalSearchErrorMessage(err));
           setTextSearchResults([]);
         }
@@ -119,6 +118,19 @@ export function HospitalSearchPanelInner({
     };
   }, [localSearch, centerLocation, radiusKm]);
 
+  const [visibleCount, setVisibleCount] = useState(35);
+
+  useEffect(() => {
+    setVisibleCount(35);
+  }, [hospitals, radiusKm, localSearch]);
+
+  const handleScroll = (e: React.UIEvent<HTMLDivElement>) => {
+    const { scrollTop, scrollHeight, clientHeight } = e.currentTarget;
+    if (scrollHeight - scrollTop - clientHeight < 150) {
+      setVisibleCount(prev => Math.min(prev + 30, hospitals.length));
+    }
+  };
+
   const handleSelectNearby = (h: NormalizedHospital) => {
     onSelect(h);
     setOpen(false);
@@ -130,10 +142,10 @@ export function HospitalSearchPanelInner({
       {!isVisible && (
         <button
           onClick={() => setIsVisible(true)}
-          className="absolute top-4 left-4 z-30 bg-white rounded-full p-3 shadow-md border border-slate-200 hover:bg-slate-50 transition-colors pointer-events-auto"
+          className="absolute top-4 left-4 z-30 bg-[#0F172A]/90 backdrop-blur-md rounded-full p-3 shadow-xl border border-slate-700 text-cyan-400 hover:bg-[#1E293B] hover:text-white transition-colors pointer-events-auto"
           title="Show Hospital Search"
         >
-          <svg className="w-5 h-5 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <svg className="w-5 h-5 text-cyan-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-4.35-4.35M17 11A6 6 0 1 1 5 11a6 6 0 0 1 12 0z"/>
           </svg>
         </button>
@@ -144,16 +156,16 @@ export function HospitalSearchPanelInner({
         <div className="absolute top-4 left-3 right-3 md:right-auto md:left-4 z-30 md:w-[360px] pointer-events-auto transition-all duration-200">
           
           {/* Search bar container */}
-          <div className="flex items-center gap-2 bg-white rounded-full px-4 md:px-5 h-[54px] md:h-[60px] border-2 border-blue-600 shadow-[0_4px_16px_rgba(37,99,235,0.20)] focus-within:ring-2 focus-within:ring-blue-500/20 transition-all">
+          <div className="flex items-center gap-2 bg-[#0F172A]/95 backdrop-blur-md rounded-full px-4 md:px-5 h-[54px] md:h-[60px] border-2 border-cyan-500/50 shadow-[0_4px_20px_rgba(8,145,178,0.25)] focus-within:ring-2 focus-within:ring-cyan-500/30 transition-all">
             
             {/* Search Icon / Spinner */}
             {loading || textSearchLoading ? (
-              <svg className="animate-spin w-5 h-5 text-blue-600 shrink-0" viewBox="0 0 24 24" fill="none">
+              <svg className="animate-spin w-5 h-5 text-cyan-400 shrink-0" viewBox="0 0 24 24" fill="none">
                 <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/>
                 <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/>
               </svg>
             ) : (
-              <svg className="w-5 h-5 text-slate-500 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <svg className="w-5 h-5 text-slate-400 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-4.35-4.35M17 11A6 6 0 1 1 5 11a6 6 0 0 1 12 0z"/>
               </svg>
             )}
@@ -166,14 +178,14 @@ export function HospitalSearchPanelInner({
               onChange={e => setLocalSearch(e.target.value)}
               onFocus={() => setOpen(true)}
               placeholder={`Search hospitals within ${radiusKm} km...`}
-              className="flex-1 text-[15px] md:text-[16px] font-medium text-slate-800 placeholder-slate-400 bg-transparent outline-none"
+              className="flex-1 text-[15px] md:text-[16px] font-medium text-white placeholder-slate-400 bg-transparent outline-none"
             />
 
             {/* Clear Button (X) */}
             {localSearch && (
               <button
                 onClick={() => { setLocalSearch(''); inputRef.current?.focus(); }}
-                className="text-slate-400 hover:text-slate-600 cursor-pointer shrink-0 p-1"
+                className="text-slate-400 hover:text-white cursor-pointer shrink-0 p-1"
                 title="Clear Search"
               >
                 <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 20 20">
@@ -185,7 +197,7 @@ export function HospitalSearchPanelInner({
             {/* Hide Button */}
             <button
               onClick={() => setIsVisible(false)}
-              className="text-slate-500 hover:text-slate-700 cursor-pointer shrink-0 text-[14px] md:text-[15px] font-medium ml-1 md:ml-2"
+              className="text-slate-400 hover:text-white cursor-pointer shrink-0 text-[14px] md:text-[15px] font-medium ml-1 md:ml-2"
             >
               Hide
             </button>
@@ -193,21 +205,31 @@ export function HospitalSearchPanelInner({
 
           {/* Results dropdown */}
           {open && (
-            <div className="mt-2 bg-white rounded-2xl shadow-lg border border-slate-200 overflow-hidden flex flex-col transition-all" style={{ maxHeight: '60vh' }}>
+            <div className="mt-2 bg-[#0F172A] rounded-2xl shadow-2xl border border-slate-700/80 overflow-hidden flex flex-col transition-all text-slate-200" style={{ maxHeight: '60vh' }}>
               
-              {/* Header with Radius Selector (only show if not typing autocomplete) */}
+              {/* Header with Radius Selector */}
               {!localSearch.trim() && (
-                <div className="px-4 py-3 border-b border-slate-100 flex flex-col gap-2 bg-slate-50/50 shrink-0">
+                <div className="px-4 py-3 border-b border-slate-800 flex flex-col gap-2 bg-[#182338]/80 shrink-0">
                   <div className="flex items-center justify-between">
-                    <span className="text-[11px] font-bold text-slate-500 uppercase tracking-wider">
+                    <span className="text-[11px] font-bold text-slate-300 uppercase tracking-wider">
                       {!gpsEnabled ? 'DETECTING LOCATION...' :
-                       loading ? 'SEARCHING NEARBY HOSPITALS...' : 
+                       loading ? `SEARCHING WITHIN ${radiusKm} KM...` : 
                        error ? (error.includes('configured') ? 'HOSPITAL SERVICE NOT CONFIGURED' : 'HOSPITAL SEARCH ERROR') :
-                       hospitals.length > 0 ? `${hospitals.length} HOSPITALS FOUND` : 
-                       'NO HOSPITALS FOUND'}
+                       hospitals.length > 0 ? `${hospitals.length} HOSPITALS FOUND (${radiusKm} KM)` : 
+                       `NO HOSPITALS WITHIN ${radiusKm} KM`}
                     </span>
                     {!loading && !error && hospitals.length > 0 && (
-                      <span className="text-[11px] text-blue-600 font-bold uppercase">Live Data</span>
+                      <span className="text-[10px] text-cyan-400 font-bold uppercase tracking-wider bg-cyan-950/60 px-2 py-0.5 rounded border border-cyan-800/40">
+                        TomTom Places
+                      </span>
+                    )}
+                    {error && (
+                      <button
+                        onClick={() => onRadiusChange(radiusKm)}
+                        className="text-[11px] text-cyan-400 underline hover:text-cyan-300 cursor-pointer"
+                      >
+                        Retry
+                      </button>
                     )}
                   </div>
                   <div className="flex items-center gap-2 mt-1">
@@ -217,8 +239,8 @@ export function HospitalSearchPanelInner({
                         onClick={() => onRadiusChange(r)}
                         className={`px-3 py-1 rounded-full text-[12px] font-bold border transition-colors cursor-pointer ${
                           radiusKm === r 
-                            ? 'bg-blue-600 text-white border-blue-600' 
-                            : 'bg-white text-slate-600 border-slate-200 hover:border-blue-400 hover:text-blue-600'
+                            ? 'bg-cyan-500 text-slate-950 font-bold border-cyan-400' 
+                            : 'bg-[#0B1220] text-slate-300 border-slate-700 hover:border-cyan-400 hover:text-cyan-300'
                         }`}
                       >
                         {r} km
@@ -230,20 +252,21 @@ export function HospitalSearchPanelInner({
 
               {/* Autocomplete Result Header */}
               {localSearch.trim() && (
-                <div className="px-4 py-3 border-b border-slate-100 flex flex-col gap-2 bg-slate-50/50 shrink-0">
+                <div className="px-4 py-3 border-b border-slate-800 flex flex-col gap-2 bg-[#182338]/80 shrink-0">
                   <div className="flex items-center justify-between">
-                    <span className="text-[11px] font-bold text-slate-500 uppercase tracking-wider">
-                      {textSearchLoading ? 'SEARCHING GOOGLE PLACES...' : 'GOOGLE PLACES RESULTS'}
+                    <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">
+                      {textSearchLoading ? 'SEARCHING PLACES...' : `SEARCH RESULTS (${textSearchResults.length})`}
                     </span>
-                    <span className="text-[11px] text-blue-600 font-bold uppercase">Search</span>
+                    <span className="text-[10px] text-cyan-400 font-bold uppercase bg-cyan-950/60 px-2 py-0.5 rounded border border-cyan-800/40">TomTom POI</span>
                   </div>
                 </div>
               )}
 
-              {/* List with correct scroll containment */}
+              {/* List with correct scroll containment & windowed rendering */}
               <div 
                 className="overflow-y-auto flex-1 overscroll-contain"
                 style={{ minHeight: 0 }}
+                onScroll={handleScroll}
                 onWheelCapture={e => e.stopPropagation()}
               >
                 {/* Autocomplete Mode */}
@@ -252,36 +275,50 @@ export function HospitalSearchPanelInner({
                     {textSearchResults.length === 0 && !textSearchLoading && (
                       <div className="flex flex-col items-center justify-center py-10 text-center px-6">
                         <span className="text-3xl mb-3">🏥</span>
-                        <p className="text-[14px] text-slate-600 font-semibold">
+                        <p className="text-[14px] text-slate-300 font-semibold">
                           {textSearchError ? textSearchError : 'No hospitals found'}
                         </p>
                         {!textSearchError && (
-                          <p className="text-[12px] text-slate-400 mt-1">You can try another hospital name or increase the radius.</p>
+                          <p className="text-[12px] text-slate-400 mt-1">Try another hospital name or select a larger search radius.</p>
                         )}
                       </div>
                     )}
                     {textSearchResults.map((place) => {
                       const isSelected = place.id === selectedHospitalId;
+                      const distKm = (place.distanceMeters ?? 0) / 1000;
                       return (
-                      <div key={place.id} className="flex flex-col border-b border-slate-100 last:border-0">
-                        <button
-                          onClick={() => handleSelectNearby(place)}
-                          className={`w-full text-left px-4 py-3 flex items-center gap-3 hover:bg-slate-50 transition-colors cursor-pointer ${isSelected ? 'bg-blue-50/50' : ''}`}
-                        >
-                          <div className="w-8 h-8 rounded-full bg-slate-100 flex items-center justify-center shrink-0 border border-slate-200">
-                            <span className="text-[12px]">📍</span>
-                          </div>
-                          <div className="flex-1 min-w-0">
-                            <p className="text-[14px] font-bold leading-tight truncate text-slate-800">
-                              {place.name}
-                            </p>
-                            <p className="text-[12px] text-slate-500 truncate mt-1">
-                              {place.address}
-                            </p>
-                          </div>
-                        </button>
-                      </div>
-                    )})}
+                        <div key={place.id} className="flex flex-col border-b border-slate-800/80 last:border-0">
+                          <button
+                            onClick={() => handleSelectNearby(place)}
+                            className={`w-full text-left px-4 py-3 flex items-start gap-3 hover:bg-[#182338] transition-colors cursor-pointer ${
+                              isSelected ? 'bg-cyan-950/40 border-l-2 border-l-cyan-400' : ''
+                            }`}
+                          >
+                            <div className="w-8 h-8 rounded-full bg-[#182338] flex items-center justify-center shrink-0 border border-slate-700 mt-0.5">
+                              <span className="text-[12px]">🏥</span>
+                            </div>
+                            <div className="flex-1 min-w-0">
+                              <div className="flex items-start justify-between gap-2">
+                                <p className="text-[14px] font-bold leading-tight truncate text-white">
+                                  {place.name}
+                                </p>
+                                {distKm > 0 && (
+                                  <span className="text-[12px] font-mono font-bold shrink-0 text-cyan-400">
+                                    {distKm.toFixed(1)} km
+                                  </span>
+                                )}
+                              </div>
+                              <p className="text-[12px] text-slate-400 truncate mt-1">
+                                {place.address || 'Address unavailable'}
+                              </p>
+                              {place.phone && (
+                                <p className="text-[12px] text-cyan-400 mt-1 font-mono">{place.phone}</p>
+                              )}
+                            </div>
+                          </button>
+                        </div>
+                      );
+                    })}
                   </>
                 ) : (
                   /* Nearby Mode */
@@ -289,34 +326,34 @@ export function HospitalSearchPanelInner({
                     {hospitals.length === 0 && !loading && (
                       <div className="flex flex-col items-center justify-center py-10 text-center px-6">
                         <span className="text-3xl mb-3">🏥</span>
-                        <p className="text-[14px] text-slate-600 font-semibold">
-                          {error ? error : 'No hospitals found'}
+                        <p className="text-[14px] text-slate-300 font-semibold">
+                          {error ? error : `No hospitals found within ${radiusKm} km`}
                         </p>
-                        <p className="text-[12px] text-slate-400 mt-1">Try a larger radius</p>
+                        <p className="text-[12px] text-slate-400 mt-1">Try increasing the search radius above</p>
                       </div>
                     )}
-                    {hospitals.map((h, i) => {
+                    {hospitals.slice(0, visibleCount).map((h, i) => {
                       const isSelected = h.id === selectedHospitalId;
-                      const distKm = (h as any).drivingDistanceMeters ? (h as any).drivingDistanceMeters / 1000 : (h.distanceMeters ?? 0) / 1000;
-                      const urgencyColor = distKm < 3 ? 'text-emerald-600' : distKm < 8 ? 'text-amber-600' : 'text-blue-600';
+                      const distKm = (h.distanceMeters ?? 0) / 1000;
+                      const urgencyColor = distKm < 3 ? 'text-emerald-400' : distKm < 8 ? 'text-amber-400' : 'text-cyan-400';
                       return (
-                        <div key={h.id} className="flex flex-col border-b border-slate-100 last:border-0">
+                        <div key={h.id} className="flex flex-col border-b border-slate-800/80 last:border-0">
                           <button
                             onClick={() => handleSelectNearby(h)}
-                            className={`w-full text-left px-4 py-3 flex items-start gap-3 hover:bg-slate-50 transition-colors cursor-pointer ${
-                              isSelected ? 'bg-blue-50/50' : ''
+                            className={`w-full text-left px-4 py-3 flex items-start gap-3 hover:bg-[#182338] transition-colors cursor-pointer ${
+                              isSelected ? 'bg-cyan-950/40 border-l-2 border-l-cyan-400' : ''
                             }`}
                           >
                             {/* Rank badge */}
                             <div className={`mt-0.5 w-6 h-6 rounded-full flex items-center justify-center text-[11px] font-bold shrink-0 ${
-                              i === 0 ? 'bg-emerald-500 text-white shadow-sm' : 'bg-slate-100 border border-slate-200 text-slate-500'
+                              i === 0 ? 'bg-emerald-500 text-slate-950 shadow-sm' : 'bg-[#182338] border border-slate-700 text-slate-400'
                             }`}>
                               {i === 0 ? '★' : i + 1}
                             </div>
 
                             <div className="flex-1 min-w-0">
                               <div className="flex items-start justify-between gap-2">
-                                <p className={`text-[14px] font-bold leading-tight truncate ${isSelected ? 'text-blue-600' : 'text-slate-800'}`}>
+                                <p className={`text-[14px] font-bold leading-tight truncate ${isSelected ? 'text-cyan-300' : 'text-white'}`}>
                                   {h.name}
                                 </p>
                                 <span className={`text-[12px] font-mono font-bold shrink-0 ${urgencyColor}`}>
@@ -324,23 +361,20 @@ export function HospitalSearchPanelInner({
                                 </span>
                               </div>
                               {h.address && (
-                                <p className="text-[12px] text-slate-500 mt-1 leading-tight truncate">{h.address}</p>
+                                <p className="text-[12px] text-slate-400 mt-1 leading-tight truncate">{h.address}</p>
                               )}
                               {h.businessStatus && (
-                                <p className={`text-[11px] mt-1 font-bold tracking-wide ${h.businessStatus === 'OPERATIONAL' ? 'text-emerald-600' : 'text-amber-600'}`}>
+                                <p className={`text-[11px] mt-1 font-bold tracking-wide ${h.businessStatus === 'OPERATIONAL' ? 'text-emerald-400' : 'text-amber-400'}`}>
                                   {h.businessStatus.replace('_', ' ')}
                                 </p>
                               )}
                               {h.phone && (
-                                <p className="text-[12px] text-blue-600 mt-1 font-mono">{h.phone}</p>
-                              )}
-                              {(h as any).googleMapsUri && (
-                                <a href={(h as any).googleMapsUri} target="_blank" rel="noopener noreferrer" className="inline-block text-[11px] text-slate-400 mt-1.5 underline hover:text-blue-600 transition-colors" onClick={(e) => e.stopPropagation()}>View on Google Maps</a>
+                                <p className="text-[12px] text-cyan-400 mt-1 font-mono">{h.phone}</p>
                               )}
                             </div>
 
                             {isSelected && (
-                              <svg className="w-5 h-5 text-blue-600 shrink-0 mt-0.5" fill="currentColor" viewBox="0 0 20 20">
+                              <svg className="w-5 h-5 text-cyan-400 shrink-0 mt-0.5" fill="currentColor" viewBox="0 0 20 20">
                                 <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clipRule="evenodd"/>
                               </svg>
                             )}
@@ -348,6 +382,13 @@ export function HospitalSearchPanelInner({
                         </div>
                       );
                     })}
+
+                    {/* Windowed pagination indicator */}
+                    {hospitals.length > visibleCount && (
+                      <div className="py-2.5 text-center text-xs text-slate-400 bg-slate-900/60 border-t border-slate-800">
+                        Showing {visibleCount} of {hospitals.length} hospitals (scroll down for more)
+                      </div>
+                    )}
                   </>
                 )}
               </div>

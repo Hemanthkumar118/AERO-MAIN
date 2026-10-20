@@ -1,24 +1,33 @@
+import { lazy, Suspense } from 'react';
 import { Routes, Route, useNavigate, Navigate, useLocation } from 'react-router-dom';
 import { useAuth } from '../providers/AuthProvider';
-import { LandingPage } from '../features/public/pages/LandingPage';
-import { LoginPage } from '../features/auth/pages/LoginPage';
-import { RegisterPage } from '../features/auth/pages/RegisterPage';
-import { AuthCallbackPage } from '../features/auth/pages/AuthCallbackPage';
-import { AccountSettingsPage } from '../features/settings/pages/AccountSettingsPage';
-import { SecurityPrivacyPage } from '../features/settings/pages/SecurityPrivacyPage';
-import { EmergencyProtocolPage } from '../features/public/pages/EmergencyProtocolPage';
-import { TermsOfServicePage } from '../features/public/pages/TermsOfServicePage';
-import { PrivacyPolicyPage } from '../features/public/pages/PrivacyPolicyPage';
-
-import { AmbulanceDashboard } from '../features/ambulance/pages/AmbulanceDashboard';
-import { PoliceDashboard } from '../features/police/pages/PoliceDashboard';
-import { ActiveEmergencyDetails } from '../features/police/pages/ActiveEmergencyDetails';
-import { HospitalDashboard } from '../features/hospital/pages/HospitalDashboard';
-import { AdminDashboard } from '../features/admin/pages/AdminDashboard';
-import { AdminAnalytics } from '../features/admin/pages/AdminAnalytics';
-import { ComponentShowcase } from '../pages/ComponentShowcase';
-import { NotFoundPage } from '../pages/NotFoundPage';
 import { AIAssistant } from '../features/ai/components/AIAssistant';
+
+// Lazy-loaded routes for code-splitting and performance
+const LandingPage = lazy(() => import('../features/public/pages/LandingPage').then(m => ({ default: m.LandingPage })));
+const LoginPage = lazy(() => import('../features/auth/pages/LoginPage').then(m => ({ default: m.LoginPage })));
+const RegisterPage = lazy(() => import('../features/auth/pages/RegisterPage').then(m => ({ default: m.RegisterPage })));
+const AuthCallbackPage = lazy(() => import('../features/auth/pages/AuthCallbackPage').then(m => ({ default: m.AuthCallbackPage })));
+const AccountSettingsPage = lazy(() => import('../features/settings/pages/AccountSettingsPage').then(m => ({ default: m.AccountSettingsPage })));
+const SecurityPrivacyPage = lazy(() => import('../features/settings/pages/SecurityPrivacyPage').then(m => ({ default: m.SecurityPrivacyPage })));
+const EmergencyProtocolPage = lazy(() => import('../features/public/pages/EmergencyProtocolPage').then(m => ({ default: m.EmergencyProtocolPage })));
+const TermsOfServicePage = lazy(() => import('../features/public/pages/TermsOfServicePage').then(m => ({ default: m.TermsOfServicePage })));
+const PrivacyPolicyPage = lazy(() => import('../features/public/pages/PrivacyPolicyPage').then(m => ({ default: m.PrivacyPolicyPage })));
+const AmbulanceDashboard = lazy(() => import('../features/ambulance/pages/AmbulanceDashboard').then(m => ({ default: m.AmbulanceDashboard })));
+const PoliceDashboard = lazy(() => import('../features/police/pages/PoliceDashboard').then(m => ({ default: m.PoliceDashboard })));
+const ActiveEmergencyDetails = lazy(() => import('../features/police/pages/ActiveEmergencyDetails').then(m => ({ default: m.ActiveEmergencyDetails })));
+const HospitalDashboard = lazy(() => import('../features/hospital/pages/HospitalDashboard').then(m => ({ default: m.HospitalDashboard })));
+const AdminDashboard = lazy(() => import('../features/admin/pages/AdminDashboard').then(m => ({ default: m.AdminDashboard })));
+const AdminAnalytics = lazy(() => import('../features/admin/pages/AdminAnalytics').then(m => ({ default: m.AdminAnalytics })));
+const ComponentShowcase = lazy(() => import('../pages/ComponentShowcase').then(m => ({ default: m.ComponentShowcase })));
+const NotFoundPage = lazy(() => import('../pages/NotFoundPage').then(m => ({ default: m.NotFoundPage })));
+
+const RouteLoadingFallback = () => (
+  <div className="min-h-dvh flex flex-col items-center justify-center bg-[#0a1628] text-slate-300">
+    <div className="w-10 h-10 border-4 border-cyan-500/20 border-t-cyan-400 rounded-full animate-spin mb-3" />
+    <span className="text-xs font-mono font-bold tracking-wider text-slate-400 uppercase">Loading AERO...</span>
+  </div>
+);
 
 export function AppRoutes() {
   const navigate = useNavigate();
@@ -51,23 +60,23 @@ export function AppRoutes() {
 
     if (authLoading || (profileLoading && !profile)) {
       return (
-        <div className="min-h-dvh flex flex-col items-center justify-center bg-bg-main p-4">
-          <div className="w-16 h-16 rounded-full border-4 border-border-subtle border-t-[#35C7FF] animate-spin mb-4"></div>
-          <h2 className="text-xl font-bold text-white">LOADING AERO ACCOUNT...</h2>
-          <p className="text-text-secondary mt-2">Authenticating secure session</p>
+        <div className="min-h-dvh flex flex-col items-center justify-center bg-aero-background p-4">
+          <div className="w-16 h-16 rounded-full border-4 border-aero-border border-t-[#35C7FF] animate-spin mb-4"></div>
+          <h2 className="text-xl font-bold text-aero-text-primary">LOADING AERO ACCOUNT...</h2>
+          <p className="text-aero-text-secondary mt-2">Authenticating secure session</p>
         </div>
       );
     }
 
     if (profileError && !profile) {
       return (
-        <div className="min-h-dvh flex flex-col items-center justify-center bg-bg-main p-4">
-          <div className="bg-red-500/10 border border-red-500/30 rounded-xl p-6 max-w-md text-center">
-            <h2 className="text-xl font-bold text-red-500 mb-2">AERO ACCOUNT ERROR</h2>
-            <p className="text-text-secondary mb-6">{profileError || "Authentication could not be initialized."}</p>
+        <div className="min-h-dvh flex flex-col items-center justify-center bg-aero-background p-4">
+          <div className="bg-aero-red-soft border border-aero-red/30 rounded-xl p-6 max-w-md text-center">
+            <h2 className="text-xl font-bold text-aero-red mb-2">AERO ACCOUNT ERROR</h2>
+            <p className="text-aero-text-secondary mb-6">{profileError || "Authentication could not be initialized."}</p>
             <button 
               onClick={() => refreshProfile()}
-              className="bg-bg-surface hover:bg-bg-elevated text-white px-6 py-2 rounded-lg border border-border-subtle transition-colors"
+              className="bg-aero-surface hover:bg-aero-surface-soft text-aero-text-primary px-6 py-2 rounded-lg border border-aero-border transition-colors"
             >
               Retry
             </button>
@@ -94,9 +103,9 @@ export function AppRoutes() {
         }
         
         return (
-          <div className="min-h-dvh flex flex-col items-center justify-center bg-bg-main p-4 text-center">
-            <h2 className="text-xl font-bold text-red-500 mb-2">UNAUTHORIZED</h2>
-            <p className="text-text-secondary">Your account role ({userRole || 'UNKNOWN'}) does not have access to this page.</p>
+          <div className="min-h-dvh flex flex-col items-center justify-center bg-aero-background p-4 text-center">
+            <h2 className="text-xl font-bold text-aero-red mb-2">UNAUTHORIZED</h2>
+            <p className="text-aero-text-secondary">Your account role ({userRole || 'UNKNOWN'}) does not have access to this page.</p>
           </div>
         );
       }
@@ -111,7 +120,8 @@ export function AppRoutes() {
   };
 
   return (
-    <Routes>
+    <Suspense fallback={<RouteLoadingFallback />}>
+      <Routes>
       {/* Legal & Protocol */}
       <Route path="/emergency-response-protocol" element={<EmergencyProtocolPage />} />
       <Route path="/terms-of-service" element={<TermsOfServicePage />} />
@@ -237,5 +247,6 @@ export function AppRoutes() {
       {/* Fallback */}
       <Route path="*" element={<NotFoundPage />} />
     </Routes>
+  </Suspense>
   );
 }

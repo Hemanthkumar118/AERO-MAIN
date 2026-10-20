@@ -1,161 +1,151 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
-import { GoogleMapContext } from './GoogleMapContext';
+import { TomTomMap, type StandardStyleID } from '@tomtom-org/maps-sdk/map';
+import type { Map as MapLibreMap } from 'maplibre-gl';
+import * as maplibregl from 'maplibre-gl';
+import 'maplibre-gl/dist/maplibre-gl.css';
+
+import { TomTomMapContext } from './TomTomMapContext';
+import { TomTomTrafficLayer } from './TomTomTrafficLayer';
+import { TomTomIncidentsLayer } from './TomTomIncidentsLayer';
+import { TrafficLegend } from './TrafficLegend';
+import { IncidentDetailModal } from './IncidentDetailModal';
+import type { TomTomIncident } from '../../types';
 
 interface MapViewProps {
-  center: [number, number];
+  center: [number, number]; // [lat, lng]
   zoom?: number;
+  mapStyle?: StandardStyleID;
   children?: React.ReactNode;
   className?: string;
   showControls?: boolean;
   showLiveLocation?: boolean;
   followLiveLocation?: boolean;
-}
-
-// Google Maps loader singleton
-let googleMapsLoadPromise: Promise<void> | null = null;
-let googleMapsLoaded = false;
-
-function loadGoogleMapsScript(apiKey: string): Promise<void> {
-  if (googleMapsLoaded) return Promise.resolve();
-  if (googleMapsLoadPromise) return googleMapsLoadPromise;
-
-  googleMapsLoadPromise = new Promise((resolve, reject) => {
-    // Check if already loaded
-    if (window.google?.maps?.Map) {
-      googleMapsLoaded = true;
-      resolve();
-      return;
-    }
-
-    const script = document.createElement('script');
-    script.src = `https://maps.googleapis.com/maps/api/js?key=${apiKey}&libraries=places,marker&v=weekly`;
-    script.async = true;
-    script.defer = true;
-
-    script.onload = () => {
-      googleMapsLoaded = true;
-      resolve();
-    };
-    script.onerror = () => {
-      googleMapsLoadPromise = null;
-      reject(new Error('Failed to load Google Maps script'));
-    };
-
-    document.head.appendChild(script);
-  });
-
-  return googleMapsLoadPromise;
+  enableTraffic?: boolean;
+  enableIncidents?: boolean;
+  onTrafficToggle?: (enabled: boolean) => void;
+  onIncidentsToggle?: (enabled: boolean) => void;
 }
 
 export function MapView({
   center,
   zoom = 14,
+  mapStyle = 'streetLight',
   children,
   className = '',
   showControls = true,
   showLiveLocation = true,
   followLiveLocation = false,
+  enableTraffic = true,
+  enableIncidents = true,
+  onTrafficToggle,
+  onIncidentsToggle,
 }: MapViewProps) {
-  console.log("[MapView] COMPONENT MOUNTED (Google Maps)", Date.now());
-
   const mapContainerRef = useRef<HTMLDivElement>(null);
-  const mapRef = useRef<google.maps.Map | null>(null);
-  const uniqueId = useRef(`gmap-${Math.random().toString(36).substr(2, 9)}`);
+  const tomtomMapRef = useRef<TomTomMap | null>(null);
+  const mapRef = useRef<MapLibreMap | null>(null);
+  const uniqueId = useRef(`tomtom-map-${Math.random().toString(36).substr(2, 9)}`);
+  
   const [isMapLoaded, setIsMapLoaded] = useState(false);
   const [showLegend, setShowLegend] = useState(false);
 
+  // TomTom Traffic & Incident state
+  const [showTrafficFlow, setShowTrafficFlow] = useState(enableTraffic);
+  const [showIncidents, setShowIncidents] = useState(enableIncidents);
+  const [showTrafficLegend, setShowTrafficLegend] = useState(false);
+  const [selectedIncident, setSelectedIncident] = useState<TomTomIncident | null>(null);
+  const [trafficError, setTrafficError] = useState<string | null>(null);
+  const [incidentCount, setIncidentCount] = useState<number>(0);
+
   // Live location tracker marker
-  const liveLocationMarker = useRef<google.maps.marker.AdvancedMarkerElement | null>(null);
+  const liveLocationMarker = useRef<maplibregl.Marker | null>(null);
   const hasInitialCentered = useRef(false);
   const isInitializing = useRef(false);
 
   useEffect(() => {
-    const apiKey = import.meta.env.VITE_GOOGLE_MAPS_API_KEY;
-    console.log("[MapView] GOOGLE MAPS API KEY:", apiKey ? "CONFIGURED" : "MISSING");
+    const apiKey = import.meta.env.VITE_TOMTOM_API_KEY;
     if (!apiKey) {
-      console.error("VITE_GOOGLE_MAPS_API_KEY is not defined");
+      setTrafficError('TomTom API key not configured. Set VITE_TOMTOM_API_KEY in .env');
       return;
     }
 
-    if (isInitializing.current || isMapLoaded) {
-      console.log("[MapView] Already initializing or loaded. Skipping.");
+    if (isInitializing.current || isMapLoaded || mapRef.current) {
       return;
     }
     isInitializing.current = true;
 
-    let isMounted = true;
+    const mapContainer = mapContainerRef.current;
+    if (!mapContainer) return;
 
-    loadGoogleMapsScript(apiKey).then(() => {
-      if (!isMounted) return;
+    // Safe center handling (fallback to Hyderabad / India if 0,0)
+    const safeCenter = (center[0] === 0 && center[1] === 0)
+      ? { lat: 17.4435, lng: 78.3772 }
+      : { lat: center[0], lng: center[1] };
 
-      const mapContainer = document.getElementById(uniqueId.current);
-      if (!mapContainer) {
-        console.error("[MapView] mapContainer not found in DOM!");
-        return;
-      }
-
-      console.log("[MapView] Google Maps script loaded. Instantiating map...");
-
-      // If center is exactly 0,0, default to India's center
-      const safeCenter = (center[0] === 0 && center[1] === 0)
-        ? { lat: 28.6139, lng: 77.2090 } // New Delhi fallback
-        : { lat: center[0], lng: center[1] };
-
-      const newMap = new google.maps.Map(mapContainer, {
-        center: safeCenter,
-        zoom: zoom || 15,
-        zoomControl: false,
-        mapTypeControl: false,
-        streetViewControl: false,
-        fullscreenControl: false,
-        styles: [
-          // Dark emergency dashboard style
-          { elementType: 'geometry', stylers: [{ color: '#0a0e1a' }] },
-          { elementType: 'labels.text.stroke', stylers: [{ color: '#0a0e1a' }] },
-          { elementType: 'labels.text.fill', stylers: [{ color: '#746855' }] },
-          { featureType: 'administrative.locality', elementType: 'labels.text.fill', stylers: [{ color: '#d59563' }] },
-          { featureType: 'poi', elementType: 'labels.text.fill', stylers: [{ color: '#d59563' }] },
-          { featureType: 'poi.park', elementType: 'geometry', stylers: [{ color: '#0f1a12' }] },
-          { featureType: 'poi.park', elementType: 'labels.text.fill', stylers: [{ color: '#6b9a76' }] },
-          { featureType: 'road', elementType: 'geometry', stylers: [{ color: '#1a2235' }] },
-          { featureType: 'road', elementType: 'geometry.stroke', stylers: [{ color: '#1a2235' }] },
-          { featureType: 'road', elementType: 'labels.text.fill', stylers: [{ color: '#9ca5b3' }] },
-          { featureType: 'road.highway', elementType: 'geometry', stylers: [{ color: '#2c3a5a' }] },
-          { featureType: 'road.highway', elementType: 'geometry.stroke', stylers: [{ color: '#1f2835' }] },
-          { featureType: 'road.highway', elementType: 'labels.text.fill', stylers: [{ color: '#f3d19c' }] },
-          { featureType: 'transit', elementType: 'geometry', stylers: [{ color: '#111927' }] },
-          { featureType: 'transit.station', elementType: 'labels.text.fill', stylers: [{ color: '#d59563' }] },
-          { featureType: 'water', elementType: 'geometry', stylers: [{ color: '#0d1117' }] },
-          { featureType: 'water', elementType: 'labels.text.fill', stylers: [{ color: '#515c6d' }] },
-          { featureType: 'water', elementType: 'labels.text.stroke', stylers: [{ color: '#0d1117' }] },
-        ],
-        mapId: 'AERO_EMERGENCY_MAP', // Required for AdvancedMarkerElement
+    try {
+      // Initialize modern TomTomMap backed by MapLibre GL with light theme
+      const ttMap = new TomTomMap({
+        apiKey,
+        style: mapStyle,
+        mapLibre: {
+          container: mapContainer,
+          center: [safeCenter.lng, safeCenter.lat], // MapLibre uses [lng, lat]
+          zoom: zoom || 14,
+        },
       });
 
-      console.log("[MapView] Map instance created.");
-      mapRef.current = newMap;
+      tomtomMapRef.current = ttMap;
+      const coreMap = ttMap.mapLibreMap;
+      mapRef.current = coreMap;
 
-      google.maps.event.addListenerOnce(newMap, 'tilesloaded', () => {
-        if (!isMounted) return;
-        console.log("[MapView] Map tiles loaded.");
+      coreMap.on('load', () => {
         setIsMapLoaded(true);
       });
 
-      // Fallback in case 'tilesloaded' doesn't fire
+      // Fallback in case load takes longer or already ready
       setTimeout(() => {
-        if (isMounted && !isMapLoaded) {
-          console.log("[MapView] Fallback timeout reached, setting map loaded.");
+        if (coreMap && !isMapLoaded) {
           setIsMapLoaded(true);
         }
-      }, 2000);
-    }).catch(err => {
-      console.error("Failed to load Google Maps:", err);
-    });
+      }, 1500);
+    } catch (err: any) {
+      console.warn('[MapView] Error creating TomTomMap, trying direct MapLibre fallback:', err);
+      try {
+        const isLight = mapStyle === 'streetLight';
+        const mapPart = isLight ? 'basic_street-light' : 'basic_street-dark';
+        const flowPart = isLight ? 'flow_relative-light' : 'flow_relative-dark';
+        const incPart = isLight ? 'incidents_light' : 'incidents_dark';
+        const orbisStyleUrl = `https://api.tomtom.com/maps/orbis/assets/styles/0.6.0-0/style.json?apiVersion=1&key=${apiKey}&map=${mapPart}&trafficFlow=${flowPart}&trafficIncidents=${incPart}`;
+        const mlMap = new maplibregl.Map({
+          container: mapContainer,
+          style: orbisStyleUrl,
+          center: [safeCenter.lng, safeCenter.lat],
+          zoom: zoom || 14,
+          attributionControl: false,
+        });
+
+        mapRef.current = mlMap;
+        mlMap.on('load', () => {
+          setIsMapLoaded(true);
+        });
+      } catch (fallbackErr: any) {
+        console.error('[MapView] Fatal MapLibre initialization error:', fallbackErr);
+        setTrafficError(fallbackErr.message || 'Failed to initialize TomTom Maps');
+      }
+    }
 
     return () => {
-      isMounted = false;
       isInitializing.current = false;
-      mapRef.current = null;
+      if (liveLocationMarker.current) {
+        liveLocationMarker.current.remove();
+        liveLocationMarker.current = null;
+      }
+      if (mapRef.current) {
+        try {
+          mapRef.current.remove();
+        } catch (e) {}
+        mapRef.current = null;
+        tomtomMapRef.current = null;
+      }
     };
   }, []);
 
@@ -163,9 +153,9 @@ export function MapView({
   useEffect(() => {
     if (isMapLoaded && mapRef.current) {
       const safeCenter = (center[0] === 0 && center[1] === 0)
-        ? { lat: 28.6139, lng: 77.2090 }
+        ? { lat: 17.4435, lng: 78.3772 }
         : { lat: center[0], lng: center[1] };
-      mapRef.current.setCenter(safeCenter);
+      mapRef.current.setCenter([safeCenter.lng, safeCenter.lat]);
     }
   }, [center[0], center[1], isMapLoaded]);
 
@@ -173,34 +163,33 @@ export function MapView({
   useEffect(() => {
     if (!showLiveLocation || !isMapLoaded || !('geolocation' in navigator) || !mapRef.current) return;
 
+    const map = mapRef.current;
+
     const watchId = navigator.geolocation.watchPosition(
       (pos) => {
-        const newPos = { lat: pos.coords.latitude, lng: pos.coords.longitude };
+        const newPos: [number, number] = [pos.coords.longitude, pos.coords.latitude];
 
         if (!liveLocationMarker.current) {
-          // Create a blue dot marker for live location
           const dotEl = document.createElement('div');
+          dotEl.className = 'aero-live-location-dot';
           dotEl.innerHTML = `
             <div style="display: flex; align-items: center; justify-content: center; width: 24px; height: 24px;">
-              <div style="width: 14px; height: 14px; background-color: #4285F4; border-radius: 50%; border: 2.5px solid #ffffff; box-shadow: 0 0 10px rgba(66, 133, 244, 0.6);"></div>
+              <div style="width: 14px; height: 14px; background-color: #38bdf8; border-radius: 50%; border: 2.5px solid #ffffff; box-shadow: 0 0 12px rgba(56, 189, 248, 0.8);"></div>
             </div>
           `;
 
-          liveLocationMarker.current = new google.maps.marker.AdvancedMarkerElement({
-            map: mapRef.current,
-            position: newPos,
-            content: dotEl,
-          });
+          liveLocationMarker.current = new maplibregl.Marker({ element: dotEl })
+            .setLngLat(newPos)
+            .addTo(map);
         } else {
-          liveLocationMarker.current.position = newPos;
+          liveLocationMarker.current.setLngLat(newPos);
         }
 
         if (followLiveLocation && !hasInitialCentered.current) {
-          mapRef.current!.setCenter(newPos);
-          mapRef.current!.setZoom(Math.max(mapRef.current!.getZoom() || 14, 16));
+          map.flyTo({ center: newPos, zoom: Math.max(map.getZoom(), 15), duration: 800 });
           hasInitialCentered.current = true;
         } else if (followLiveLocation) {
-          mapRef.current!.setCenter(newPos);
+          map.panTo(newPos, { duration: 500 });
         }
       },
       () => {},
@@ -210,7 +199,7 @@ export function MapView({
     return () => {
       navigator.geolocation.clearWatch(watchId);
       if (liveLocationMarker.current) {
-        liveLocationMarker.current.map = null;
+        liveLocationMarker.current.remove();
         liveLocationMarker.current = null;
       }
     };
@@ -218,27 +207,62 @@ export function MapView({
 
   const handleRecenter = useCallback(() => {
     if (mapRef.current) {
-      mapRef.current.setCenter({ lat: center[0], lng: center[1] });
+      mapRef.current.flyTo({
+        center: [center[1], center[0]],
+        zoom: zoom || 14,
+        duration: 1000,
+      });
     }
-  }, [center[0], center[1]]);
+  }, [center[0], center[1], zoom]);
 
   const handleZoomIn = useCallback(() => {
-    if (mapRef.current) mapRef.current.setZoom((mapRef.current.getZoom() || 14) + 1);
+    if (mapRef.current) mapRef.current.zoomIn();
   }, []);
 
   const handleZoomOut = useCallback(() => {
-    if (mapRef.current) mapRef.current.setZoom((mapRef.current.getZoom() || 14) - 1);
+    if (mapRef.current) mapRef.current.zoomOut();
   }, []);
 
-  return (
-    <div className={`relative w-full h-full min-h-[300px] bg-bg-main overflow-hidden ${className}`}>
+  const isLight = mapStyle === 'streetLight';
 
-      <div id={uniqueId.current} ref={mapContainerRef} className="w-full h-full z-10 bg-[#0a0e1a]" />
+  return (
+    <div className={`relative w-full h-full min-h-[300px] ${isLight ? 'bg-[#f8fafc]' : 'bg-[#0F172A]'} overflow-hidden ${className}`}>
+      {/* MapLibre / TomTom Canvas Container */}
+      <div id={uniqueId.current} ref={mapContainerRef} className={`w-full h-full z-10 ${isLight ? 'bg-[#f8fafc]' : 'bg-[#0F172A]'}`} />
+
+      {/* Traffic Configuration / Network Warning */}
+      {trafficError && (
+        <div className="absolute top-4 left-4 z-30 bg-red-950/90 border border-red-500/50 text-red-200 text-xs px-3 py-1.5 rounded-lg shadow-xl flex items-center gap-2 max-w-md animate-fade-in pointer-events-auto">
+          <span>⚠️ {trafficError}</span>
+          <button onClick={() => setTrafficError(null)} className="text-red-400 hover:text-white font-bold ml-auto pl-2">✕</button>
+        </div>
+      )}
+
+      {/* Incident Detail Card Modal */}
+      <IncidentDetailModal
+        incident={selectedIncident}
+        onClose={() => setSelectedIncident(null)}
+      />
 
       {isMapLoaded && (
-        <GoogleMapContext.Provider value={{ map: mapRef.current }}>
+        <TomTomMapContext.Provider value={{ map: mapRef.current, tomtomMap: tomtomMapRef.current }}>
+          {/* TomTom Real-Time Traffic Flow Layer */}
+          <TomTomTrafficLayer
+            enabled={showTrafficFlow}
+            onError={(err) => setTrafficError(err)}
+          />
+
+          {/* TomTom Real-Time Traffic Incidents Layer */}
+          <TomTomIncidentsLayer
+            enabled={showIncidents}
+            center={center}
+            onSelectIncident={(inc) => setSelectedIncident(inc)}
+            onCountChange={(count) => setIncidentCount(count)}
+            onError={(err) => console.warn('[MapView] Incidents error:', err)}
+          />
+
           {children}
-        </GoogleMapContext.Provider>
+        </TomTomMapContext.Provider>
       )}
 
       {/* Bottom Left Floating Controls */}
@@ -246,7 +270,7 @@ export function MapView({
         <div className="absolute bottom-4 left-4 z-20 flex flex-col gap-2 pointer-events-auto">
           <button
             onClick={handleRecenter}
-            className="w-9 h-9 bg-white/90 backdrop-blur border border-gray-200 rounded-lg flex items-center justify-center text-gray-600 hover:text-gray-900 hover:bg-white transition-colors shadow-md cursor-pointer pointer-events-auto"
+            className="w-9 h-9 bg-[#0F172A]/90 backdrop-blur-md border border-slate-700/80 rounded-lg flex items-center justify-center text-slate-300 hover:text-white hover:bg-[#1E293B] transition-colors shadow-lg cursor-pointer pointer-events-auto"
             title="Recenter Map"
           >
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
@@ -258,26 +282,79 @@ export function MapView({
           <div className="flex flex-col gap-1">
             <button
               onClick={handleZoomIn}
-              className="w-9 h-9 bg-white/90 backdrop-blur border border-gray-200 rounded-lg flex items-center justify-center text-gray-600 hover:text-gray-900 hover:bg-white transition-colors shadow-md cursor-pointer font-bold text-lg"
+              className="w-9 h-9 bg-[#0F172A]/90 backdrop-blur-md border border-slate-700/80 rounded-lg flex items-center justify-center text-slate-300 hover:text-white hover:bg-[#1E293B] transition-colors shadow-lg cursor-pointer font-bold text-lg"
               title="Zoom In"
             >
               +
             </button>
             <button
               onClick={handleZoomOut}
-              className="w-9 h-9 bg-white/90 backdrop-blur border border-gray-200 rounded-lg flex items-center justify-center text-gray-600 hover:text-gray-900 hover:bg-white transition-colors shadow-md cursor-pointer font-bold text-lg"
+              className="w-9 h-9 bg-[#0F172A]/90 backdrop-blur-md border border-slate-700/80 rounded-lg flex items-center justify-center text-slate-300 hover:text-white hover:bg-[#1E293B] transition-colors shadow-lg cursor-pointer font-bold text-lg"
               title="Zoom Out"
             >
               −
             </button>
           </div>
 
+          {/* TomTom Live Traffic Flow Toggle */}
+          <button
+            onClick={() => {
+              const next = !showTrafficFlow;
+              setShowTrafficFlow(next);
+              if (onTrafficToggle) onTrafficToggle(next);
+            }}
+            className={`w-9 h-9 rounded-lg border flex items-center justify-center transition-all shadow-lg cursor-pointer text-xs font-bold ${
+              showTrafficFlow
+                ? 'bg-emerald-600 text-white border-emerald-400 shadow-[0_0_15px_rgba(16,185,129,0.35)]'
+                : 'bg-[#0F172A]/90 backdrop-blur-md border-slate-700/80 text-slate-400 hover:text-slate-200 hover:bg-[#1E293B]'
+            }`}
+            title={showTrafficFlow ? "TomTom Live Traffic: ON (Click to Hide)" : "TomTom Live Traffic: OFF (Click to Show)"}
+          >
+            🚦
+          </button>
+
+          {/* TomTom Incidents Toggle */}
+          <button
+            onClick={() => {
+              const next = !showIncidents;
+              setShowIncidents(next);
+              if (onIncidentsToggle) onIncidentsToggle(next);
+            }}
+            className={`relative w-9 h-9 rounded-lg border flex items-center justify-center transition-all shadow-lg cursor-pointer text-xs font-bold ${
+              showIncidents
+                ? 'bg-amber-600 text-white border-amber-400 shadow-[0_0_15px_rgba(245,158,11,0.35)]'
+                : 'bg-[#0F172A]/90 backdrop-blur-md border-slate-700/80 text-slate-400 hover:text-slate-200 hover:bg-[#1E293B]'
+            }`}
+            title={showIncidents ? `TomTom Incidents: ${incidentCount} Active` : "TomTom Incidents: OFF"}
+          >
+            ⚠️
+            {showIncidents && incidentCount > 0 && (
+              <span className="absolute -top-1.5 -right-1.5 bg-red-600 text-white text-[9px] font-bold px-1 rounded-full min-w-[16px] text-center border border-slate-900 shadow">
+                {incidentCount > 99 ? '99+' : incidentCount}
+              </span>
+            )}
+          </button>
+
+          {/* Traffic Legend Toggle */}
+          <button
+            onClick={() => setShowTrafficLegend(!showTrafficLegend)}
+            className={`w-9 h-9 rounded-lg border flex items-center justify-center transition-colors shadow-lg cursor-pointer text-xs font-bold ${
+              showTrafficLegend
+                ? 'bg-sky-600 text-white border-sky-400 shadow-[0_0_15px_rgba(56,189,248,0.35)]'
+                : 'bg-[#0F172A]/90 backdrop-blur-md border-slate-700/80 text-slate-400 hover:text-slate-200 hover:bg-[#1E293B]'
+            }`}
+            title="Toggle TomTom Traffic Legend"
+          >
+            📊
+          </button>
+
+          {/* Standard Map Legend Toggle */}
           <button
             onClick={() => setShowLegend(!showLegend)}
-            className={`w-9 h-9 rounded-lg border flex items-center justify-center transition-colors shadow-md cursor-pointer text-xs font-bold ${
+            className={`w-9 h-9 rounded-lg border flex items-center justify-center transition-colors shadow-lg cursor-pointer text-xs font-bold ${
               showLegend
-                ? 'bg-primary-600 text-white border-primary-500'
-                : 'bg-white/90 backdrop-blur border-gray-200 text-gray-500 hover:text-gray-900'
+                ? 'bg-blue-600 text-white border-blue-400 shadow-[0_0_15px_rgba(37,99,235,0.35)]'
+                : 'bg-[#0F172A]/90 backdrop-blur-md border-slate-700/80 text-slate-400 hover:text-slate-200 hover:bg-[#1E293B]'
             }`}
             title="Toggle Map Legend"
           >
@@ -286,54 +363,39 @@ export function MapView({
         </div>
       )}
 
+      {/* TomTom Traffic Legend Overlay */}
+      {showTrafficLegend && (
+        <TrafficLegend
+          onClose={() => setShowTrafficLegend(false)}
+          showIncidents={showIncidents}
+        />
+      )}
+
       {/* Map Legend Overlay */}
       {showLegend && (
-        <div className="absolute bottom-16 left-16 z-20 bg-white/95 backdrop-blur border border-gray-200 rounded-xl p-3.5 shadow-lg text-xs max-w-xs animate-fade-in">
-          <div className="flex items-center justify-between mb-2 pb-1.5 border-b border-gray-200">
-            <span className="font-bold text-gray-800 uppercase tracking-wider text-[11px]">Map Legend</span>
-            <button onClick={() => setShowLegend(false)} className="text-gray-400 hover:text-gray-600">✕</button>
+        <div className="absolute bottom-16 left-4 z-20 bg-[#0F172A]/95 backdrop-blur-md border border-slate-700/80 rounded-xl p-3 shadow-2xl text-xs space-y-2 pointer-events-auto min-w-[180px] animate-fade-in">
+          <div className="flex items-center justify-between pb-1.5 border-b border-slate-700/50">
+            <span className="font-bold text-slate-200 uppercase tracking-wider text-[11px]">Map Legend</span>
+            <button onClick={() => setShowLegend(false)} className="text-slate-400 hover:text-white font-bold cursor-pointer">✕</button>
           </div>
-          <div className="space-y-2">
-            <div className="flex items-center gap-2">
-              <div className="w-4 h-4 rounded-full bg-[#FF3B30] flex items-center justify-center text-[10px]">🚑</div>
-              <span className="text-gray-700 font-medium">Emergency Ambulance (Live)</span>
-            </div>
-            <div className="flex items-center gap-2">
-              <div className="w-4 h-4 rounded-full bg-red-700 flex items-center justify-center text-[10px]">🏥</div>
-              <span className="text-gray-700 font-medium">Destination Hospital</span>
-            </div>
-            <div className="flex items-center gap-2">
-              <div className="w-4 h-4 rounded-full bg-sky-600 flex items-center justify-center text-[10px]">👮</div>
-              <span className="text-gray-700 font-medium">Traffic Police Officer</span>
-            </div>
-            <div className="flex items-center gap-2">
-              <div className="w-4 h-4 rounded-full bg-blue-500 flex items-center justify-center">
-                <div className="w-2 h-2 rounded-full bg-white"></div>
-              </div>
-              <span className="text-gray-700 font-medium">Your Live Location</span>
-            </div>
-            <div className="flex items-center gap-2">
-              <span className="w-3 h-3 rounded-full bg-emerald-500 ring-2 ring-emerald-300" />
-              <span className="text-gray-600">Cleared Green-Wave Junction</span>
-            </div>
-            <div className="flex items-center gap-2">
-              <span className="w-3 h-3 rounded-full bg-amber-500 ring-2 ring-amber-300" />
-              <span className="text-gray-600">Preparing Junction Clearance</span>
-            </div>
-            <div className="flex items-center gap-2">
-              <span className="w-3 h-3 rounded bg-orange-500 flex items-center justify-center text-[9px]">⚠️</span>
-              <span className="text-gray-600">Hazard / Road Blockage</span>
-            </div>
+          <div className="flex items-center gap-2 text-slate-300">
+            <span className="w-3 h-3 rounded-full bg-red-500 shadow-[0_0_6px_rgba(239,68,68,0.6)]" />
+            <span>Emergency Ambulance</span>
+          </div>
+          <div className="flex items-center gap-2 text-slate-300">
+            <span className="w-3 h-3 rounded-full bg-sky-500 shadow-[0_0_6px_rgba(56,189,248,0.6)]" />
+            <span>Police Unit</span>
+          </div>
+          <div className="flex items-center gap-2 text-slate-300">
+            <span className="w-3 h-3 rounded-full bg-blue-600 shadow-[0_0_6px_rgba(37,99,235,0.6)]" />
+            <span>Hospital Pin</span>
+          </div>
+          <div className="flex items-center gap-2 text-slate-300">
+            <span className="w-3.5 h-1 bg-red-500 rounded" />
+            <span>Primary Route</span>
           </div>
         </div>
       )}
-
-      {/* Police-Assisted System Notice */}
-      <div className="absolute bottom-2 right-4 z-20 pointer-events-none">
-        <span className="text-[10px] text-gray-400 bg-white/80 px-2 py-0.5 rounded border border-gray-200 font-mono">
-          Police-Assisted Traffic Clearance • Google Maps
-        </span>
-      </div>
     </div>
   );
 }

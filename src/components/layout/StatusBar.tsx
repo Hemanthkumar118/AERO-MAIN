@@ -44,7 +44,7 @@ export function StatusBar({
   const userName = propUserName || profile?.full_name || 'Operator';
 
   return (
-    <header className="relative z-40 h-14 bg-bg-surface border-b border-border-subtle flex items-center justify-between px-4 sm:px-6 shrink-0">
+    <header className="relative z-40 h-14 bg-aero-surface border-b border-aero-border flex items-center justify-between px-4 sm:px-6 shrink-0">
       {/* Left: Brand & Role */}
       <div className="flex items-center gap-3 sm:gap-4">
         <div
@@ -52,19 +52,19 @@ export function StatusBar({
           className="flex items-center gap-2.5 cursor-pointer hover:opacity-80 transition-opacity"
         >
           {/* AERO Logo Mark */}
-          <div className="w-8 h-8 rounded-lg bg-[#E53935] flex items-center justify-center shadow-[0_0_12px_rgba(229,57,53,0.4)]">
+          <div className="w-8 h-8 rounded-lg bg-[#EF3B3A] flex items-center justify-center shadow-[0_0_12px_rgba(229,57,53,0.4)]">
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true">
               <path d="M12 2L4 6v6c0 5.55 3.84 10.74 8 12 4.16-1.26 8-6.45 8-12V6l-8-4z" fill="white" opacity="0.95"/>
               <path d="M9 12h6M12 9v6" stroke="#07090C" strokeWidth="2.5" strokeLinecap="round"/>
             </svg>
           </div>
-          <span className="text-lg font-black tracking-tight text-white font-sans">
+          <span className="text-lg font-black tracking-tight text-aero-red font-sans">
             AERO
           </span>
         </div>
 
         {userRole && (
-          <div className="flex items-center ml-2 border-l border-border-subtle pl-4">
+          <div className="flex items-center ml-2 border-l border-aero-border pl-4">
             <Badge variant={roleBadgeVariant[userRole]} size="sm">
               {roleLabels[userRole]}
             </Badge>

@@ -23,21 +23,21 @@ export function Input({
       {label && (
         <label
           htmlFor={inputId}
-          className="text-xs font-bold uppercase tracking-wider text-text-secondary mb-1"
+          className="text-xs font-bold uppercase tracking-wider text-aero-text-secondary mb-1"
         >
           {label}
         </label>
       )}
       <div className="relative">
         {icon && (
-          <span className="absolute left-3 top-1/2 -translate-y-1/2 text-text-secondary" aria-hidden="true">
+          <span className="absolute left-3 top-1/2 -translate-y-1/2 text-aero-text-secondary" aria-hidden="true">
             {icon}
           </span>
         )}
         <input
           id={inputId}
           className={`
-            enterprise-input
+            aero-input
             ${icon ? 'pl-10' : ''}
             ${error
               ? 'border-status-error focus:ring-status-error/50'
@@ -60,7 +60,7 @@ export function Input({
         </p>
       )}
       {hint && !error && (
-        <p id={`${inputId}-hint`} className="text-[12px] text-text-secondary mt-1">
+        <p id={`${inputId}-hint`} className="text-[12px] text-aero-text-secondary mt-1">
           {hint}
         </p>
       )}

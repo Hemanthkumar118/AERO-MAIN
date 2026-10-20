@@ -38,22 +38,22 @@ export function ETADisplay({
   if (compact) {
     return (
       <div className={`inline-flex items-center gap-3 text-[13px] ${className}`}>
-        <span className="text-text-secondary">
-          <span className="font-semibold text-text-primary">{formatETA(activeEta)}</span>
+        <span className="text-aero-text-secondary">
+          <span className="font-semibold text-aero-text-primary">{formatETA(activeEta)}</span>
           {' '}ETA
         </span>
         {trafficStatus === 'LIVE' && (
-           <span className="text-[9px] bg-[#34C759]/20 text-[#34C759] px-1 py-0.5 rounded border border-[#34C759]/30 font-bold ml-1">LIVE TRAFFIC</span>
+           <span className="text-[9px] bg-aero-surface-soft text-aero-text-secondary px-1 py-0.5 rounded border border-aero-border font-bold ml-1 uppercase">ROUTE ETA</span>
         )}
         <span className="text-border-strong">|</span>
-        <span className="text-text-secondary">
-          <span className="font-semibold text-text-primary">{formatDistance(distanceMeters)}</span>
+        <span className="text-aero-text-secondary">
+          <span className="font-semibold text-aero-text-primary">{formatDistance(distanceMeters)}</span>
         </span>
         {speed != null && (
           <>
             <span className="text-border-strong">|</span>
-            <span className="text-text-secondary">
-              <span className="font-semibold text-text-primary">{Math.round(speed)}</span> km/h
+            <span className="text-aero-text-secondary">
+              <span className="font-semibold text-aero-text-primary">{Math.round(speed)}</span> km/h
             </span>
           </>
         )}
@@ -65,14 +65,11 @@ export function ETADisplay({
       <div className={`flex gap-4 ${className}`} role="status" aria-label={`ETA: ${formatETA(activeEta)}, Distance: ${formatDistance(distanceMeters)}`}>
       {/* ETA */}
       <div className="flex flex-col items-center relative">
-        <span className="text-2xl font-bold text-text-primary tabular-nums">
+        <span className="text-2xl font-bold text-aero-text-primary tabular-nums">
           {formatETA(activeEta)}
         </span>
-        <span className="text-[11px] font-medium tracking-[0.05em] uppercase text-text-secondary flex items-center gap-1">
+        <span className="text-[11px] font-medium tracking-[0.05em] uppercase text-aero-text-secondary flex items-center gap-1">
           ETA
-          {trafficStatus === 'LIVE' && (
-            <span className="w-1.5 h-1.5 rounded-full bg-[#34C759] animate-pulse" title="Live Traffic" />
-          )}
         </span>
       </div>
 
@@ -80,10 +77,10 @@ export function ETADisplay({
 
       {/* Distance */}
       <div className="flex flex-col items-center">
-        <span className="text-2xl font-bold text-text-primary tabular-nums">
+        <span className="text-2xl font-bold text-aero-text-primary tabular-nums">
           {formatDistance(distanceMeters)}
         </span>
-        <span className="text-[11px] font-medium tracking-[0.05em] uppercase text-text-secondary">
+        <span className="text-[11px] font-medium tracking-[0.05em] uppercase text-aero-text-secondary">
           Distance
         </span>
       </div>
@@ -92,10 +89,10 @@ export function ETADisplay({
         <>
           <div className="w-px bg-border-subtle" />
           <div className="flex flex-col items-center">
-            <span className="text-2xl font-bold text-text-primary tabular-nums">
+            <span className="text-2xl font-bold text-aero-text-primary tabular-nums">
               {Math.round(speed)}
             </span>
-            <span className="text-[11px] font-medium tracking-[0.05em] uppercase text-text-secondary">
+            <span className="text-[11px] font-medium tracking-[0.05em] uppercase text-aero-text-secondary">
               km/h
             </span>
           </div>

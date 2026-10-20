@@ -31,14 +31,14 @@ export function SOSButton({
           className={`
             relative w-20 h-20 rounded-full
             flex items-center justify-center
-            text-white font-bold text-lg tracking-wide
+            text-aero-text-primary font-bold text-lg tracking-wide
             transition-all duration-200
             focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-[#FF3B30] focus-visible:ring-offset-2 focus-visible:ring-offset-bg-main
             ${disabled
               ? 'bg-white/10 cursor-not-allowed opacity-50'
               : loading
                 ? 'bg-[#FF3B30]/80 cursor-wait'
-                : 'bg-[#FF3B30] hover:bg-[#FF3B30]/90 active:bg-[#FF3B30]/70 cursor-pointer shadow-[0_0_20px_rgba(255,59,48,0.4)] hover:shadow-[0_0_30px_rgba(255,59,48,0.5)]'
+                : 'bg-aero-red hover:bg-[#FF3B30]/90 active:bg-[#FF3B30]/70 cursor-pointer shadow-[0_0_20px_rgba(255,59,48,0.4)] hover:shadow-[0_0_30px_rgba(255,59,48,0.5)]'
             }
           `}
           aria-label="Send Emergency SOS"
@@ -58,7 +58,7 @@ export function SOSButton({
           )}
         </button>
         {disabled && disabledReason && (
-          <p className="text-[11px] text-text-secondary text-center max-w-[180px]">
+          <p className="text-[11px] text-aero-text-secondary text-center max-w-[180px]">
             {disabledReason}
           </p>
         )}

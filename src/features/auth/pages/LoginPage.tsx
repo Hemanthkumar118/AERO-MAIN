@@ -22,8 +22,8 @@ const ROLES: { role: UserRole; label: string; sublabel: string; color: string; a
     role: 'POLICE',
     label: 'Traffic Police',
     sublabel: 'Traffic Authority',
-    color: 'text-[#FFB020]',
-    activeBg: 'bg-[#FFB020]/10',
+    color: 'text-aero-amber',
+    activeBg: 'bg-aero-amber-soft',
     activeBorder: 'border-[#FFB020]/50',
   },
   {
@@ -167,7 +167,7 @@ export function LoginPage({ onLogin }: LoginPageProps) {
       animate={{ opacity: 1, y: 0 }}
       exit={{ opacity: 0, y: -10 }}
       transition={{ duration: 0.3, ease: 'easeOut' }}
-      className="min-h-screen flex bg-bg-main font-sans" style={{ colorScheme: 'dark' }}
+      className="min-h-screen flex bg-aero-background font-sans" style={{ colorScheme: 'dark' }}
     >
 
       {/* ── LEFT: Cinematic image panel ── */}
@@ -273,7 +273,7 @@ export function LoginPage({ onLogin }: LoginPageProps) {
       </div>
 
       {/* ── RIGHT: Authentication panel ── */}
-      <div className="flex-1 flex flex-col justify-center px-6 py-12 lg:px-12 bg-bg-surface relative">
+      <div className="flex-1 flex flex-col justify-center px-6 py-12 lg:px-12 bg-aero-surface relative">
         {/* Subtle grid texture */}
         <div className="absolute inset-0 opacity-[0.03]" style={{
           backgroundImage: 'linear-gradient(rgba(255,255,255,0.5) 1px, transparent 1px), linear-gradient(90deg, rgba(255,255,255,0.5) 1px, transparent 1px)',
@@ -324,7 +324,7 @@ export function LoginPage({ onLogin }: LoginPageProps) {
                         hover:-translate-y-[1px] hover:scale-[1.01]
                         ${active
                           ? `${activeBg} ${activeBorder} ${color}`
-                          : 'bg-[#0F1218] border-[rgba(255,255,255,0.06)] text-[#A7ADB5] hover:border-[rgba(255,255,255,0.12)] hover:text-white hover:bg-white/[0.02]'
+                          : 'bg-aero-surface border-[var(--color-border-subtle)] text-[#A7ADB5] hover:border-[rgba(255,255,255,0.12)] hover:text-white hover:bg-white/[0.02]'
                         }
                       `}
                     >
@@ -332,8 +332,8 @@ export function LoginPage({ onLogin }: LoginPageProps) {
                         {RoleIcons[role]}
                       </span>
                       <div className="min-w-0">
-                        <p className={`text-[11px] font-bold leading-tight transition-colors ${active ? color : 'text-text-primary'}`}>{label}</p>
-                        <p className={`text-[9px] font-medium mt-0.5 truncate transition-colors ${active ? 'opacity-70' : 'text-text-secondary'}`}>{sublabel}</p>
+                        <p className={`text-[11px] font-bold leading-tight transition-colors ${active ? color : 'text-aero-text-primary'}`}>{label}</p>
+                        <p className={`text-[9px] font-medium mt-0.5 truncate transition-colors ${active ? 'opacity-70' : 'text-aero-text-secondary'}`}>{sublabel}</p>
                       </div>
                       {active && (
                         <motion.div
@@ -381,7 +381,7 @@ export function LoginPage({ onLogin }: LoginPageProps) {
                   value={identifier}
                   onChange={e => { setIdentifier(e.target.value); setError(''); }}
                   disabled={isLoading}
-                  className="enterprise-input disabled:opacity-50 focus:border-[#E53935] focus:ring-1 focus:ring-[#E53935]/30 focus:shadow-[0_0_15px_rgba(229,57,53,0.15)] transition duration-200"
+                  className="aero-input disabled:opacity-50 focus:border-[#E53935] focus:ring-1 focus:ring-[#E53935]/30 focus:shadow-[0_0_15px_rgba(229,57,53,0.15)] transition duration-200"
                 />
               </motion.div>
 
@@ -402,7 +402,7 @@ export function LoginPage({ onLogin }: LoginPageProps) {
                     value={password}
                     onChange={e => { setPassword(e.target.value); setError(''); }}
                     disabled={isLoading}
-                    className="enterprise-input pr-16 disabled:opacity-50 focus:border-[#E53935] focus:ring-1 focus:ring-[#E53935]/30 focus:shadow-[0_0_15px_rgba(229,57,53,0.15)] transition duration-200"
+                    className="aero-input pr-16 disabled:opacity-50 focus:border-[#E53935] focus:ring-1 focus:ring-[#E53935]/30 focus:shadow-[0_0_15px_rgba(229,57,53,0.15)] transition duration-200"
                   />
                   <button
                     type="button"
@@ -482,7 +482,7 @@ export function LoginPage({ onLogin }: LoginPageProps) {
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
               transition={{ delay: 0.35, duration: 0.3 }}
-              className="mt-6 pt-6 border-t border-border-subtle"
+              className="mt-6 pt-6 border-t border-aero-border"
             >
               <p className="text-center text-[11px] font-medium text-[#A7ADB5]/60 leading-relaxed">
                 For authorized AERO operators only.

@@ -1,8 +1,9 @@
 import { memo, useEffect, useRef } from 'react';
 import { renderToString } from 'react-dom/server';
+import * as maplibregl from 'maplibre-gl';
+import type { FeatureCollection, Point } from 'geojson';
 import type { NormalizedHospital } from '../../../services/hospitalSearch/types';
-import { useGoogleMap } from '../../../components/map/GoogleMapContext';
-import { MarkerClusterer, Cluster } from '@googlemaps/markerclusterer';
+import { useTomTomMap } from '../../../components/map/TomTomMapContext';
 
 interface HospitalPinsProps {
   hospitals: NormalizedHospital[];
@@ -21,86 +22,27 @@ const BLUE_ICON_HTML = `
   </div>
 `;
 
-// Custom renderer for AERO theme
-const aeroClusterRenderer = {
-  render: ({ count, position }: Cluster, _stats: any, _map: google.maps.Map) => {
-    const content = document.createElement('div');
-    content.style.width = '42px';
-    content.style.height = '42px';
-    content.style.backgroundColor = '#3b82f6';
-    content.style.color = 'white';
-    content.style.borderRadius = '50%';
-    content.style.display = 'flex';
-    content.style.justifyContent = 'center';
-    content.style.alignItems = 'center';
-    content.style.fontWeight = 'bold';
-    content.style.fontSize = '15px';
-    content.style.border = '3px solid white';
-    content.style.boxShadow = '0 2px 6px rgba(0,0,0,0.3)';
-    content.innerText = String(count);
-
-    return new google.maps.marker.AdvancedMarkerElement({
-      position,
-      content,
-      zIndex: Number(google.maps.Marker.MAX_ZINDEX) + count,
-    });
-  }
-};
+const GEOJSON_SOURCE_ID = 'aero-hospitals-geojson';
+const CLUSTERS_LAYER_ID = 'aero-hospitals-clusters';
+const CLUSTER_COUNT_LAYER_ID = 'aero-hospitals-cluster-count';
+const UNCLUSTERED_LAYER_ID = 'aero-hospitals-unclustered';
 
 export const HospitalPins = memo(function HospitalPins({
   hospitals,
   selectedHospitalId,
   onSelect,
 }: HospitalPinsProps) {
-  const { map } = useGoogleMap();
-  const clustererRef = useRef<MarkerClusterer | null>(null);
-  const markersRef = useRef<google.maps.marker.AdvancedMarkerElement[]>([]);
-  const infoWindowRef = useRef<google.maps.InfoWindow | null>(null);
-  
-  // Use a ref for onSelect so we don't have to re-create markers on every render
+  const { map } = useTomTomMap();
+  const markersRef = useRef<maplibregl.Marker[]>([]);
+  const popupRef = useRef<maplibregl.Popup | null>(null);
+
   const onSelectRef = useRef(onSelect);
   useEffect(() => {
     onSelectRef.current = onSelect;
   }, [onSelect]);
 
-  // Setup clusterer and info window once
   useEffect(() => {
     if (!map) return;
-
-    if (!infoWindowRef.current) {
-      infoWindowRef.current = new google.maps.InfoWindow({
-        maxWidth: 300,
-      });
-    }
-
-    if (!clustererRef.current) {
-      clustererRef.current = new MarkerClusterer({
-        map,
-        markers: [],
-        renderer: aeroClusterRenderer,
-      });
-    }
-
-    return () => {
-      if (clustererRef.current) {
-        clustererRef.current.clearMarkers();
-        clustererRef.current = null;
-      }
-      if (infoWindowRef.current) {
-        infoWindowRef.current.close();
-        infoWindowRef.current = null;
-      }
-      markersRef.current.forEach(m => {
-        m.map = null;
-        google.maps.event.clearInstanceListeners(m);
-      });
-      markersRef.current = [];
-    };
-  }, [map]);
-
-  // Update markers when hospitals change
-  useEffect(() => {
-    if (!map || !clustererRef.current || !infoWindowRef.current) return;
 
     // Filter out the selected hospital (rendered separately by parent)
     const visibleHospitals = hospitals.filter(h => h.id !== selectedHospitalId);
@@ -110,82 +52,238 @@ export const HospitalPins = memo(function HospitalPins({
       new Map(visibleHospitals.map(h => [h.id, h])).values()
     );
 
+    // 1. Build GeoJSON FeatureCollection for all hospitals
+    const geojsonData: FeatureCollection<Point> = {
+      type: 'FeatureCollection',
+      features: uniqueHospitals.map(h => ({
+        type: 'Feature',
+        geometry: {
+          type: 'Point',
+          coordinates: [h.lng, h.lat]
+        },
+        properties: {
+          id: h.id,
+          name: h.name,
+          address: h.address || '',
+          distanceMeters: h.distanceMeters ?? 0
+        }
+      }))
+    };
+
+    // Helper to add or update MapLibre clustered layers safely
+    const setupClusteredLayers = () => {
+      try {
+        const existingSource = map.getSource(GEOJSON_SOURCE_ID) as maplibregl.GeoJSONSource | undefined;
+        if (existingSource) {
+          existingSource.setData(geojsonData);
+          return;
+        }
+
+        // Add clustered source
+        map.addSource(GEOJSON_SOURCE_ID, {
+          type: 'geojson',
+          data: geojsonData,
+          cluster: true,
+          clusterMaxZoom: 13,
+          clusterRadius: 50
+        });
+
+        // Add cluster bubbles
+        if (!map.getLayer(CLUSTERS_LAYER_ID)) {
+          map.addLayer({
+            id: CLUSTERS_LAYER_ID,
+            type: 'circle',
+            source: GEOJSON_SOURCE_ID,
+            filter: ['has', 'point_count'],
+            paint: {
+              'circle-color': [
+                'step',
+                ['get', 'point_count'],
+                '#0284c7', // 0-19: sky-600
+                20,
+                '#2563eb', // 20-99: blue-600
+                100,
+                '#1d4ed8'  // 100+: blue-700
+              ],
+              'circle-radius': [
+                'step',
+                ['get', 'point_count'],
+                18,
+                20,
+                22,
+                100,
+                26
+              ],
+              'circle-stroke-width': 2,
+              'circle-stroke-color': '#ffffff'
+            }
+          });
+        }
+
+        // Add cluster text count
+        if (!map.getLayer(CLUSTER_COUNT_LAYER_ID)) {
+          map.addLayer({
+            id: CLUSTER_COUNT_LAYER_ID,
+            type: 'symbol',
+            source: GEOJSON_SOURCE_ID,
+            filter: ['has', 'point_count'],
+            layout: {
+              'text-field': '{point_count_abbreviated}',
+              'text-font': ['Noto Sans Regular', 'Open Sans Regular', 'Arial Unicode MS Regular'],
+              'text-size': 12
+            },
+            paint: {
+              'text-color': '#ffffff'
+            }
+          });
+        }
+
+        // Add unclustered hospital dots for points beyond top DOM markers
+        if (!map.getLayer(UNCLUSTERED_LAYER_ID)) {
+          map.addLayer({
+            id: UNCLUSTERED_LAYER_ID,
+            type: 'circle',
+            source: GEOJSON_SOURCE_ID,
+            filter: ['!', ['has', 'point_count']],
+            paint: {
+              'circle-color': '#0284c7',
+              'circle-radius': 6,
+              'circle-stroke-width': 2,
+              'circle-stroke-color': '#ffffff'
+            }
+          });
+        }
+
+        // Cluster click to zoom in
+        map.on('click', CLUSTERS_LAYER_ID, (e) => {
+          const features = map.queryRenderedFeatures(e.point, { layers: [CLUSTERS_LAYER_ID] });
+          if (!features.length) return;
+          const clusterId = features[0].properties?.cluster_id;
+          const source = map.getSource(GEOJSON_SOURCE_ID) as maplibregl.GeoJSONSource;
+          if (source && clusterId) {
+            source.getClusterExpansionZoom(clusterId).then((zoom: number) => {
+              const geometry = features[0].geometry as Point;
+              map.easeTo({
+                center: geometry.coordinates as [number, number],
+                zoom: zoom + 0.5,
+                duration: 500
+              });
+            }).catch(() => {});
+          }
+        });
+
+        // Unclustered point click to select
+        map.on('click', UNCLUSTERED_LAYER_ID, (e) => {
+          const features = map.queryRenderedFeatures(e.point, { layers: [UNCLUSTERED_LAYER_ID] });
+          if (!features.length) return;
+          const clickedId = features[0].properties?.id;
+          const clickedHosp = uniqueHospitals.find(h => h.id === clickedId);
+          if (clickedHosp) {
+            onSelectRef.current(clickedHosp);
+          }
+        });
+
+        // Pointer cursor on hover
+        const setPointer = () => { map.getCanvas().style.cursor = 'pointer'; };
+        const resetPointer = () => { map.getCanvas().style.cursor = ''; };
+        map.on('mouseenter', CLUSTERS_LAYER_ID, setPointer);
+        map.on('mouseleave', CLUSTERS_LAYER_ID, resetPointer);
+        map.on('mouseenter', UNCLUSTERED_LAYER_ID, setPointer);
+        map.on('mouseleave', UNCLUSTERED_LAYER_ID, resetPointer);
+      } catch (err) {
+        console.warn('[HospitalPins] Clustered layer setup warning:', err);
+      }
+    };
+
+    if (map.isStyleLoaded()) {
+      setupClusteredLayers();
+    } else {
+      map.once('load', setupClusteredLayers);
+    }
+
+    // 2. Render prominent DOM pins for the closest 40 visible hospitals
     // Clear old markers
-    clustererRef.current.clearMarkers();
-    markersRef.current.forEach(m => {
-      m.map = null;
-      google.maps.event.clearInstanceListeners(m);
-    });
+    markersRef.current.forEach(m => m.remove());
     markersRef.current = [];
 
-    const newMarkers = uniqueHospitals.map(hospital => {
+    const closestHospitals = uniqueHospitals.slice(0, 40);
+    const newMarkers: maplibregl.Marker[] = [];
+
+    closestHospitals.forEach(hospital => {
       const contentEl = document.createElement('div');
       contentEl.innerHTML = BLUE_ICON_HTML;
       contentEl.style.width = '28px';
       contentEl.style.height = '36px';
       contentEl.style.cursor = 'pointer';
 
-      const marker = new google.maps.marker.AdvancedMarkerElement({
-        position: { lat: hospital.lat, lng: hospital.lng },
-        content: contentEl,
-      });
+      const distKm = ((hospital as any).drivingDistanceMeters
+        ? (hospital as any).drivingDistanceMeters
+        : (hospital.distanceMeters ?? 0)) / 1000;
 
-      marker.addListener('click', () => {
-        onSelectRef.current(hospital);
-
-        if (map) {
-          map.setCenter({ lat: hospital.lat, lng: hospital.lng });
-          map.setZoom(15);
-        }
-
-        const distKm = ((hospital as any).drivingDistanceMeters
-          ? (hospital as any).drivingDistanceMeters
-          : (hospital.distanceMeters ?? 0)) / 1000;
-
-        const popupContent = (
-          <div className="font-sans p-1 min-w-[180px]">
-            <p className="font-bold text-sm text-gray-900">{hospital.name}</p>
-            {hospital.address && (
-              <p className="text-xs text-gray-500 mt-0.5 leading-tight">
-                {hospital.address.slice(0, 60)}
-              </p>
-            )}
-
-            {hospital.provider === 'google' && (
-              <span className="text-[9px] font-bold text-gray-400">SOURCE: GOOGLE PLACES</span>
-            )}
-            {hospital.provider === 'osm' && (
-              <span className="text-[9px] font-bold text-gray-400">SOURCE: OSM / OVERPASS</span>
-            )}
-            {hospital.provider === 'merged' && (
-              <span className="text-[9px] font-bold text-[#10b981]">
-                SOURCE: VERIFIED (GOOGLE + OSM)
-              </span>
-            )}
-
-            <div className="flex items-center justify-between mt-2">
-              <span className="text-xs bg-blue-100 text-blue-700 font-bold px-2 py-0.5 rounded-full">
-                {distKm.toFixed(1)} km
-              </span>
-              <button
-                className="text-xs bg-emerald-600 text-white font-bold px-3 py-1 rounded-lg hover:bg-emerald-500 cursor-pointer"
-              >
-                Route
-              </button>
-            </div>
+      const popupContent = (
+        <div className="p-2 min-w-[200px]">
+          <div className="flex items-center gap-1.5 text-[10px] font-bold text-sky-500 uppercase tracking-wide">
+            <span className="w-2 h-2 rounded-full bg-sky-500" />
+            <span>Hospital</span>
           </div>
-        );
+          <p className="font-bold text-sm text-slate-100 mt-1">{hospital.name}</p>
+          <p className="text-xs text-slate-400">{hospital.address || 'Address unavailable'}</p>
 
-        const popupHtmlDep = renderToString(<div className="aero-custom-popup">{popupContent}</div>);
-        infoWindowRef.current?.setContent(popupHtmlDep);
-        infoWindowRef.current?.open({ anchor: marker, map });
+          <div className="mt-2 pt-2 border-t border-slate-700/60 space-y-1 text-xs">
+            <div className="flex justify-between">
+              <span className="text-slate-400">Distance:</span>
+              <span className="font-bold text-sky-400">{distKm > 0 ? `${distKm.toFixed(1)} km` : 'Calculating...'}</span>
+            </div>
+            {hospital.phone && (
+              <div className="flex justify-between">
+                <span className="text-slate-400">Phone:</span>
+                <span className="text-slate-200">{hospital.phone}</span>
+              </div>
+            )}
+          </div>
+        </div>
+      );
+
+      const popupHtml = renderToString(<div className="aero-custom-popup">{popupContent}</div>);
+
+      const popup = new maplibregl.Popup({
+        offset: 25,
+        maxWidth: '300px',
+        closeButton: true,
+        closeOnClick: false,
+        className: 'aero-maplibre-popup'
+      }).setHTML(popupHtml);
+
+      const marker = new maplibregl.Marker({
+        element: contentEl,
+      })
+        .setLngLat([hospital.lng, hospital.lat])
+        .setPopup(popup)
+        .addTo(map);
+
+      contentEl.addEventListener('click', (e) => {
+        e.stopPropagation();
+        onSelectRef.current(hospital);
+        map.flyTo({
+          center: [hospital.lng, hospital.lat],
+          zoom: Math.max(map.getZoom(), 15),
+          duration: 1000,
+        });
       });
 
-      return marker;
+      newMarkers.push(marker);
     });
 
     markersRef.current = newMarkers;
-    clustererRef.current.addMarkers(newMarkers);
+
+    return () => {
+      newMarkers.forEach(m => m.remove());
+      markersRef.current = [];
+      if (popupRef.current) {
+        popupRef.current.remove();
+        popupRef.current = null;
+      }
+    };
   }, [map, hospitals, selectedHospitalId]);
 
   return null;

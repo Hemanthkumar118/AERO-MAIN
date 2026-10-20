@@ -6,6 +6,7 @@ import { useToast } from '../../../components/ui/Toast';
 interface SOSInformationPanelProps {
   incident: EmergencyIncident;
   navigationStatus: 'idle' | 'active' | 'rerouting' | 'arrived' | 'error';
+  routeInfo?: any | null;
   onAbort: () => void;
   onComplete: () => void;
 }
@@ -13,6 +14,7 @@ interface SOSInformationPanelProps {
 export function SOSInformationPanel({
   incident,
   navigationStatus,
+  routeInfo,
   onAbort,
   onComplete
 }: SOSInformationPanelProps) {
@@ -46,17 +48,25 @@ export function SOSInformationPanel({
       addToast({
         variant: 'info',
         title: 'Route Updated',
-        message: 'A faster traffic-aware route has been found and applied.',
+        message: 'A faster route has been found and applied.',
       });
       prevRouteVersion.current = incident.route_version;
     }
   }, [incident.route_version, addToast]);
 
+  const effectiveDistanceMeters = incident.route_distance_meters ?? routeInfo?.distanceMeters ?? null;
+  const effectiveEtaSeconds = (incident.traffic_duration_seconds || incident.route_duration_seconds) ?? routeInfo?.trafficAwareEtaSeconds ?? routeInfo?.etaSeconds ?? null;
+  const isTrafficAware = (incident.traffic_status === 'LIVE' || incident.route_provider === 'tomtom' || routeInfo?.isTrafficAware) && incident.traffic_status !== 'UNAVAILABLE';
+  const effectiveTrafficStatus = incident.traffic_status || routeInfo?.trafficStatus || (isTrafficAware ? 'LIVE' : 'UNAVAILABLE');
+  const delaySec = (incident.traffic_duration_seconds && incident.route_duration_seconds)
+    ? Math.max(0, incident.traffic_duration_seconds - incident.route_duration_seconds)
+    : (routeInfo?.trafficDelaySeconds || 0);
+
   // Derive SOSState directly in the panel
   const sosState: SOSState = {
     status: incident.status === 'cancelled' ? 'ABORTED' : (incident.status === 'resolved' || incident.status === 'arrived' ? 'COMPLETED' : 'ACTIVE'),
     emergencyId: incident.id,
-    routeStatus: navigationStatus === 'error' ? 'ERROR' : (incident.route_geometry ? 'SUCCESS' : 'PENDING'),
+    routeStatus: navigationStatus === 'error' ? 'ERROR' : ((incident.route_geometry || routeInfo?.polyline) ? 'SUCCESS' : 'PENDING'),
     policeStatus: incident.police_acknowledged_at ? 'DELIVERED' : (incident.corridor_status !== 'PENDING' ? 'SENT' : 'PENDING'),
     hospitalStatus: incident.hospital_status === 'READY' ? 'DELIVERED' : (incident.hospital_status === 'ACCEPTED' ? 'SENT' : 'PENDING'),
     ambulanceLocation: { latitude: incident.current_latitude || 0, longitude: incident.current_longitude || 0 },
@@ -67,10 +77,10 @@ export function SOSInformationPanel({
       location: { latitude: incident.destination_latitude, longitude: incident.destination_longitude },
       emergencyCapable: true,
     } as any,
-    distanceMeters: incident.route_distance_meters,
-    etaSeconds: incident.route_duration_seconds,
-    trafficAwareEtaSeconds: incident.traffic_duration_seconds,
-    trafficStatus: incident.traffic_status as any,
+    distanceMeters: effectiveDistanceMeters,
+    etaSeconds: effectiveEtaSeconds,
+    trafficAwareEtaSeconds: effectiveEtaSeconds,
+    trafficStatus: effectiveTrafficStatus as any,
     speedKmH: incident.current_speed,
     startedAt: incident.created_at,
     updatedAt: incident.updated_at,
@@ -137,34 +147,50 @@ export function SOSInformationPanel({
                 <span>Distance</span>
               </div>
               <div className="font-bold text-white text-base">
-                {sosState.distanceMeters != null ? (sosState.distanceMeters >= 1000 ? (sosState.distanceMeters / 1000).toFixed(1) + ' km' : sosState.distanceMeters + ' m') : <span className="text-xs text-text-secondary">{navigationStatus === 'active' || navigationStatus === 'rerouting' ? 'CALCULATING...' : 'UNAVAILABLE'}</span>}
+                {effectiveDistanceMeters != null ? (
+                  effectiveDistanceMeters >= 1000 ? (effectiveDistanceMeters / 1000).toFixed(1) + ' km' : effectiveDistanceMeters + ' m'
+                ) : (
+                  <span className="text-xs text-text-secondary font-mono">{navigationStatus === 'rerouting' ? 'RECALCULATING...' : 'CALCULATING...'}</span>
+                )}
               </div>
             </div>
             <div>
               <div className="text-[11px] text-text-secondary uppercase mb-0.5 flex items-center justify-between">
                 <span>ETA</span>
-                {sosState.trafficStatus === 'LIVE' ? (
-                  <span className="text-[9px] bg-[#34C759]/20 text-[#34C759] px-1 py-0.5 rounded border border-[#34C759]/30 font-bold tracking-wider">LIVE TRAFFIC</span>
+                {isTrafficAware ? (
+                  <span className="text-[9px] bg-emerald-500/20 text-emerald-400 px-1.5 py-0.5 rounded border border-emerald-500/30 font-bold tracking-wider flex items-center gap-1">
+                    <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></span>
+                    TRAFFIC-AWARE
+                  </span>
+                ) : effectiveTrafficStatus === 'UNAVAILABLE' ? (
+                  <span className="text-[9px] bg-amber-500/20 text-amber-300 px-1 py-0.5 rounded border border-amber-500/30 font-bold">
+                    TRAFFIC UNAVAILABLE
+                  </span>
                 ) : (
-                  <span className="text-[9px] bg-bg-elevated text-text-secondary px-1 py-0.5 rounded border border-border-subtle font-bold">STANDARD</span>
+                  <span className="text-[9px] bg-bg-elevated text-text-secondary px-1 py-0.5 rounded border border-border-subtle font-bold uppercase">
+                    STANDARD ROUTE
+                  </span>
                 )}
               </div>
-              <div className="font-bold text-white text-base flex items-baseline gap-1.5">
-                {sosState.trafficAwareEtaSeconds != null && sosState.trafficStatus === 'LIVE' ? (
+              <div className="font-bold text-white text-base flex items-baseline gap-1.5 flex-wrap">
+                {effectiveEtaSeconds != null ? (
                   <>
-                    <span className={sosState.trafficAwareEtaSeconds > (sosState.etaSeconds || 0) + 120 ? 'text-[#FF3B30]' : 'text-[#34C759]'}>
-                      {Math.round(sosState.trafficAwareEtaSeconds / 60)} min
-                    </span>
-                    {sosState.etaSeconds != null && (
-                      <span className="text-[11px] text-text-secondary line-through">
-                        {Math.round(sosState.etaSeconds / 60)}m
+                    <span>{Math.round(effectiveEtaSeconds / 60)} min</span>
+                    {delaySec > 60 && (
+                      <span className="text-[10px] text-amber-400 font-bold">
+                        (+{Math.round(delaySec / 60)}m delay)
                       </span>
                     )}
                   </>
                 ) : (
-                  sosState.etaSeconds != null ? Math.round(sosState.etaSeconds / 60) + ' min' : <span className="text-xs text-text-secondary">{navigationStatus === 'active' || navigationStatus === 'rerouting' ? 'CALCULATING...' : 'UNAVAILABLE'}</span>
+                  <span className="text-xs text-text-secondary font-mono">{navigationStatus === 'rerouting' ? 'RECALCULATING...' : 'CALCULATING...'}</span>
                 )}
               </div>
+              {(incident.route_updated_at || routeInfo?.calculatedAt) && (
+                <div className="text-[9px] text-slate-400 mt-0.5 font-mono">
+                  Calculated: {new Date(incident.route_updated_at || routeInfo.calculatedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })}
+                </div>
+              )}
             </div>
           </div>
 

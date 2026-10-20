@@ -72,24 +72,24 @@ export function AuthCallbackPage() {
 
   if (loading) {
     return (
-      <div className="min-h-dvh flex flex-col items-center justify-center bg-bg-main p-4">
-        <div className="w-16 h-16 rounded-full border-4 border-border-subtle border-t-[#35C7FF] animate-spin mb-4"></div>
-        <h2 className="text-xl font-bold text-white">Verifying Authentication...</h2>
-        <p className="text-text-secondary mt-2">Please wait while we confirm your credentials.</p>
+      <div className="min-h-dvh flex flex-col items-center justify-center bg-aero-background p-4">
+        <div className="w-16 h-16 rounded-full border-4 border-aero-border border-t-[#35C7FF] animate-spin mb-4"></div>
+        <h2 className="text-xl font-bold text-aero-text-primary">Verifying Authentication...</h2>
+        <p className="text-aero-text-secondary mt-2">Please wait while we confirm your credentials.</p>
       </div>
     );
   }
 
   if (error) {
     return (
-      <div className="min-h-dvh flex items-center justify-center bg-bg-main p-4">
-        <div className="w-full max-w-md bg-bg-surface border border-[#FF3B30]/30 rounded-2xl p-8 shadow-2xl text-center">
-          <div className="w-16 h-16 rounded-full bg-red-500/20 border border-red-500/30 mx-auto flex items-center justify-center mb-6">
+      <div className="min-h-dvh flex items-center justify-center bg-aero-background p-4">
+        <div className="w-full max-w-md bg-aero-surface border border-aero-red/30 rounded-2xl p-8 shadow-2xl text-center">
+          <div className="w-16 h-16 rounded-full bg-aero-red/20 border border-aero-red/30 mx-auto flex items-center justify-center mb-6">
             <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="#ef4444" strokeWidth="2.5">
               <path d="M18 6L6 18M6 6l12 12" strokeLinecap="round" strokeLinejoin="round" />
             </svg>
           </div>
-          <h2 className="text-xl font-bold text-white mb-2">Authentication Error</h2>
+          <h2 className="text-xl font-bold text-aero-text-primary mb-2">Authentication Error</h2>
           <p className="text-red-400 mb-8">{error}</p>
           
           <div className="space-y-3">

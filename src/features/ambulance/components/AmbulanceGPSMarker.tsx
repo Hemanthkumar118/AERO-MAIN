@@ -1,5 +1,5 @@
 import { useEffect, useState, useRef } from 'react';
-import { useGoogleMap } from '../../../components/map/GoogleMapContext';
+import { useTomTomMap } from '../../../components/map/TomTomMapContext';
 import { AmbulanceMarker } from '../../../components/map';
 import { geolocationService, type GeoLocationResult } from '../../../services/geolocationService';
 
@@ -12,20 +12,20 @@ interface AmbulanceGPSMarkerProps {
   };
   isSOS: boolean;
   followLiveLocation: boolean;
-  onLocationUpdate?: (pos: GeoLocationResult) => void;
+  onLocationUpdate?: (pos: [number, number]) => void;
 }
 
 /**
  * Handles its own GPS subscription so that the parent map/dashboard
- * doesn't need to re-render 1,000+ hospital markers every time the GPS ticks.
+ * doesn't need to re-render hospital markers every time the GPS ticks.
  */
 export function AmbulanceGPSMarker({
   ambulance,
   isSOS,
   followLiveLocation,
-  onLocationUpdate
+  onLocationUpdate,
 }: AmbulanceGPSMarkerProps) {
-  const { map } = useGoogleMap();
+  const { map } = useTomTomMap();
   const [gpsLocation, setGpsLocation] = useState<GeoLocationResult | null>(null);
   const isFirstUpdate = useRef(true);
   const lastEmittedPos = useRef<[number, number] | null>(null);
@@ -54,14 +54,15 @@ export function AmbulanceGPSMarker({
     const handleStart = () => { isInteracting.current = true; };
     const handleEnd = () => { isInteracting.current = false; };
 
-    const events = ['mousedown', 'touchstart', 'dragstart'];
+    const startEvents = ['mousedown', 'touchstart', 'dragstart'];
     const endEvents = ['mouseup', 'touchend', 'dragend'];
 
-    events.forEach(event => map.addListener(event, handleStart));
-    endEvents.forEach(event => map.addListener(event, handleEnd));
+    startEvents.forEach(evt => map.on(evt as any, handleStart));
+    endEvents.forEach(evt => map.on(evt as any, handleEnd));
 
     return () => {
-      // Google Maps listeners are cleaned up when the map is destroyed
+      startEvents.forEach(evt => map.off(evt as any, handleStart));
+      endEvents.forEach(evt => map.off(evt as any, handleEnd));
     };
   }, [map]);
 
@@ -74,16 +75,16 @@ export function AmbulanceGPSMarker({
         Math.abs(lastEmittedPos.current[0] - currentPos[0]) > 0.00001 || 
         Math.abs(lastEmittedPos.current[1] - currentPos[1]) > 0.00001) {
       lastEmittedPos.current = currentPos;
-      if (onLocationUpdate) onLocationUpdate(gpsLocation);
+      if (onLocationUpdate) onLocationUpdate(currentPos);
     }
 
     // Handle map panning internally
     if (followLiveLocation && !isInteracting.current && map) {
       if (isFirstUpdate.current) {
-        map.setCenter({ lat: currentPos[0], lng: currentPos[1] });
+        map.setCenter([currentPos[1], currentPos[0]]);
         isFirstUpdate.current = false;
       } else {
-        map.setCenter({ lat: currentPos[0], lng: currentPos[1] });
+        map.panTo([currentPos[1], currentPos[0]], { duration: 600 });
       }
     }
   }, [gpsLocation, followLiveLocation, map, onLocationUpdate]);

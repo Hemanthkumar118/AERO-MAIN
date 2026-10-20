@@ -50,7 +50,7 @@ export function Drawer({
         aria-modal="true"
         aria-label={title || 'Panel'}
         className={`
-          absolute bg-bg-elevated border-border-subtle shadow-modal
+          absolute bg-aero-surface-soft border-aero-border shadow-modal
           flex flex-col overflow-hidden ${slideAnimation}
           ${positionClasses}
           ${position === 'bottom' ? 'border-t' : 'border-l'}
@@ -65,8 +65,8 @@ export function Drawer({
         )}
         {/* Header */}
         {title && (
-          <div className="flex items-center justify-between px-5 py-3 border-b border-border-subtle">
-            <h3 className="text-base font-semibold text-text-primary">{title}</h3>
+          <div className="flex items-center justify-between px-5 py-3 border-b border-aero-border">
+            <h3 className="text-base font-semibold text-aero-text-primary">{title}</h3>
             <button
               onClick={onClose}
               className="p-1.5 rounded-[6px] hover:bg-white/5 transition-colors cursor-pointer"
