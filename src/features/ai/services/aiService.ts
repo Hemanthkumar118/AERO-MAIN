@@ -7,32 +7,83 @@ export interface ChatMessage {
   created_at: string;
 }
 
-export const aiService = {
-  async sendMessage(message: string, conversationId: string | null, retryCount = 0): Promise<{ reply: string, conversationId: string }> {
-    const { data: { session } } = await supabase.auth.getSession();
-    if (!session) throw new Error('Not authenticated');
+export interface Conversation {
+  id: string;
+  title: string;
+  incident_id?: string | null;
+  status?: string;
+  created_at: string;
+  updated_at?: string;
+}
 
-    const response = await fetch('http://localhost:3001/api/ai/chat', {
+async function getAuthHeader(): Promise<string | null> {
+  try {
+    const { data: { session } } = await supabase.auth.getSession();
+    if (session?.access_token) {
+      return `Bearer ${session.access_token}`;
+    }
+
+    // Fallback: check role-specific local storage keys
+    if (typeof window !== 'undefined') {
+      const keys = ['aero-session-ambulance', 'aero-session-police', 'aero-session-hospital', 'aero-session-admin', 'aero-session-default'];
+      for (const k of keys) {
+        const item = localStorage.getItem(k);
+        if (item) {
+          try {
+            const parsed = JSON.parse(item);
+            if (parsed.access_token) return `Bearer ${parsed.access_token}`;
+          } catch {
+            // ignore
+          }
+        }
+      }
+    }
+  } catch (err) {
+    console.warn('[aiService] Failed to retrieve session token:', err);
+  }
+  return null;
+}
+
+export const aiService = {
+  /**
+   * Send message to authoritative AERO AI backend
+   */
+  async sendMessage(
+    message: string, 
+    conversationId: string | null = null, 
+    incidentContext?: string | null,
+    retryCount = 0
+  ): Promise<{ reply: string; conversationId: string }> {
+    const authHeader = await getAuthHeader();
+    if (!authHeader) {
+      throw new Error('Authentication required. Please sign in to consult AERO Intelligence.');
+    }
+
+    const response = await fetch('/api/ai/chat', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'Authorization': `Bearer ${session.access_token}`
+        'Authorization': authHeader
       },
-      body: JSON.stringify({ message, conversationId })
+      body: JSON.stringify({ 
+        message, 
+        conversationId,
+        incidentContext 
+      })
     });
 
     if (!response.ok) {
       if (response.status === 401 && retryCount === 0) {
-        // Token might have expired, try fetching fresh session and retry once
-        return this.sendMessage(message, conversationId, 1);
+        // Token might have refreshed, retry once
+        return this.sendMessage(message, conversationId, incidentContext, 1);
       }
       
       if (response.status === 401) {
-        throw new Error('Your AERO session has expired. Please sign in again.');
+        throw new Error('Your session has expired. Please sign in again.');
       }
 
       const errorData = await response.json().catch(() => ({}));
-      throw new Error(errorData.error || 'Failed to communicate with AERO AI.');
+      throw new Error(errorData.error || errorData.details || 'Failed to communicate with AERO AI.');
     }
 
     const data = await response.json();
@@ -42,42 +93,73 @@ export const aiService = {
     };
   },
 
-  async loadConversations() {
-    const { data, error } = await supabase
-      .from('ai_conversations')
-      .select('*')
-      .order('created_at', { ascending: false });
-    
-    if (error) throw error;
-    return data;
+  /**
+   * Load user's conversations from authoritative backend
+   */
+  async loadConversations(): Promise<Conversation[]> {
+    const authHeader = await getAuthHeader();
+    if (!authHeader) return [];
+
+    try {
+      const res = await fetch('/api/ai/conversations', {
+        headers: { 'Authorization': authHeader }
+      });
+      if (!res.ok) {
+        console.warn('[aiService] Failed to load conversations:', res.statusText);
+        return [];
+      }
+      const data = await res.json();
+      return data.conversations || [];
+    } catch (err) {
+      console.warn('[aiService] Error fetching conversations:', err);
+      return [];
+    }
   },
 
-  async loadMessages(conversationId: string) {
-    const { data, error } = await supabase
-      .from('ai_messages')
-      .select('*')
-      .eq('conversation_id', conversationId)
-      .order('created_at', { ascending: true });
-    
-    if (error) throw error;
-    return data;
+  /**
+   * Load verified messages for an active conversation
+   */
+  async loadMessages(conversationId: string): Promise<ChatMessage[]> {
+    const authHeader = await getAuthHeader();
+    if (!authHeader || !conversationId) return [];
+
+    try {
+      const res = await fetch(`/api/ai/conversations/${conversationId}/messages`, {
+        headers: { 'Authorization': authHeader }
+      });
+      if (!res.ok) {
+        console.warn('[aiService] Failed to load messages:', res.statusText);
+        return [];
+      }
+      const data = await res.json();
+      return (data.messages || []).map((m: any) => ({
+        id: m.id,
+        role: m.role,
+        content: m.content,
+        created_at: m.created_at
+      }));
+    } catch (err) {
+      console.warn('[aiService] Error fetching messages:', err);
+      return [];
+    }
   },
 
-  async deleteConversation(conversationId: string) {
-    const { error } = await supabase
-      .from('ai_conversations')
-      .delete()
-      .eq('id', conversationId);
-    
-    if (error) throw error;
-  },
+  /**
+   * Delete an authorized conversation
+   */
+  async deleteConversation(conversationId: string): Promise<boolean> {
+    const authHeader = await getAuthHeader();
+    if (!authHeader || !conversationId) return false;
 
-  async renameConversation(conversationId: string, title: string) {
-    const { error } = await supabase
-      .from('ai_conversations')
-      .update({ title })
-      .eq('id', conversationId);
-    
-    if (error) throw error;
+    try {
+      const res = await fetch(`/api/ai/conversations/${conversationId}`, {
+        method: 'DELETE',
+        headers: { 'Authorization': authHeader }
+      });
+      return res.ok;
+    } catch (err) {
+      console.error('[aiService] Error deleting conversation:', err);
+      return false;
+    }
   }
 };

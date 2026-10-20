@@ -12,3 +12,4 @@ coverage/
 scratch/
 audit_*.png
 supabase/.temp/
+server/data/
