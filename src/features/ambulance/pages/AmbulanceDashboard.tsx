@@ -23,6 +23,7 @@ import type {
 } from '../../../types';
 import { supabase } from '../../../lib/supabase';
 import { useAuth } from '../../../providers/AuthProvider';
+import { policeCoordinationService } from '../../../services/policeCoordinationService';
 
 export function AmbulanceDashboard() {
   const { user, profile } = useAuth();
@@ -144,6 +145,34 @@ export function AmbulanceDashboard() {
     });
     return () => unsub();
   }, [ambulance.id]);
+
+  // Generate route coordination plan for advance police alerts whenever active incident has route geometry
+  const generatedPlanForIncident = useRef<string | null>(null);
+  useEffect(() => {
+    if (!activeIncident || !activeIncident.id || !activeIncident.route_geometry || activeIncident.route_geometry.length < 2) return;
+    if (generatedPlanForIncident.current === activeIncident.id) return;
+    generatedPlanForIncident.current = activeIncident.id;
+
+    policeCoordinationService.generatePlan({
+      incidentId: activeIncident.id,
+      ambulanceId: ambulance.id,
+      ambulanceLocation: [
+        activeIncident.current_latitude || activeIncident.latitude || 17.44,
+        activeIncident.current_longitude || activeIncident.longitude || 78.34
+      ],
+      destinationLocation: [
+        activeIncident.destination_latitude || 17.43,
+        activeIncident.destination_longitude || 78.40
+      ],
+      destinationHospital: activeIncident.destination_hospital || 'Hospital',
+      routeGeometry: activeIncident.route_geometry,
+      routeDistanceMeters: activeIncident.route_distance_meters || 5000,
+      routeDurationSeconds: activeIncident.route_duration_seconds || 600,
+      priority: activeIncident.priority || 'CRITICAL'
+    }).catch(err => {
+      console.warn('[AmbulanceDashboard] Police coordination plan generation deferred:', err?.message);
+    });
+  }, [activeIncident?.id, activeIncident?.route_geometry, ambulance.id]);
 
   const handleAbort = async () => {
     if (!activeIncident || !window.confirm("Are you sure you want to abort this emergency?")) return;
@@ -352,6 +381,17 @@ export function AmbulanceDashboard() {
                  lastRouteCalculationTime.current = Date.now();
 
                   if (activeIncident) {
+                    // Dynamic replanning for police coordination along new road geometry
+                    policeCoordinationService.replanRoute(activeIncident.id, {
+                      newRouteGeometry: newRoute.polyline,
+                      newDestinationLocation: dest,
+                      newDestinationHospital: selectedHospital?.name || activeIncident.destination_hospital || 'Hospital',
+                      ambulanceLocation: pos,
+                      reason: 'Dynamic off-route traffic or route deviation'
+                    }).catch(err => {
+                      console.warn('[AERO ROUTING] Failed to replan route coordination:', err?.message);
+                    });
+
                     const updatePayload: any = {
                       route_geometry: newRoute.polyline,
                       route_distance_meters: newRoute.distanceMeters,

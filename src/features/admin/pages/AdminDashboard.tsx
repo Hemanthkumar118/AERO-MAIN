@@ -18,8 +18,15 @@ import {
   FileSpreadsheet,
   FileJson,
   Activity,
-  Ambulance as AmbulanceIcon
+  Ambulance as AmbulanceIcon,
+  Navigation,
+  UserCheck
 } from 'lucide-react';
+import {
+  policeCoordinationService,
+  type PoliceCoordinationPlan,
+  type PoliceRouteAssignment
+} from '../../../services/policeCoordinationService';
 
 export function AdminDashboard() {
   const [stats, setStats] = useState<AdminOverviewStats>({
@@ -43,15 +50,39 @@ export function AdminDashboard() {
   const [filterCategory, setFilterCategory] = useState('ALL');
   const [selectedEmergency, setSelectedEmergency] = useState<Emergency | null>(null);
 
+  // Central Police Route Coordination Overview & Dispatcher Override
+  const [coordinationOverview, setCoordinationOverview] = useState<{
+    plans: (PoliceCoordinationPlan & { assignments: PoliceRouteAssignment[] })[];
+    totalActivePlans: number;
+    totalCheckpoints: number;
+    totalGaps: number;
+    availableOfficers: any[];
+  } | null>(null);
+
+  const [reassignModalOpen, setReassignModalOpen] = useState(false);
+  const [selectedAssignmentToReassign, setSelectedAssignmentToReassign] = useState<PoliceRouteAssignment | null>(null);
+  const [newOfficerId, setNewOfficerId] = useState('');
+  const [newOfficerName, setNewOfficerName] = useState('');
+  const [reassignReason, setReassignReason] = useState('DISPATCH_OVERRIDE_PRIORITY');
+  const [isReassigning, setIsReassigning] = useState(false);
+
   const loadData = async () => {
     setLoading(true);
     try {
-      const [overviewData, historyData] = await Promise.all([
+      const [overviewData, historyData, coordOverview] = await Promise.all([
         analyticsService.getDashboardOverview(),
         analyticsService.getEmergencyHistory(),
+        policeCoordinationService.getAdminOverview().catch(() => null),
       ]);
       setStats(overviewData);
       setEmergencies(historyData);
+      if (coordOverview) {
+        setCoordinationOverview(coordOverview);
+        if (coordOverview.availableOfficers?.[0] && !newOfficerId) {
+          setNewOfficerId(coordOverview.availableOfficers[0].id);
+          setNewOfficerName(coordOverview.availableOfficers[0].name);
+        }
+      }
     } catch (err) {
       console.warn('[AdminDashboard] Failed to load data:', err);
     } finally {
@@ -66,8 +97,15 @@ export function AdminDashboard() {
       loadData();
     });
 
+    const unsubPolice = realtimeService.on('police_assignment_update', () => {
+      policeCoordinationService.getAdminOverview().then(data => {
+        if (data) setCoordinationOverview(data);
+      }).catch(() => {});
+    });
+
     return () => {
       unsubEmergency();
+      unsubPolice();
     };
   }, []);
 
@@ -349,10 +387,236 @@ export function AdminDashboard() {
                     {renderEmergencyList(historyList, 'No historical incident records found')}
                   </motion.div>
                 ),
+              },
+              {
+                id: 'route_coordination',
+                label: 'Route Police Coordination',
+                badge: (coordinationOverview?.totalGaps && coordinationOverview.totalGaps > 0)
+                  ? `${coordinationOverview.totalGaps} GAPS`
+                  : (coordinationOverview?.totalActivePlans || 0),
+                content: (
+                  <motion.div
+                    initial={{ opacity: 0 }}
+                    animate={{ opacity: 1 }}
+                    className="space-y-4 pt-2"
+                  >
+                    {/* Operational Summary Bar */}
+                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                      <div className="bg-[#0D111A] p-3 rounded-xl border border-slate-800 flex items-center justify-between">
+                        <div>
+                          <span className="text-[10px] text-slate-400 uppercase font-bold block">Active Plans</span>
+                          <span className="text-xl font-black text-cyan-400 font-mono">
+                            {coordinationOverview?.totalActivePlans || 0}
+                          </span>
+                        </div>
+                        <Navigation className="w-5 h-5 text-cyan-400" />
+                      </div>
+
+                      <div className="bg-[#0D111A] p-3 rounded-xl border border-slate-800 flex items-center justify-between">
+                        <div>
+                          <span className="text-[10px] text-slate-400 uppercase font-bold block">Monitored Checkpoints</span>
+                          <span className="text-xl font-black text-teal-400 font-mono">
+                            {coordinationOverview?.totalCheckpoints || 0}
+                          </span>
+                        </div>
+                        <Shield className="w-5 h-5 text-teal-400" />
+                      </div>
+
+                      <div className={`p-3 rounded-xl border flex items-center justify-between ${
+                        (coordinationOverview?.totalGaps || 0) > 0
+                          ? 'bg-amber-950/20 border-amber-500/50'
+                          : 'bg-[#0D111A] border-slate-800'
+                      }`}>
+                        <div>
+                          <span className="text-[10px] text-slate-400 uppercase font-bold block">Coverage Gaps</span>
+                          <span className={`text-xl font-black font-mono ${
+                            (coordinationOverview?.totalGaps || 0) > 0 ? 'text-amber-400' : 'text-slate-400'
+                          }`}>
+                            {coordinationOverview?.totalGaps || 0} Unstaffed
+                          </span>
+                        </div>
+                        <AlertTriangle className={`w-5 h-5 ${
+                          (coordinationOverview?.totalGaps || 0) > 0 ? 'text-amber-400 animate-pulse' : 'text-slate-600'
+                        }`} />
+                      </div>
+                    </div>
+
+                    {/* Plans List */}
+                    {(!coordinationOverview?.plans || coordinationOverview.plans.length === 0) ? (
+                      <div className="text-center py-12 bg-[#0D111A] rounded-xl border border-slate-800">
+                        <Shield className="w-8 h-8 text-slate-600 mx-auto mb-2.5" />
+                        <h3 className="text-sm font-bold text-slate-200">No active route coordination plans running</h3>
+                        <p className="text-xs text-slate-400 mt-1">Coordination plans generate automatically when an ambulance SOS establishes a route.</p>
+                      </div>
+                    ) : (
+                      coordinationOverview.plans.map(plan => (
+                        <div key={plan.id} className="bg-[#0D111A] border border-slate-800 rounded-xl p-4 space-y-3">
+                          <div className="flex flex-col sm:flex-row justify-between sm:items-center gap-2 border-b border-slate-800 pb-2.5">
+                            <div>
+                              <div className="flex items-center gap-2">
+                                <span className="font-mono text-xs font-black text-cyan-400 bg-cyan-950/60 px-2 py-0.5 rounded border border-cyan-800">
+                                  PLAN v{plan.route_version}
+                                </span>
+                                <span className="font-bold text-white text-sm">Incident {plan.incident_id.slice(0, 8)}...</span>
+                                <span className={`text-[10px] font-black uppercase px-2 py-0.5 rounded border ${
+                                  plan.status === 'ACTIVE' ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/30' : 'bg-slate-800 text-slate-400 border-slate-700'
+                                }`}>
+                                  {plan.status}
+                                </span>
+                              </div>
+                              <p className="text-xs text-slate-400 mt-1">
+                                Corridor Radius: <strong className="text-slate-200">{plan.corridor_distance_meters}m</strong> • Checkpoints: <strong className="text-slate-200">{plan.assignments?.length || 0}</strong>
+                              </p>
+                            </div>
+
+                            {(plan.coverage_gap_count || plan.coverage_gaps_count || 0) > 0 && (
+                              <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-amber-500/10 border border-amber-500/30 text-amber-300 text-xs font-bold">
+                                <AlertTriangle className="w-3.5 h-3.5 text-amber-400 shrink-0" />
+                                <span>{plan.coverage_gap_count || plan.coverage_gaps_count} Uncovered Junction(s)</span>
+                              </div>
+                            )}
+                          </div>
+
+                          {/* Checkpoint assignments */}
+                          <div className="space-y-1.5">
+                            {plan.assignments?.map(asg => {
+                              const isGap = !asg.police_id || asg.is_coverage_gap;
+                              return (
+                                <div
+                                  key={asg.id}
+                                  className={`flex flex-col sm:flex-row sm:items-center justify-between gap-2 p-2.5 rounded-lg border text-xs ${
+                                    isGap ? 'bg-amber-950/15 border-amber-500/30' : 'bg-[#111624] border-slate-800/80'
+                                  }`}
+                                >
+                                  <div className="flex items-center gap-2">
+                                    <span className="font-mono font-black text-cyan-400 bg-cyan-950/70 px-1.5 py-0.5 rounded text-[10px]">
+                                      P{asg.sequence_order}
+                                    </span>
+                                    <div>
+                                      <p className="font-bold text-white leading-tight">{asg.junction_name}</p>
+                                      <p className="text-[10px] text-slate-400">
+                                        {(asg.distance_from_ambulance_meters / 1000).toFixed(1)} km ahead • Amb ETA ~{asg.ambulance_eta_seconds != null ? Math.max(1, Math.round(asg.ambulance_eta_seconds / 60)) : Math.max(1, Math.round(asg.distance_from_ambulance_meters / 500))}m
+                                      </p>
+                                    </div>
+                                  </div>
+
+                                  <div className="flex items-center gap-2 self-end sm:self-auto flex-wrap">
+                                    {isGap ? (
+                                      <span className="text-[10px] font-bold text-amber-400 bg-amber-950/70 px-2 py-0.5 rounded border border-amber-800">
+                                        ⚠️ UNSTAFFED GAP
+                                      </span>
+                                    ) : (
+                                      <span className="text-[10px] text-slate-300 bg-[#161D2E] px-2 py-0.5 rounded border border-slate-700">
+                                        Officer: <strong className="text-white">{asg.police_name || 'Assigned'}</strong>
+                                      </span>
+                                    )}
+
+                                    <span className={`text-[9px] font-black uppercase px-2 py-0.5 rounded border ${
+                                      asg.status === 'CLEARANCE_CONFIRMED' ? 'bg-emerald-500/20 text-emerald-400 border-emerald-500/40' :
+                                      asg.status === 'READY' ? 'bg-teal-500/20 text-teal-300 border-teal-500/40' :
+                                      asg.status === 'EN_ROUTE_TO_POSITION' ? 'bg-cyan-500/20 text-cyan-300 border-cyan-500/40' :
+                                      asg.status === 'ACKNOWLEDGED' ? 'bg-blue-500/20 text-blue-300 border-blue-500/40' :
+                                      asg.status === 'PASSED' || asg.status === 'COMPLETED' ? 'bg-purple-500/20 text-purple-300 border-purple-500/40' :
+                                      asg.status === 'BLOCKED' || asg.status === 'CLEARANCE_REVOKED' ? 'bg-red-500/20 text-red-400 border-red-500/40' :
+                                      'bg-amber-500/20 text-amber-300 border-amber-500/40'
+                                    }`}>
+                                      {asg.status.replace(/_/g, ' ')}
+                                    </span>
+
+                                    <button
+                                      onClick={() => {
+                                        setSelectedAssignmentToReassign(asg);
+                                        setReassignModalOpen(true);
+                                      }}
+                                      className="py-1 px-2.5 rounded bg-cyan-600/20 hover:bg-cyan-600/30 text-cyan-400 font-bold text-[10px] border border-cyan-500/30 transition-colors cursor-pointer flex items-center gap-1"
+                                    >
+                                      <UserCheck className="w-3 h-3" />
+                                      {isGap ? 'Assign Reinforcement' : 'Reassign / Override'}
+                                    </button>
+                                  </div>
+                                </div>
+                              );
+                            })}
+                          </div>
+                        </div>
+                      ))
+                    )}
+                  </motion.div>
+                )
               }
             ]}
           />
         </div>
+
+        {/* Modal: Dispatcher Assignment Override / Reinforcement */}
+        <Dialog
+          open={reassignModalOpen}
+          onClose={() => setReassignModalOpen(false)}
+          title={selectedAssignmentToReassign?.police_id ? "Dispatcher Override / Reassign Officer" : "Assign Reinforcement Officer"}
+          variant="default"
+          confirmLabel={isReassigning ? "Processing..." : "Confirm Assignment"}
+          onConfirm={async () => {
+            if (!selectedAssignmentToReassign || !newOfficerId) return;
+            setIsReassigning(true);
+            try {
+              const res = await policeCoordinationService.reassignOfficer(
+                selectedAssignmentToReassign.id,
+                newOfficerId,
+                reassignReason,
+                newOfficerName
+              );
+              if (res?.assignment) {
+                // Refresh data
+                const updated = await policeCoordinationService.getAdminOverview();
+                if (updated) setCoordinationOverview(updated);
+                setReassignModalOpen(false);
+              }
+            } catch (err: any) {
+              alert(`Reassignment failed: ${err.message || 'Error'}`);
+            } finally {
+              setIsReassigning(false);
+            }
+          }}
+        >
+          <div className="space-y-3.5 text-xs text-slate-300">
+            <p>
+              Reassign post at <strong className="text-white">{selectedAssignmentToReassign?.junction_name}</strong> to an available authorized traffic officer.
+            </p>
+
+            <div>
+              <label className="text-[10px] uppercase font-bold text-slate-400 block mb-1">Select Officer</label>
+              <select
+                value={newOfficerId}
+                onChange={(e) => {
+                  setNewOfficerId(e.target.value);
+                  const off = coordinationOverview?.availableOfficers?.find(o => o.id === e.target.value);
+                  if (off) setNewOfficerName(off.name);
+                }}
+                className="w-full bg-[#131826] border border-slate-700 rounded-lg p-2.5 text-xs text-white focus:outline-none focus:border-cyan-500"
+              >
+                {coordinationOverview?.availableOfficers?.map(off => (
+                  <option key={off.id} value={off.id}>
+                    {off.name} ({off.station || 'Traffic Division'}) — {off.availability}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            <div>
+              <label className="text-[10px] uppercase font-bold text-slate-400 block mb-1">Reason for Reassignment</label>
+              <select
+                value={reassignReason}
+                onChange={(e) => setReassignReason(e.target.value)}
+                className="w-full bg-[#131826] border border-slate-700 rounded-lg p-2.5 text-xs text-white focus:outline-none focus:border-cyan-500"
+              >
+                <option value="DISPATCH_OVERRIDE_PRIORITY">Dispatch Override: Prioritize Critical Trauma Corridor</option>
+                <option value="COVERAGE_GAP_FILL">Coverage Gap Fill: Reinforce Unstaffed Route Junction</option>
+                <option value="OFFICER_DELAY_ESCALATION">Escalation: Primary Officer Delayed or Unresponsive</option>
+                <option value="TACTICAL_REDISTRIBUTION">Tactical Redistribution across Division</option>
+              </select>
+            </div>
+          </div>
+        </Dialog>
 
         {/* Incident Detail Modal */}
         {selectedEmergency && (

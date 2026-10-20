@@ -1,7 +1,13 @@
 import { useState, useEffect, useRef } from 'react';
-import { Minus, Plus, ChevronRight, CheckCircle2, Clock, Activity } from 'lucide-react';
+import { Minus, Plus, ChevronRight, CheckCircle2, Clock, Activity, Shield, AlertTriangle } from 'lucide-react';
 import type { EmergencyIncident, SOSState } from '../../../types';
 import { useToast } from '../../../components/ui/Toast';
+import {
+  policeCoordinationService,
+  type PoliceCoordinationPlan,
+  type PoliceRouteAssignment
+} from '../../../services/policeCoordinationService';
+import { realtimeService } from '../../../services/realtimeService';
 
 interface SOSInformationPanelProps {
   incident: EmergencyIncident;
@@ -23,6 +29,42 @@ export function SOSInformationPanel({
   const [expanded, setExpanded] = useState(true);
   const { addToast } = useToast();
   const prevCorridorStatus = useRef(incident.corridor_status);
+
+  // Dynamic route coordination checkpoints
+  const [coordinationPlan, setCoordinationPlan] = useState<PoliceCoordinationPlan | null>(null);
+  const [assignments, setAssignments] = useState<PoliceRouteAssignment[]>([]);
+
+  useEffect(() => {
+    if (!incident?.id) return;
+
+    let isMounted = true;
+    policeCoordinationService.getPlan(incident.id).then(res => {
+      if (isMounted && res?.plan) {
+        setCoordinationPlan(res.plan);
+        setAssignments(res.assignments || []);
+      }
+    }).catch(() => {});
+
+    const unsub = realtimeService.on('police_assignment_update', (data: any) => {
+      if (!isMounted) return;
+      if (data?.incidentId === incident.id && data.assignment) {
+        setAssignments(prev => {
+          const idx = prev.findIndex(a => a.id === data.assignment.id);
+          if (idx >= 0) {
+            const next = [...prev];
+            next[idx] = data.assignment;
+            return next;
+          }
+          return [...prev, data.assignment].sort((a, b) => a.sequence_order - b.sequence_order);
+        });
+      }
+    });
+
+    return () => {
+      isMounted = false;
+      unsub();
+    };
+  }, [incident?.id]);
 
   useEffect(() => {
     if (incident.corridor_status && incident.corridor_status !== prevCorridorStatus.current) {
@@ -211,10 +253,77 @@ export function SOSInformationPanel({
             </div>
           </div>
 
+          {/* Police Route Coordination & Sequential Clearance */}
           <div className="pt-1.5 border-t border-border-subtle">
-            <div className="flex items-center justify-between mb-0.5">
-              <span className="text-[11px] text-text-secondary uppercase">Police Corridor Status</span>
+            <div className="flex items-center justify-between mb-1">
+              <span className="text-[11px] text-text-secondary uppercase flex items-center gap-1 font-bold">
+                <Shield className="w-3.5 h-3.5 text-cyan-400" />
+                Route Police Coordination
+              </span>
+              <span className="text-[10px] font-mono font-bold text-cyan-400">
+                {coordinationPlan ? `v${coordinationPlan.route_version} • ` : ''}
+                {assignments.filter(a => ['CLEARANCE_CONFIRMED', 'PASSED', 'COMPLETED'].includes(a.status)).length} / {assignments.length || 0} Cleared
+              </span>
             </div>
+
+            {/* Coverage Gap Warning */}
+            {assignments.some(a => !a.police_id || a.is_coverage_gap) && (
+              <div className="mb-2 p-1.5 rounded-lg bg-amber-500/10 border border-amber-500/30 text-amber-300 text-[11px] flex items-center gap-1.5 font-bold">
+                <AlertTriangle className="w-3.5 h-3.5 shrink-0 text-amber-400" />
+                <span>Coverage Gap Detected: Unstaffed junction ahead (Dispatch alerted)</span>
+              </div>
+            )}
+
+            {/* Sequential Junction Progression */}
+            {assignments.length > 0 ? (
+              <div className="space-y-1 max-h-32 overflow-y-auto custom-scrollbar pr-0.5 mb-2">
+                {assignments.map(asg => {
+                  const isCleared = ['CLEARANCE_CONFIRMED', 'PASSED', 'COMPLETED'].includes(asg.status);
+                  const isReady = asg.status === 'READY';
+                  const isEnRoute = ['EN_ROUTE_TO_POSITION', 'ACKNOWLEDGED'].includes(asg.status);
+                  const isBlocked = ['BLOCKED', 'CLEARANCE_REVOKED'].includes(asg.status);
+                  const isGap = !asg.police_id;
+
+                  return (
+                    <div
+                      key={asg.id}
+                      className={`flex items-center justify-between p-1.5 rounded border text-[11px] ${
+                        isCleared ? 'bg-emerald-950/30 border-emerald-500/40 text-emerald-300' :
+                        isBlocked ? 'bg-red-950/30 border-red-500/40 text-red-300' :
+                        isReady ? 'bg-teal-950/30 border-teal-500/40 text-teal-300' :
+                        isEnRoute ? 'bg-blue-950/30 border-blue-500/40 text-blue-300' :
+                        isGap ? 'bg-amber-950/30 border-amber-500/40 text-amber-300' :
+                        'bg-bg-elevated border-border-subtle text-slate-300'
+                      }`}
+                    >
+                      <div className="flex items-center gap-1.5 truncate">
+                        <span className="font-mono font-bold text-[9px] px-1 py-0.2 rounded bg-slate-800 text-cyan-300">
+                          P{asg.sequence_order}
+                        </span>
+                        <span className="font-semibold truncate">{asg.junction_name}</span>
+                      </div>
+                      <div className="flex items-center gap-1.5 shrink-0">
+                        <span className="text-[10px] text-slate-400 font-mono">
+                          ~{(asg.distance_from_ambulance_meters / 1000).toFixed(1)}km
+                        </span>
+                        <span className={`text-[9px] font-black uppercase px-1.5 py-0.2 rounded ${
+                          isCleared ? 'bg-emerald-500/20 text-emerald-400' :
+                          isBlocked ? 'bg-red-500/20 text-red-400' :
+                          isReady ? 'bg-teal-500/20 text-teal-300' :
+                          isEnRoute ? 'bg-blue-500/20 text-blue-300' :
+                          isGap ? 'bg-amber-500/20 text-amber-300' :
+                          'bg-slate-700 text-slate-300'
+                        }`}>
+                          {isCleared ? 'CLEARED' : isBlocked ? 'BLOCKED' : isReady ? 'READY' : isEnRoute ? 'PREPARING' : isGap ? 'UNSTAFFED' : 'PENDING'}
+                        </span>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            ) : null}
+
+            {/* Overall Corridor Status */}
             <div className={`font-bold flex items-center gap-1.5 text-[13px] px-2.5 py-1.5 rounded-lg border ${
               incident.corridor_status === 'CLEAR' ? 'bg-[#20D67A]/10 text-[#20D67A] border-[#20D67A]/30' : 
               incident.corridor_status === 'CLEARING' ? 'bg-[#35C7FF]/10 text-[#35C7FF] border-[#35C7FF]/30' : 

@@ -54,6 +54,24 @@ class RealtimeService {
         }
       )
       .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'police_route_assignments' },
+        (payload: any) => {
+          if (payload?.new) {
+            this.dispatchLocal('police_assignment_updated', payload.new);
+          }
+        }
+      )
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'police_coordination_plans' },
+        (payload: any) => {
+          if (payload?.new) {
+            this.dispatchLocal('police_coordination_plan_updated', payload.new);
+          }
+        }
+      )
+      .on(
         'broadcast',
         { event: 'location_update' },
         (payload: any) => {
@@ -65,6 +83,15 @@ class RealtimeService {
         { event: 'clinical_observation_update' },
         (payload: any) => {
           this.handleClinicalBroadcast(payload);
+        }
+      )
+      .on(
+        'broadcast',
+        { event: 'police_assignment_update' },
+        (payload: any) => {
+          if (payload?.payload) {
+            this.dispatchLocal('police_assignment_updated', payload.payload);
+          }
         }
       )
       .subscribe((status: string) => {

@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 import { AppShell } from '../../../components/layout/AppShell';
 import {
   MapView,
@@ -6,6 +6,7 @@ import {
   HospitalMarker,
   PoliceMarker,
   RoutePolyline,
+  JunctionMarker,
 } from '../../../components/map';
 import { useToast } from '../../../components/ui/Toast';
 import { IncomingEmergencyAlert } from '../components/IncomingEmergencyAlert';
@@ -19,8 +20,15 @@ import {
   Shield, 
   CheckCircle2, 
   Map as MapIcon, 
-  Radio
+  Radio,
+  Navigation
 } from 'lucide-react';
+import { Dialog } from '../../../components/ui/Dialog';
+import {
+  policeCoordinationService,
+  type PoliceRouteAssignment,
+  type PoliceRouteAssignmentStatus
+} from '../../../services/policeCoordinationService';
 
 export function PoliceDashboard() {
   const { addToast } = useToast();
@@ -31,6 +39,15 @@ export function PoliceDashboard() {
   const [mapCenter, setMapCenter] = useState<[number, number] | null>(null);
   const [activeTabMobile, setActiveTabMobile] = useState<'map' | 'alerts' | 'corridors'>('map');
   const notifiedArrivals = useRef<Set<string>>(new Set());
+
+  // Modal dialog states for state machine transitions
+  const [blockageModalOpen, setBlockageModalOpen] = useState(false);
+  const [selectedAssignmentForBlockage, setSelectedAssignmentForBlockage] = useState<PoliceRouteAssignment | null>(null);
+  const [blockageNotes, setBlockageNotes] = useState('');
+
+  const [declineModalOpen, setDeclineModalOpen] = useState(false);
+  const [selectedAssignmentForDecline, setSelectedAssignmentForDecline] = useState<PoliceRouteAssignment | null>(null);
+  const [declineReason, setDeclineReason] = useState('UNAVAILABLE_OTHER_EMERGENCY');
 
   useEffect(() => {
     let isMounted = true;
@@ -59,6 +76,127 @@ export function PoliceDashboard() {
       }
     });
   }, [incidents, addToast]);
+
+  // Route Coordination Engine State
+  const [routeAssignmentsByIncident, setRouteAssignmentsByIncident] = useState<Record<string, PoliceRouteAssignment[]>>({});
+  const [isTransitioningStatus, setIsTransitioningStatus] = useState<string | null>(null);
+
+  // Fetch or generate route coordination plan for an incident
+  const loadIncidentPlan = useCallback(async (incidentId: string) => {
+    try {
+      const planData = await policeCoordinationService.getPlan(incidentId);
+      if (planData?.assignments) {
+        setRouteAssignmentsByIncident(prev => ({
+          ...prev,
+          [incidentId]: planData.assignments
+        }));
+      }
+    } catch {
+      // If plan not yet generated, attempt to generate using route geometry
+      const inc = incidents.find(i => i.id === incidentId);
+      if (inc && inc.route_geometry && Array.isArray(inc.route_geometry) && inc.route_geometry.length > 1) {
+        try {
+          const ambLat = inc.current_latitude || inc.latitude || 17.44;
+          const ambLon = inc.current_longitude || inc.longitude || 78.34;
+          const genResult = await policeCoordinationService.generatePlan(incidentId, {
+            routePolyline: inc.route_geometry,
+            routeDistanceMeters: inc.route_distance_meters || undefined,
+            routeDurationSeconds: inc.route_duration_seconds || undefined,
+            ambulanceLocation: [ambLat, ambLon],
+            emergencyPriority: inc.priority || 'CODE_RED'
+          });
+          if (genResult?.assignments) {
+            setRouteAssignmentsByIncident(prev => ({
+              ...prev,
+              [incidentId]: genResult.assignments
+            }));
+          }
+        } catch (genErr) {
+          console.warn('[PoliceDashboard] Could not generate route plan:', genErr);
+        }
+      }
+    }
+  }, [incidents]);
+
+  // Load plans whenever incidents change
+  useEffect(() => {
+    incidents.forEach(inc => {
+      if (['active', 'dispatched', 'en_route'].includes(inc.status || '')) {
+        loadIncidentPlan(inc.id);
+      }
+    });
+  }, [incidents, loadIncidentPlan]);
+
+  // Realtime subscription for police_assignment_updated
+  useEffect(() => {
+    const unsub = realtimeService.on('police_assignment_updated', (updatedAsg: PoliceRouteAssignment) => {
+      if (!updatedAsg || !updatedAsg.incident_id) return;
+      setRouteAssignmentsByIncident(prev => {
+        const currentList = prev[updatedAsg.incident_id] || [];
+        const idx = currentList.findIndex(a => a.id === updatedAsg.id);
+        let updatedList: PoliceRouteAssignment[];
+        if (idx >= 0) {
+          updatedList = [...currentList];
+          updatedList[idx] = updatedAsg;
+        } else {
+          updatedList = [...currentList, updatedAsg].sort((a, b) => a.sequence_order - b.sequence_order);
+        }
+        return {
+          ...prev,
+          [updatedAsg.incident_id]: updatedList
+        };
+      });
+
+      // Notify if assigned to this officer and status is NOTIFIED
+      if (updatedAsg.police_id === policeProfile?.id && updatedAsg.status === 'NOTIFIED') {
+        addToast({
+          variant: 'warning',
+          title: '🚨 Advance Route Alert',
+          message: `Assigned Checkpoint Ahead: ${updatedAsg.junction_name} (ETA ~${Math.round(updatedAsg.distance_from_ambulance_meters / 1000)}km away)`,
+          duration: 9000
+        });
+      }
+    });
+
+    return () => {
+      unsub();
+    };
+  }, [policeProfile?.id, addToast]);
+
+  const handleCheckpointStatusTransition = async (
+    assignmentId: string,
+    newStatus: PoliceRouteAssignmentStatus,
+    meta: { trafficCondition?: any; reason?: string; rejectionReason?: string; blockageDetails?: string; notes?: string } = {}
+  ) => {
+    setIsTransitioningStatus(assignmentId);
+    try {
+      const res = await policeCoordinationService.updateAssignmentStatus(assignmentId, newStatus, meta);
+      if (res?.assignment) {
+        setRouteAssignmentsByIncident(prev => {
+          const incId = res.assignment.incident_id;
+          const currentList = prev[incId] || [];
+          return {
+            ...prev,
+            [incId]: currentList.map(a => a.id === assignmentId ? res.assignment : a)
+          };
+        });
+
+        addToast({
+          variant: 'success',
+          title: 'Checkpoint Updated',
+          message: `${res.assignment.junction_name} marked as ${newStatus.replace(/_/g, ' ')}`
+        });
+      }
+    } catch (err: any) {
+      addToast({
+        variant: 'error',
+        title: 'Action Failed',
+        message: err.message || 'Could not update checkpoint status'
+      });
+    } finally {
+      setIsTransitioningStatus(null);
+    }
+  };
 
   const incoming = incidents.filter(i => ['active', 'dispatched', 'en_route'].includes(i.status || '') && !i.police_acknowledged_at);
   const active = incidents.filter(i => ['active', 'dispatched', 'en_route', 'arrived'].includes(i.status || '') && i.police_acknowledged_at);
@@ -310,6 +448,25 @@ export function PoliceDashboard() {
                     {incident.route_geometry && (
                       <RoutePolyline positions={incident.route_geometry} active={true} />
                     )}
+
+                    {/* Route Checkpoint Junction Markers */}
+                    {(routeAssignmentsByIncident[incident.id] || []).map(asg => {
+                      let jStatus: 'NORMAL' | 'PREPARING' | 'CLEARED' | 'PASSED' = 'NORMAL';
+                      if (['CLEARANCE_CONFIRMED'].includes(asg.status)) jStatus = 'CLEARED';
+                      else if (['EN_ROUTE_TO_POSITION', 'READY'].includes(asg.status)) jStatus = 'PREPARING';
+                      else if (['PASSED', 'COMPLETED'].includes(asg.status)) jStatus = 'PASSED';
+
+                      return (
+                        <JunctionMarker
+                          key={asg.id}
+                          position={[asg.junction_latitude, asg.junction_longitude]}
+                          name={`P${asg.sequence_order}: ${asg.junction_name}`}
+                          status={jStatus}
+                          distanceMeters={asg.distance_from_ambulance_meters}
+                          policeName={asg.police_name}
+                        />
+                      );
+                    })}
                   </div>
                 );
               })}
@@ -431,11 +588,219 @@ export function PoliceDashboard() {
                           </div>
                         </div>
 
-                        {/* Corridor Action Buttons */}
-                        <div className="space-y-2" onClick={e => e.stopPropagation()}>
+                        {/* Route Checkpoints & Sequential Coordination */}
+                        {(() => {
+                          const checkpoints = routeAssignmentsByIncident[incident.id] || [];
+                          const gapCount = checkpoints.filter(c => !c.police_id || c.is_coverage_gap).length;
+
+                          return (
+                            <div className="space-y-2 mt-3 pt-3 border-t border-slate-800" onClick={e => e.stopPropagation()}>
+                              <div className="flex items-center justify-between">
+                                <div className="flex items-center gap-1.5">
+                                  <Navigation className="w-3.5 h-3.5 text-cyan-400" />
+                                  <span className="text-[10px] uppercase font-bold tracking-wider text-slate-300">
+                                    Route Checkpoints ({checkpoints.length})
+                                  </span>
+                                </div>
+                                {gapCount > 0 ? (
+                                  <span className="text-[9px] font-black text-amber-400 bg-amber-500/10 px-2 py-0.5 rounded border border-amber-500/30">
+                                    {gapCount} COVERAGE GAP{gapCount > 1 ? 'S' : ''}
+                                  </span>
+                                ) : (
+                                  <span className="text-[9px] font-bold text-emerald-400 bg-emerald-500/10 px-2 py-0.5 rounded border border-emerald-500/30">
+                                    FULLY COVERED
+                                  </span>
+                                )}
+                              </div>
+
+                              {checkpoints.length === 0 ? (
+                                <p className="text-[11px] text-slate-500 italic py-1">
+                                  Calculating road-following checkpoints ahead of ambulance...
+                                </p>
+                              ) : (
+                                <div className="space-y-2">
+                                  {checkpoints.map((asg) => {
+                                    const isMyAssignment = asg.police_id === policeProfile?.id;
+                                    const isTransitioning = isTransitioningStatus === asg.id;
+                                    const distKm = (asg.distance_from_ambulance_meters / 1000).toFixed(1);
+                                    const etaMin = asg.ambulance_eta_seconds != null ? Math.max(1, Math.round(asg.ambulance_eta_seconds / 60)) : Math.max(1, Math.round(asg.distance_from_ambulance_meters / 500));
+
+                                    const statusBadgeStyle = 
+                                      asg.status === 'CLEARANCE_CONFIRMED' ? 'bg-emerald-500/20 text-emerald-400 border-emerald-500/40' :
+                                      asg.status === 'READY' ? 'bg-teal-500/20 text-teal-300 border-teal-500/40' :
+                                      asg.status === 'EN_ROUTE_TO_POSITION' ? 'bg-cyan-500/20 text-cyan-300 border-cyan-500/40' :
+                                      asg.status === 'ACKNOWLEDGED' ? 'bg-blue-500/20 text-blue-300 border-blue-500/40' :
+                                      asg.status === 'PASSED' || asg.status === 'COMPLETED' ? 'bg-purple-500/20 text-purple-300 border-purple-500/40' :
+                                      asg.status === 'BLOCKED' || asg.status === 'CLEARANCE_REVOKED' ? 'bg-red-500/20 text-red-400 border-red-500/40' :
+                                      asg.status === 'REJECTED' || asg.status === 'UNAVAILABLE' ? 'bg-rose-500/20 text-rose-400 border-rose-500/40' :
+                                      'bg-amber-500/20 text-amber-300 border-amber-500/40';
+
+                                    return (
+                                      <div
+                                        key={asg.id}
+                                        className={`rounded-lg p-2.5 border transition-all text-xs ${
+                                          isMyAssignment
+                                            ? 'bg-cyan-950/20 border-cyan-500/40 shadow-sm'
+                                            : 'bg-[#0A0E17] border-slate-800/80'
+                                        }`}
+                                      >
+                                        <div className="flex justify-between items-start gap-2 mb-1.5">
+                                          <div>
+                                            <div className="flex items-center gap-1.5">
+                                              <span className="font-mono font-black text-cyan-400 bg-cyan-950/70 px-1.5 py-0.5 rounded text-[10px]">
+                                                P{asg.sequence_order}
+                                              </span>
+                                              <span className="font-bold text-white text-[11px] leading-tight">
+                                                {asg.junction_name}
+                                              </span>
+                                            </div>
+                                            <p className="text-[10px] text-slate-400 mt-0.5">
+                                              {distKm} km ahead • Amb ETA ~{etaMin}m
+                                            </p>
+                                          </div>
+
+                                          <span className={`text-[9px] font-black uppercase px-2 py-0.5 rounded border shrink-0 ${statusBadgeStyle}`}>
+                                            {asg.status.replace(/_/g, ' ')}
+                                          </span>
+                                        </div>
+
+                                        {/* Assigned Officer Tag */}
+                                        <div className="flex items-center justify-between text-[10px] text-slate-400 py-1 border-t border-slate-800/60 mb-1.5">
+                                          <span>Assigned:</span>
+                                          {isMyAssignment ? (
+                                            <span className="font-bold text-cyan-400 flex items-center gap-1">
+                                              <Shield className="w-3 h-3" /> YOU (Primary Unit)
+                                            </span>
+                                          ) : asg.police_name ? (
+                                            <span className="font-medium text-slate-300">{asg.police_name}</span>
+                                          ) : (
+                                            <span className="font-bold text-amber-400 bg-amber-950/60 px-1.5 py-0.2 rounded border border-amber-800">
+                                              ⚠️ UNASSIGNED GAP
+                                            </span>
+                                          )}
+                                        </div>
+
+                                        {/* State Machine Transition Actions */}
+                                        {(isMyAssignment || (!asg.police_id && asg.status === 'PROPOSED')) && (
+                                          <div className="pt-1.5 border-t border-slate-800/60 flex flex-wrap gap-1.5">
+                                            {['PROPOSED', 'NOTIFIED'].includes(asg.status) && (
+                                              <>
+                                                <button
+                                                  disabled={isTransitioning}
+                                                  onClick={() => handleCheckpointStatusTransition(asg.id, 'ACKNOWLEDGED')}
+                                                  className="flex-1 py-1 px-2 rounded bg-cyan-600 hover:bg-cyan-500 text-white font-bold text-[10px] transition-colors cursor-pointer disabled:opacity-50"
+                                                >
+                                                  {isTransitioning ? 'Updating...' : 'Acknowledge Sector'}
+                                                </button>
+                                                <button
+                                                  disabled={isTransitioning}
+                                                  onClick={() => {
+                                                    setSelectedAssignmentForDecline(asg);
+                                                    setDeclineModalOpen(true);
+                                                  }}
+                                                  className="py-1 px-2 rounded bg-slate-800 hover:bg-red-950 text-red-400 font-bold text-[10px] border border-red-900/50 transition-colors cursor-pointer"
+                                                >
+                                                  Decline
+                                                </button>
+                                              </>
+                                            )}
+
+                                            {asg.status === 'ACKNOWLEDGED' && (
+                                              <button
+                                                disabled={isTransitioning}
+                                                onClick={() => handleCheckpointStatusTransition(asg.id, 'EN_ROUTE_TO_POSITION')}
+                                                className="w-full py-1 px-2 rounded bg-blue-600 hover:bg-blue-500 text-white font-bold text-[10px] transition-colors cursor-pointer"
+                                              >
+                                                {isTransitioning ? 'Updating...' : '→ En Route to Sector Post'}
+                                              </button>
+                                            )}
+
+                                            {asg.status === 'EN_ROUTE_TO_POSITION' && (
+                                              <button
+                                                disabled={isTransitioning}
+                                                onClick={() => handleCheckpointStatusTransition(asg.id, 'READY')}
+                                                className="w-full py-1 px-2 rounded bg-teal-600 hover:bg-teal-500 text-white font-bold text-[10px] transition-colors cursor-pointer"
+                                              >
+                                                {isTransitioning ? 'Updating...' : '✓ Sector Ready (At Post)'}
+                                              </button>
+                                            )}
+
+                                            {asg.status === 'READY' && (
+                                              <>
+                                                <button
+                                                  disabled={isTransitioning}
+                                                  onClick={() => handleCheckpointStatusTransition(asg.id, 'CLEARANCE_CONFIRMED')}
+                                                  className="flex-1 py-1 px-2 rounded bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-[10px] transition-colors cursor-pointer shadow-[0_0_8px_rgba(16,185,129,0.4)]"
+                                                >
+                                                  {isTransitioning ? 'Updating...' : '⚡ Confirm Clearance'}
+                                                </button>
+                                                <button
+                                                  disabled={isTransitioning}
+                                                  onClick={() => {
+                                                    setSelectedAssignmentForBlockage(asg);
+                                                    setBlockageModalOpen(true);
+                                                  }}
+                                                  className="py-1 px-2 rounded bg-slate-800 hover:bg-red-950 text-red-400 font-bold text-[10px] border border-red-900/50 transition-colors cursor-pointer"
+                                                >
+                                                  Blockage
+                                                </button>
+                                              </>
+                                            )}
+
+                                            {asg.status === 'CLEARANCE_CONFIRMED' && (
+                                              <>
+                                                <button
+                                                  disabled={isTransitioning}
+                                                  onClick={() => handleCheckpointStatusTransition(asg.id, 'PASSED')}
+                                                  className="flex-1 py-1 px-2 rounded bg-purple-600 hover:bg-purple-500 text-white font-bold text-[10px] transition-colors cursor-pointer"
+                                                >
+                                                  {isTransitioning ? 'Updating...' : 'Ambulance Passed'}
+                                                </button>
+                                                <button
+                                                  disabled={isTransitioning}
+                                                  onClick={() => handleCheckpointStatusTransition(asg.id, 'CLEARANCE_REVOKED', { reason: 'Traffic surge or obstacle reopened' })}
+                                                  className="py-1 px-2 rounded bg-amber-950/60 hover:bg-amber-900/80 text-amber-300 font-bold text-[10px] border border-amber-800 transition-colors cursor-pointer"
+                                                >
+                                                  Revoke
+                                                </button>
+                                              </>
+                                            )}
+
+                                            {asg.status === 'PASSED' && (
+                                              <button
+                                                disabled={isTransitioning}
+                                                onClick={() => handleCheckpointStatusTransition(asg.id, 'COMPLETED')}
+                                                className="w-full py-1 px-2 rounded bg-slate-800 hover:bg-slate-700 text-slate-300 font-bold text-[10px] transition-colors cursor-pointer"
+                                              >
+                                                {isTransitioning ? 'Updating...' : 'Mark Completed'}
+                                              </button>
+                                            )}
+
+                                            {['BLOCKED', 'CLEARANCE_REVOKED'].includes(asg.status) && (
+                                              <button
+                                                disabled={isTransitioning}
+                                                onClick={() => handleCheckpointStatusTransition(asg.id, 'READY', { notes: 'Blockage cleared' })}
+                                                className="w-full py-1 px-2 rounded bg-teal-700 hover:bg-teal-600 text-white font-bold text-[10px] transition-colors cursor-pointer"
+                                              >
+                                                {isTransitioning ? 'Updating...' : 'Clear Obstruction & Re-Ready'}
+                                              </button>
+                                            )}
+                                          </div>
+                                        )}
+                                      </div>
+                                    );
+                                  })}
+                                </div>
+                              )}
+                            </div>
+                          );
+                        })()}
+
+                        {/* General Corridor Action Buttons */}
+                        <div className="space-y-2 mt-3 pt-3 border-t border-slate-800/80" onClick={e => e.stopPropagation()}>
                           <div className="flex items-center justify-between">
                             <span className="text-[10px] uppercase font-bold tracking-wider text-slate-400">
-                              Corridor Action
+                              Corridor Green-Wave Status
                             </span>
                             <span className={`text-[10px] font-bold uppercase px-2 py-0.5 rounded border ${
                               incident.corridor_status === 'CLEAR' ? 'bg-emerald-500/20 text-emerald-400 border-emerald-500/40' :
@@ -456,7 +821,7 @@ export function PoliceDashboard() {
                                   : 'bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-400 border-emerald-500/30'
                               }`}
                               onClick={() => handleStatusChange(incident.id, 'CLEAR')}
-                              title="Confirm corridor is clear for priority transport"
+                              title="Confirm entire corridor is clear for priority transport"
                             >
                               CLEAR
                             </button>
@@ -504,6 +869,74 @@ export function PoliceDashboard() {
           </div>
 
         </div>
+
+        {/* Modal: Report Junction Blockage */}
+        <Dialog
+          open={blockageModalOpen}
+          onClose={() => setBlockageModalOpen(false)}
+          title="Report Junction Obstruction / Blockage"
+          variant="danger"
+          confirmLabel="Submit Blockage Alert"
+          onConfirm={() => {
+            if (selectedAssignmentForBlockage) {
+              handleCheckpointStatusTransition(selectedAssignmentForBlockage.id, 'BLOCKED', {
+                blockageDetails: blockageNotes || 'Unspecified blockage reported by officer'
+              });
+              setBlockageModalOpen(false);
+              setBlockageNotes('');
+            }
+          }}
+        >
+          <div className="space-y-3 text-xs text-slate-300">
+            <p>
+              Report a road blockage or severe obstruction at{' '}
+              <strong className="text-white">{selectedAssignmentForBlockage?.junction_name}</strong>.
+              This will update the central coordination plan and alert dispatch for rerouting or reinforcement.
+            </p>
+            <textarea
+              rows={3}
+              placeholder="Describe obstruction (e.g. stalled truck, waterlogging, active collision)..."
+              value={blockageNotes}
+              onChange={(e) => setBlockageNotes(e.target.value)}
+              className="w-full bg-[#131826] border border-slate-700 rounded-lg p-2.5 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-red-500"
+            />
+          </div>
+        </Dialog>
+
+        {/* Modal: Decline / Report Unavailable */}
+        <Dialog
+          open={declineModalOpen}
+          onClose={() => setDeclineModalOpen(false)}
+          title="Decline Assignment / Report Unavailable"
+          variant="danger"
+          confirmLabel="Confirm Decline"
+          onConfirm={() => {
+            if (selectedAssignmentForDecline) {
+              handleCheckpointStatusTransition(selectedAssignmentForDecline.id, 'REJECTED', {
+                rejectionReason: declineReason
+              });
+              setDeclineModalOpen(false);
+            }
+          }}
+        >
+          <div className="space-y-3 text-xs text-slate-300">
+            <p>
+              Please state why you cannot cover{' '}
+              <strong className="text-white">{selectedAssignmentForDecline?.junction_name}</strong>.
+              The coordination engine will immediately attempt to dispatch an eligible nearby reinforcement unit.
+            </p>
+            <select
+              value={declineReason}
+              onChange={(e) => setDeclineReason(e.target.value)}
+              className="w-full bg-[#131826] border border-slate-700 rounded-lg p-2.5 text-xs text-white focus:outline-none focus:border-cyan-500"
+            >
+              <option value="UNAVAILABLE_OTHER_EMERGENCY">Engaged in higher-priority local emergency</option>
+              <option value="OUTSIDE_PATROL_SECTOR">Beyond current patrol jurisdiction</option>
+              <option value="EQUIPMENT_VEHICLE_FAILURE">Vehicle or radio equipment failure</option>
+              <option value="TRAFFIC_GRIDLOCK_EN_ROUTE">Severe local gridlock preventing transit to post</option>
+            </select>
+          </div>
+        </Dialog>
 
       </div>
     </AppShell>
