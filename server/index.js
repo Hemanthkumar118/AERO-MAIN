@@ -16,7 +16,7 @@ const PORT = process.env.PORT || 3001;
 
 const isSupabaseConfigured = Boolean(process.env.VITE_SUPABASE_URL && process.env.VITE_SUPABASE_PUBLISHABLE_KEY);
 const isGroqConfigured = Boolean(process.env.GROQ_API_KEY);
-const groqModel = process.env.GROQ_MODEL || 'llama-3.1-8b-instant';
+const groqModel = process.env.GROQ_MODEL || 'openai/gpt-oss-120b';
 const isTomTomConfigured = Boolean(process.env.TOMTOM_API_KEY || process.env.VITE_TOMTOM_API_KEY);
 
 console.log('--- AERO Backend Diagnostics ---');
@@ -52,6 +52,53 @@ const supabase = isSupabaseConfigured
 const groq = process.env.GROQ_API_KEY 
   ? new Groq({ apiKey: process.env.GROQ_API_KEY })
   : null;
+
+// Helper: Call Groq with bounded retry and multi-model fallback (e.g. 120b -> 20b -> qwen)
+async function callGroqWithFallback(messages, primaryModel) {
+  if (!groq) throw new Error('Groq client not initialized.');
+  const models = [
+    primaryModel,
+    'openai/gpt-oss-120b',
+    'openai/gpt-oss-20b',
+    'qwen/qwen3.8-27b',
+    'allam-2-7b'
+  ].filter((m, idx, arr) => m && arr.indexOf(m) === idx);
+
+  let lastError = null;
+
+  for (const model of models) {
+    for (let attempt = 1; attempt <= 2; attempt++) {
+      try {
+        const timeoutPromise = new Promise((_, reject) => 
+          setTimeout(() => reject(new Error('Groq request timed out (15s limit)')), 15000)
+        );
+
+        const completionPromise = groq.chat.completions.create({
+          messages,
+          model: model,
+          temperature: 0.2,
+          max_tokens: 1024,
+        });
+
+        const chatCompletion = await Promise.race([completionPromise, timeoutPromise]);
+        const content = chatCompletion.choices?.[0]?.message?.content;
+        if (content) {
+          return { content, modelUsed: model };
+        }
+      } catch (err) {
+        lastError = err;
+        console.warn(`[Groq AI] Model ${model} attempt ${attempt} error:`, err.status || err.message);
+        if (err.status === 429 && attempt < 2) {
+          await new Promise(r => setTimeout(r, 1000));
+        } else if (err.status === 404 || err.code === 'model_not_found') {
+          break; // Switch to next fallback model immediately
+        }
+      }
+    }
+  }
+
+  throw lastError || new Error('All Groq model attempts exhausted.');
+}
 
 // Middleware to authenticate requests using Supabase JWT with development session support
 const authenticateUser = async (req, res, next) => {
@@ -368,33 +415,69 @@ app.post('/api/ai/chat', authenticateUser, async (req, res) => {
         `*Notice: Always follow your designated Regional Emergency Medical Services standing orders and medical direction.*`;
 
     } else {
-      // General question: invoke Groq LLM if configured
+      // General question: invoke Groq LLM with live data grounding and role context
       if (groq) {
         try {
-          let currentSystemPrompt = SYSTEM_PROMPT;
-          if (incidentContext) {
-            currentSystemPrompt += `\n\n--- ACTIVE INCIDENT CONTEXT ---\n${incidentContext}`;
+          const userRole = (req.user?.role || req.user?.user_metadata?.role || 'ambulance').toLowerCase();
+          let roleGuideline = '';
+          if (userRole.includes('ambulance')) {
+            roleGuideline = 'USER ROLE: AMBULANCE OPERATOR / PARAMEDIC\nFocus on clinical stabilization, Golden Hour transit management, priority navigation, hospital triage preparation, and junction clearance.';
+          } else if (userRole.includes('police')) {
+            roleGuideline = 'USER ROLE: TRAFFIC POLICE OFFICER\nFocus on junction signal preemption, green corridor clearing, intersection safety, and emergency vehicle escort coordination.';
+          } else if (userRole.includes('hospital')) {
+            roleGuideline = 'USER ROLE: HOSPITAL CLINICAL ER STAFF\nFocus on trauma bay readiness, ICU bed capacity, specialist standby, and incoming emergency triage preparation.';
+          } else if (userRole.includes('admin')) {
+            roleGuideline = 'USER ROLE: CENTRAL COMMAND ADMINISTRATOR\nFocus on city-wide emergency metrics, system operational health, transit monitoring, and cross-agency coordination.';
           }
 
+          // Live operational database grounding
+          let liveSnapshot = `OPERATIONAL SNAPSHOT:\n• User Role: ${userRole.toUpperCase()}\n• Server Time: ${new Date().toISOString()}`;
+          if (supabase) {
+            try {
+              const { data: recentIncidents } = await supabase
+                .from('emergency_incidents')
+                .select('id, category, incident_type, priority, status, destination_hospital, corridor_status')
+                .in('status', ['active', 'dispatched', 'en_route', 'rerouting'])
+                .order('created_at', { ascending: false })
+                .limit(3);
+
+              if (recentIncidents && recentIncidents.length > 0) {
+                liveSnapshot += `\n• Active Live Incidents (${recentIncidents.length}): ` +
+                  recentIncidents.map(inc => `[ID: ${inc.id.slice(0, 6)}, Type: ${inc.category || inc.incident_type || 'Transit'}, Priority: ${inc.priority || 'CRITICAL'}, Status: ${inc.status}, Hospital: ${inc.destination_hospital || 'Awaiting selection'}, Corridor: ${inc.corridor_status || 'PENDING'}]`).join(', ');
+              } else {
+                liveSnapshot += `\n• Active Live Incidents: 0 active incidents on record. System in standby mode.`;
+              }
+            } catch (err) {
+              // Ignore snapshot query error
+            }
+          }
+
+          let fullSystemPrompt = `${SYSTEM_PROMPT}\n\n--- ROLE CONTEXT ---\n${roleGuideline}\n\n--- LIVE DATA SNAPSHOT ---\n${liveSnapshot}`;
+          if (incidentContext) {
+            fullSystemPrompt += `\n\n--- ACTIVE INCIDENT CONTEXT ---\n${incidentContext}`;
+          }
+
+          fullSystemPrompt += `\n\nCRITICAL CONSTRAINTS:
+1. NEVER fabricate or guess patient vitals, medical records, doctor names, GPS locations, or ETAs. If data is not provided in context, explicitly state: "This data cannot be verified from active records."
+2. You CANNOT independently dispatch ambulances, alter routes, change hospital assignments, or trigger SOS. Instruct the user to use the dashboard controls.`;
+
           const chatMessages = [
-            { role: 'system', content: currentSystemPrompt },
+            { role: 'system', content: fullSystemPrompt },
             ...history.slice(-8).map(h => ({ role: h.role, content: h.content }))
           ];
 
-          const chatCompletion = await groq.chat.completions.create({
-            messages: chatMessages,
-            model: groqModel,
-            temperature: 0.2,
-            max_tokens: 1024,
-          });
-
-          reply = chatCompletion.choices[0]?.message?.content || '';
+          const result = await callGroqWithFallback(chatMessages, groqModel);
+          reply = result.content;
         } catch (llmErr) {
-          console.warn('[AI Assistant] Groq API call failed:', llmErr.message);
-          reply = `**AERO Intelligence Notice:**\n\nThe external Groq AI service is currently unavailable (${llmErr.message || 'API key requires renewal'}).\n\nBuilt-in emergency operational tools remain fully operational. You can ask:\n• *"Summarize my current incident"*\n• *"Find the nearest suitable hospital"*\n• *"What traffic risks should I watch?"*\n• *"What should I do for this emergency?"*`;
+          console.warn('[AI Assistant] Groq API call failed after retries:', llmErr.status || llmErr.message);
+          if (llmErr.status === 429) {
+            reply = `**AERO Intelligence Notice:**\n\nThe Groq AI API rate limit has temporarily been reached. Please wait a few moments and try your query again. All built-in operational tools (Incident Summary, Nearest Hospital, Traffic Watch, Clinical Protocols) remain fully functional.`;
+          } else {
+            reply = `**AERO Intelligence Notice:**\n\nGroq AI service is currently unavailable (${llmErr.message || 'Connection error'}).\n\nAll real-time emergency operational commands remain active. You can ask:\n• *"Summarize my current incident"*\n• *"Find the nearest suitable hospital"*\n• *"What traffic risks should I watch?"*\n• *"What should I do for this emergency?"*`;
+          }
         }
       } else {
-        reply = `**AERO AI Notice:**\n\nAI service is running in local emergency mode. Groq API is not configured. Built-in emergency operational tools (Incident Summary, Hospital Recommendations, Traffic Monitoring, and Protocols) are fully active.`;
+        reply = `**AERO AI Notice:**\n\nAI service is running in local emergency mode. Groq API key is not configured. Built-in emergency operational tools (Incident Summary, Hospital Recommendations, Traffic Monitoring, and Protocols) are fully active.`;
       }
     }
 
