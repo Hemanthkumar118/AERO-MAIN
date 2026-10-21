@@ -119,6 +119,8 @@ export interface Emergency {
   acceptedAt?: string;
   arrivedAt?: string;
   arrived_at?: string;
+  hospital_status?: string;
+  hospital_acknowledged_at?: string;
   completedAt?: string;
 }
 
@@ -156,6 +158,7 @@ export interface EmergencyIncident {
   police_acknowledged_at?: string;
   police_id?: string;
   hospital_status?: string;
+  hospital_acknowledged_at?: string;
   arrived_at?: string;
   arrived_by?: string;
   resolved_at?: string;

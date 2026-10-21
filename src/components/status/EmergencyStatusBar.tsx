@@ -9,6 +9,7 @@ const stages: { key: EmergencyStatus; label: string }[] = [
   { key: 'PENDING', label: 'Pending' },
   { key: 'ACCEPTED', label: 'Accepted' },
   { key: 'ACTIVE', label: 'Active' },
+  { key: 'ARRIVED', label: 'Arrived' },
   { key: 'COMPLETED', label: 'Complete' },
 ];
 
@@ -16,7 +17,8 @@ const statusOrder: Record<EmergencyStatus, number> = {
   PENDING: 0,
   ACCEPTED: 1,
   ACTIVE: 2,
-  COMPLETED: 3,
+  ARRIVED: 3,
+  COMPLETED: 4,
   CANCELLED: -1,
 };
 

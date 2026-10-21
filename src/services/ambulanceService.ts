@@ -3,6 +3,14 @@ import { getBackendUrl } from './apiConfig';
 
 import type { Emergency, Hospital, PatientInfo, TrafficIncident, RouteInfo } from '../types';
 
+export interface ArrivalResult {
+  success: boolean;
+  incident?: any;
+  arrivedAt?: string;
+  error?: string;
+  alreadyArrived?: boolean;
+}
+
 export const ambulanceService = {
   async getAmbulanceState(ambulanceId: string) {
     const { data, error } = await supabase
@@ -278,7 +286,7 @@ export const ambulanceService = {
    * Calls the server endpoint to atomically persist arrival, set server arrived_at,
    * close police route coordination, and broadcast to all dashboards.
    */
-  async markArrived(emergencyId: string, notes?: string): Promise<{ success: boolean; incident: any; arrivedAt: string }> {
+  async markArrived(emergencyId: string, notes?: string): Promise<ArrivalResult> {
     const { data: { session } } = await supabase.auth.getSession();
     const token = session?.access_token;
 
