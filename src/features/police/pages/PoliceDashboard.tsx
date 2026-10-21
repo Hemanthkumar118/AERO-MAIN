@@ -11,7 +11,7 @@ import {
 import { useToast } from '../../../components/ui/Toast';
 import { IncomingEmergencyAlert } from '../components/IncomingEmergencyAlert';
 import { realtimeService } from '../../../services/realtimeService';
-import type { EmergencyIncident } from '../../../types';
+import type { EmergencyIncident, ConnectionState } from '../../../types';
 import { useLocation } from '../../../hooks/useLocation';
 import { supabase } from '../../../lib/supabase';
 import { motion, AnimatePresence } from 'framer-motion';
@@ -51,15 +51,40 @@ export function PoliceDashboard() {
 
   useEffect(() => {
     let isMounted = true;
+    realtimeService.initialize();
+
+    const fetchInitial = async () => {
+      try {
+        const { data, error } = await supabase
+          .from('emergency_incidents')
+          .select('*')
+          .in('status', ['active', 'dispatched', 'en_route', 'rerouting', 'arrived'])
+          .order('created_at', { ascending: false });
+        if (!error && Array.isArray(data) && isMounted) {
+          setIncidents(data);
+        }
+      } catch (err) {
+        console.warn('[PoliceDashboard] Initial incidents fetch error:', err);
+      }
+    };
+
+    fetchInitial();
 
     const unsub = realtimeService.on('incidents_updated', (updatedIncidents: EmergencyIncident[]) => {
       if (!isMounted) return;
       setIncidents(updatedIncidents);
     });
 
+    const unsubConn = realtimeService.on('connection_change', (state: ConnectionState) => {
+      if (state === 'connected') {
+        fetchInitial();
+      }
+    });
+
     return () => {
       isMounted = false;
       unsub();
+      unsubConn();
     };
   }, []);
 
@@ -198,8 +223,10 @@ export function PoliceDashboard() {
     }
   };
 
-  const incoming = incidents.filter(i => ['active', 'dispatched', 'en_route'].includes(i.status || '') && !i.police_acknowledged_at);
-  const active = incidents.filter(i => ['active', 'dispatched', 'en_route', 'arrived'].includes(i.status || '') && i.police_acknowledged_at);
+  const incoming = incidents.filter(i => ['active', 'dispatched', 'en_route', 'rerouting'].includes((i.status || '').toLowerCase()) && !i.police_acknowledged_at);
+  const activeInTransit = incidents.filter(i => ['active', 'dispatched', 'en_route', 'rerouting'].includes((i.status || '').toLowerCase()) && i.police_acknowledged_at);
+  const arrivedCorridors = incidents.filter(i => (i.status || '').toLowerCase() === 'arrived');
+  const active = [...activeInTransit, ...arrivedCorridors];
 
   const handleAccept = async (emergencyId: string) => {
     try {
@@ -480,7 +507,7 @@ export function PoliceDashboard() {
               </div>
               <div className="bg-[#0D111A]/90 backdrop-blur-md px-3.5 py-1.5 rounded-full border border-slate-700 shadow-xl flex items-center gap-2">
                 <span className="text-[11px] font-bold text-slate-400 uppercase">ACTIVE EMERGENCIES:</span>
-                <span className="text-[11px] font-mono font-bold text-cyan-400">{incidents.length}</span>
+                <span className="text-[11px] font-mono font-bold text-cyan-400">{activeInTransit.length}</span>
               </div>
             </div>
           </div>
@@ -495,7 +522,7 @@ export function PoliceDashboard() {
                 <h2 className="text-xs font-bold tracking-wider text-white uppercase">ACTIVE GREEN-WAVE CORRIDORS</h2>
               </div>
               <div className="px-2 py-0.5 rounded-full text-xs font-bold bg-cyan-500/10 text-cyan-400 border border-cyan-500/20">
-                {active.length} COORDINATED
+                {activeInTransit.length} COORDINATED
               </div>
             </div>
 
@@ -536,82 +563,107 @@ export function PoliceDashboard() {
                             : 'bg-[#0F141F] border-slate-800 hover:border-slate-700'
                         } p-3.5`}
                       >
-                        <div className="flex justify-between items-start mb-2.5">
-                          <div>
-                            <div className="flex items-center gap-2">
-                              <h3 className="font-bold text-white text-base leading-tight">
-                                {incident.ambulance_id || 'Ambulance Unit'}
-                              </h3>
-                              <span className={`text-[9px] font-black uppercase px-2 py-0.5 rounded-full border ${
-                                incident.priority === 'CRITICAL' || incident.priority === 'critical'
-                                  ? 'bg-red-500/10 text-red-400 border-red-500/30'
-                                  : 'bg-amber-500/10 text-amber-300 border-amber-500/30'
-                              }`}>
-                                {incident.priority || 'HIGH'}
-                              </span>
-                            </div>
-                            <p className="text-xs text-slate-400 truncate mt-0.5">
-                              → <strong className="text-emerald-400">{incident.destination_hospital || 'Hospital'}</strong>
-                            </p>
-                          </div>
-
-                          <div className="text-right">
-                            <div className="text-xl font-black text-cyan-300 font-mono tracking-tight">
-                              {incident.traffic_duration_seconds != null
-                                ? Math.round(incident.traffic_duration_seconds / 60)
-                                : (incident.route_duration_seconds != null ? Math.round(incident.route_duration_seconds / 60) : '--')}
-                              <span className="text-xs text-cyan-500/80 ml-1">min</span>
-                            </div>
-                            <p className="text-[10px] text-slate-500 uppercase font-bold">ESTIMATED ETA</p>
-                          </div>
-                        </div>
-
-                        {/* Telemetry Strip */}
-                        <div className="grid grid-cols-3 gap-2 bg-[#07090C] rounded-lg p-2.5 border border-slate-800/80 mb-3 text-[11px]">
-                          <div>
-                            <span className="text-[9px] text-slate-500 uppercase font-bold block">Distance</span>
-                            <span className="text-slate-200 font-mono font-bold">
-                              {incident.route_distance_meters != null ? `${(incident.route_distance_meters / 1000).toFixed(1)} km` : 'N/A'}
-                            </span>
-                          </div>
-                          <div>
-                            <span className="text-[9px] text-slate-500 uppercase font-bold block">Speed</span>
-                            <span className="text-cyan-300 font-mono font-bold">
-                              {incident.current_speed != null ? `${Math.round(incident.current_speed)} km/h` : 'N/A'}
-                            </span>
-                          </div>
-                          <div>
-                            <span className="text-[9px] text-slate-500 uppercase font-bold block">GPS Fix</span>
-                            <span className={`font-mono font-bold text-[10px] ${isFresh ? 'text-emerald-400' : 'text-amber-400'}`}>
-                              {isFresh ? 'LIVE' : 'STALE'}
-                            </span>
-                          </div>
-                        </div>
-
-                        {/* Route Checkpoints & Sequential Coordination */}
                         {(() => {
-                          const checkpoints = routeAssignmentsByIncident[incident.id] || [];
-                          const gapCount = checkpoints.filter(c => !c.police_id || c.is_coverage_gap).length;
-
+                          const isArrived = (incident.status || '').toLowerCase() === 'arrived';
                           return (
-                            <div className="space-y-2 mt-3 pt-3 border-t border-slate-800" onClick={e => e.stopPropagation()}>
-                              <div className="flex items-center justify-between">
-                                <div className="flex items-center gap-1.5">
-                                  <Navigation className="w-3.5 h-3.5 text-cyan-400" />
-                                  <span className="text-[10px] uppercase font-bold tracking-wider text-slate-300">
-                                    Route Checkpoints ({checkpoints.length})
+                            <>
+                              <div className="flex justify-between items-start mb-2.5">
+                                <div>
+                                  <div className="flex items-center gap-2">
+                                    <h3 className="font-bold text-white text-base leading-tight">
+                                      {incident.ambulance_id || 'Ambulance Unit'}
+                                    </h3>
+                                    <span className={`text-[9px] font-black uppercase px-2 py-0.5 rounded-full border ${
+                                      isArrived
+                                        ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/30'
+                                        : incident.priority === 'CRITICAL' || incident.priority === 'critical'
+                                          ? 'bg-red-500/10 text-red-400 border-red-500/30'
+                                          : 'bg-amber-500/10 text-amber-300 border-amber-500/30'
+                                    }`}>
+                                      {isArrived ? 'ARRIVED • CLOSED' : (incident.priority || 'HIGH')}
+                                    </span>
+                                  </div>
+                                  <p className="text-xs text-slate-400 truncate mt-0.5">
+                                    → <strong className="text-emerald-400">{incident.destination_hospital || 'Hospital'}</strong>
+                                  </p>
+                                </div>
+
+                                <div className="text-right">
+                                  {isArrived ? (
+                                    <>
+                                      <div className="text-base font-black text-emerald-400 font-mono tracking-tight">
+                                        ARRIVED
+                                      </div>
+                                      <p className="text-[10px] text-emerald-500/80 uppercase font-bold">CORRIDOR CLOSED</p>
+                                    </>
+                                  ) : (
+                                    <>
+                                      <div className="text-xl font-black text-cyan-300 font-mono tracking-tight">
+                                        {incident.traffic_duration_seconds != null
+                                          ? Math.round(incident.traffic_duration_seconds / 60)
+                                          : (incident.route_duration_seconds != null ? Math.round(incident.route_duration_seconds / 60) : '--')}
+                                        <span className="text-xs text-cyan-500/80 ml-1">min</span>
+                                      </div>
+                                      <p className="text-[10px] text-slate-500 uppercase font-bold">ESTIMATED ETA</p>
+                                    </>
+                                  )}
+                                </div>
+                              </div>
+
+                              {/* Telemetry Strip */}
+                              <div className="grid grid-cols-3 gap-2 bg-[#07090C] rounded-lg p-2.5 border border-slate-800/80 mb-3 text-[11px]">
+                                <div>
+                                  <span className="text-[9px] text-slate-500 uppercase font-bold block">Distance</span>
+                                  <span className="text-slate-200 font-mono font-bold">
+                                    {isArrived ? 'At Destination' : (incident.route_distance_meters != null ? `${(incident.route_distance_meters / 1000).toFixed(1)} km` : 'N/A')}
                                   </span>
                                 </div>
-                                {gapCount > 0 ? (
-                                  <span className="text-[9px] font-black text-amber-400 bg-amber-500/10 px-2 py-0.5 rounded border border-amber-500/30">
-                                    {gapCount} COVERAGE GAP{gapCount > 1 ? 'S' : ''}
+                                <div>
+                                  <span className="text-[9px] text-slate-500 uppercase font-bold block">Speed</span>
+                                  <span className={isArrived ? "text-emerald-400 font-mono font-bold" : "text-cyan-300 font-mono font-bold"}>
+                                    {isArrived ? '0 km/h (Parked)' : (incident.current_speed != null ? `${Math.round(incident.current_speed)} km/h` : 'N/A')}
                                   </span>
-                                ) : (
-                                  <span className="text-[9px] font-bold text-emerald-400 bg-emerald-500/10 px-2 py-0.5 rounded border border-emerald-500/30">
-                                    FULLY COVERED
+                                </div>
+                                <div>
+                                  <span className="text-[9px] text-slate-500 uppercase font-bold block">GPS Fix</span>
+                                  <span className={`font-mono font-bold text-[10px] ${isArrived ? 'text-emerald-400' : (isFresh ? 'text-emerald-400' : 'text-amber-400')}`}>
+                                    {isArrived ? 'COMPLETE' : (isFresh ? 'LIVE' : 'STALE')}
                                   </span>
-                                )}
+                                </div>
                               </div>
+
+                              {/* Route Checkpoints & Sequential Coordination */}
+                              {(() => {
+                                const checkpoints = routeAssignmentsByIncident[incident.id] || [];
+                                const gapCount = checkpoints.filter(c => !c.police_id || c.is_coverage_gap).length;
+
+                                return (
+                                  <div className="space-y-2 mt-3 pt-3 border-t border-slate-800" onClick={e => e.stopPropagation()}>
+                                    <div className="flex items-center justify-between">
+                                      <div className="flex items-center gap-1.5">
+                                        <Navigation className="w-3.5 h-3.5 text-cyan-400" />
+                                        <span className="text-[10px] uppercase font-bold tracking-wider text-slate-300">
+                                          Route Checkpoints ({checkpoints.length})
+                                        </span>
+                                      </div>
+                                      {isArrived ? (
+                                        <span className="text-[9px] font-bold text-emerald-400 bg-emerald-500/10 px-2 py-0.5 rounded border border-emerald-500/30">
+                                          CORRIDOR CLOSED
+                                        </span>
+                                      ) : checkpoints.length === 0 ? (
+                                        <span className="text-[9px] font-bold text-slate-400 bg-slate-800/80 px-2 py-0.5 rounded border border-slate-700">
+                                          NO CHECKPOINTS
+                                        </span>
+                                      ) : gapCount > 0 ? (
+                                        <span className="text-[9px] font-black text-amber-400 bg-amber-500/10 px-2 py-0.5 rounded border border-amber-500/30">
+                                          {gapCount} COVERAGE GAP{gapCount > 1 ? 'S' : ''}
+                                        </span>
+                                      ) : (
+                                        <span className="text-[9px] font-bold text-emerald-400 bg-emerald-500/10 px-2 py-0.5 rounded border border-emerald-500/30">
+                                          FULLY COVERED
+                                        </span>
+                                      )}
+                                    </div>
 
                               {checkpoints.length === 0 ? (
                                 <p className="text-[11px] text-slate-500 italic py-1">
@@ -860,6 +912,9 @@ export function PoliceDashboard() {
                             </button>
                           </div>
                         </div>
+                            </>
+                          );
+                        })()}
                       </motion.div>
                     );
                   })

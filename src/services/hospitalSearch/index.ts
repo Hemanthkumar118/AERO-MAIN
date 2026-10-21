@@ -29,12 +29,13 @@ export function clearHospitalCache() {
 
 // Healthcare non-hospital business exclusions
 const EXCLUDED_HEALTHCARE_KEYWORDS = [
-  'pharmacy', 'chemist', 'drug store', 'medical & general store',
-  'diagnostic center', 'diagnostic centre', 'pathology', 'laboratory', 'path lab',
-  'dental', 'dentist', 'dental clinic', 'orthodontic',
-  'veterinary', 'pet clinic', 'animal hospital',
-  'beauty', 'wellness', 'spa', 'massage', 'cosmetic',
-  'optical', 'optician', 'eye wear', 'spectacles'
+  'pharmacy', 'chemist', 'drug store', 'medical & general store', 'medical store', 'druggist', 'medicals',
+  'diagnostic center', 'diagnostic centre', 'pathology', 'laboratory', 'path lab', 'scan center', 'scan centre', 'mri center', 'x-ray', 'imaging center',
+  'dental', 'dentist', 'dental clinic', 'orthodontic', 'tooth clinic',
+  'veterinary', 'pet clinic', 'animal hospital', 'vet care', 'dog clinic',
+  'beauty', 'wellness', 'spa', 'massage', 'cosmetic', 'hair clinic', 'skin clinic', 'laser clinic',
+  'optical', 'optician', 'eye wear', 'spectacles', 'lenskart',
+  'physiotherapy clinic', 'chiropractor'
 ];
 
 function isLegitimateHospital(name: string): boolean {

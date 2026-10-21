@@ -17,7 +17,7 @@ export interface User {
 }
 
 // ── Emergency & Triage ──
-export type EmergencyStatus = 'PENDING' | 'ACCEPTED' | 'ACTIVE' | 'COMPLETED' | 'CANCELLED';
+export type EmergencyStatus = 'PENDING' | 'ACCEPTED' | 'ACTIVE' | 'ARRIVED' | 'COMPLETED' | 'CANCELLED';
 export type EmergencyPriority = 'CODE_RED' | 'CODE_AMBER' | 'CODE_YELLOW';
 export type EmergencyCategory = 'CARDIAC' | 'TRAUMA' | 'STROKE' | 'RESPIRATORY' | 'OBSTETRIC' | 'PEDIATRIC' | 'GENERAL';
 
@@ -117,6 +117,8 @@ export interface Emergency {
   distanceCoveredKm?: number;
   createdAt: string;
   acceptedAt?: string;
+  arrivedAt?: string;
+  arrived_at?: string;
   completedAt?: string;
 }
 
@@ -154,6 +156,8 @@ export interface EmergencyIncident {
   police_acknowledged_at?: string;
   police_id?: string;
   hospital_status?: string;
+  arrived_at?: string;
+  arrived_by?: string;
   resolved_at?: string;
   created_at: string;
   updated_at: string;

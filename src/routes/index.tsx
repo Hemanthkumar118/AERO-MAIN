@@ -138,7 +138,7 @@ export function AppRoutes() {
       <Route
         path="/ambulance"
         element={
-          <ProtectedRoute>
+          <ProtectedRoute allowedRoles={['AMBULANCE', 'AMBULANCE_OPERATOR', 'ADMIN']}>
             <AmbulanceDashboard />
           </ProtectedRoute>
         }
@@ -150,7 +150,7 @@ export function AppRoutes() {
       <Route
         path="/ambulance/emergency"
         element={
-          <ProtectedRoute>
+          <ProtectedRoute allowedRoles={['AMBULANCE', 'AMBULANCE_OPERATOR', 'ADMIN']}>
             <AmbulanceDashboard />
           </ProtectedRoute>
         }
@@ -160,7 +160,7 @@ export function AppRoutes() {
       <Route
         path="/police"
         element={
-          <ProtectedRoute>
+          <ProtectedRoute allowedRoles={['POLICE', 'TRAFFIC_OPERATOR', 'ADMIN']}>
             <PoliceDashboard />
           </ProtectedRoute>
         }
@@ -168,7 +168,7 @@ export function AppRoutes() {
       <Route
         path="/police/emergency/:id"
         element={
-          <ProtectedRoute>
+          <ProtectedRoute allowedRoles={['POLICE', 'TRAFFIC_OPERATOR', 'ADMIN']}>
             <ActiveEmergencyDetails />
           </ProtectedRoute>
         }
@@ -176,7 +176,7 @@ export function AppRoutes() {
       <Route
         path="/police/alerts"
         element={
-          <ProtectedRoute>
+          <ProtectedRoute allowedRoles={['POLICE', 'TRAFFIC_OPERATOR', 'ADMIN']}>
             <PoliceDashboard />
           </ProtectedRoute>
         }
@@ -186,7 +186,7 @@ export function AppRoutes() {
       <Route
         path="/hospital"
         element={
-          <ProtectedRoute>
+          <ProtectedRoute allowedRoles={['HOSPITAL', 'HOSPITAL_OPERATOR', 'ADMIN']}>
             <HospitalDashboard />
           </ProtectedRoute>
         }
@@ -196,7 +196,7 @@ export function AppRoutes() {
       <Route
         path="/admin"
         element={
-          <ProtectedRoute>
+          <ProtectedRoute allowedRoles={['ADMIN']}>
             <AdminDashboard />
           </ProtectedRoute>
         }
@@ -204,7 +204,7 @@ export function AppRoutes() {
       <Route
         path="/admin/analytics"
         element={
-          <ProtectedRoute>
+          <ProtectedRoute allowedRoles={['ADMIN']}>
             <AdminAnalytics />
           </ProtectedRoute>
         }
@@ -212,7 +212,7 @@ export function AppRoutes() {
       <Route
         path="/admin/emergencies"
         element={
-          <ProtectedRoute>
+          <ProtectedRoute allowedRoles={['ADMIN']}>
             <AdminDashboard />
           </ProtectedRoute>
         }
@@ -220,7 +220,7 @@ export function AppRoutes() {
       <Route
         path="/admin/users"
         element={
-          <ProtectedRoute>
+          <ProtectedRoute allowedRoles={['ADMIN']}>
             <AdminDashboard />
           </ProtectedRoute>
         }

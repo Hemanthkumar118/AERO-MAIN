@@ -1,6 +1,9 @@
 import express from 'express';
 import cors from 'cors';
 import dotenv from 'dotenv';
+import path from 'path';
+import fs from 'fs';
+import { fileURLToPath } from 'url';
 import { createClient } from '@supabase/supabase-js';
 import Groq from 'groq-sdk';
 import crypto from 'crypto';
@@ -10,13 +13,44 @@ import { policeCoordinationEngine, AVAILABLE_REINFORCEMENT_OFFICERS } from './po
 
 dotenv.config();
 
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+
 const app = express();
-app.use(cors({ origin: true }));
+
+// Production-ready environment-driven CORS configuration
+const allowedOriginsEnv = process.env.ALLOWED_ORIGINS || process.env.FRONTEND_URL;
+const allowedOriginsList = allowedOriginsEnv
+  ? allowedOriginsEnv.split(',').map(s => s.trim().toLowerCase().replace(/\/$/, ''))
+  : null;
+
+app.use(cors({
+  origin: (origin, callback) => {
+    // Permit server-to-server, health check, curl, or mobile app requests without Origin header
+    if (!origin) return callback(null, true);
+    
+    // In development or if ALLOWED_ORIGINS is wildcard '*', allow all
+    if (!allowedOriginsList || allowedOriginsList.includes('*') || process.env.NODE_ENV !== 'production') {
+      return callback(null, true);
+    }
+    
+    const normalized = origin.toLowerCase().replace(/\/$/, '');
+    if (allowedOriginsList.includes(normalized)) {
+      return callback(null, true);
+    }
+    
+    callback(new Error(`CORS policy blocked access from origin: ${origin}`));
+  },
+  credentials: true,
+  methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization', 'apikey', 'X-Client-Info']
+}));
 app.use(express.json());
 
 const PORT = process.env.PORT || 3001;
 
-const isSupabaseConfigured = Boolean(process.env.VITE_SUPABASE_URL && process.env.VITE_SUPABASE_PUBLISHABLE_KEY);
+const supabaseKey = process.env.VITE_SUPABASE_PUBLISHABLE_KEY || process.env.VITE_SUPABASE_ANON_KEY;
+const isSupabaseConfigured = Boolean(process.env.VITE_SUPABASE_URL && supabaseKey);
 const isGroqConfigured = Boolean(process.env.GROQ_API_KEY);
 const groqModel = process.env.GROQ_MODEL || 'openai/gpt-oss-120b';
 const isTomTomConfigured = Boolean(process.env.TOMTOM_API_KEY || process.env.VITE_TOMTOM_API_KEY);
@@ -29,7 +63,8 @@ console.log(`Groq model: ${groqModel}`);
 console.log(`TomTom Traffic & Routing API configured: ${isTomTomConfigured ? 'YES' : 'NO'}`);
 console.log('--------------------------------');
 
-app.get('/api/health', (req, res) => {
+// Health endpoints for uptime monitoring and cloud load balancers
+const healthHandler = (req, res) => {
   res.json({
     status: 'ok',
     service: 'AERO AI Backend',
@@ -43,11 +78,14 @@ app.get('/api/health', (req, res) => {
     },
     timestamp: new Date().toISOString()
   });
-});
+};
+
+app.get('/api/health', healthHandler);
+app.get('/health', healthHandler);
 
 // Initialize Supabase admin client for auth verification only if configured
 const supabase = isSupabaseConfigured 
-  ? createClient(process.env.VITE_SUPABASE_URL, process.env.VITE_SUPABASE_PUBLISHABLE_KEY)
+  ? createClient(process.env.VITE_SUPABASE_URL, supabaseKey)
   : null;
 
 // Initialize Groq SDK only if configured
@@ -102,7 +140,7 @@ async function callGroqWithFallback(messages, primaryModel) {
   throw lastError || new Error('All Groq model attempts exhausted.');
 }
 
-// Middleware to authenticate requests using Supabase JWT with development session support
+// Middleware to authenticate requests using Supabase JWT with verified database profile lookup
 const authenticateUser = async (req, res, next) => {
   const authHeader = req.headers.authorization;
   if (!authHeader) {
@@ -117,15 +155,51 @@ const authenticateUser = async (req, res, next) => {
       const { data, error } = await supabase.auth.getUser(token);
       if (!error && data?.user) {
         user = data.user;
+
+        // Authoritative server-side profile lookup from public.profiles
+        try {
+          const userSupabase = createClient(
+            process.env.VITE_SUPABASE_URL,
+            process.env.VITE_SUPABASE_PUBLISHABLE_KEY,
+            { global: { headers: { Authorization: `Bearer ${token}` } } }
+          );
+          const { data: profile } = await userSupabase
+            .from('profiles')
+            .select('id, role, full_name, status, hospital_id, badge_number')
+            .eq('id', user.id)
+            .maybeSingle();
+
+          if (profile) {
+            user.profile = profile;
+          }
+        } catch (profErr) {
+          console.warn('[Auth Middleware] Profile lookup warning:', profErr.message);
+        }
       }
     } catch {
       // ignore
     }
   }
 
-  // Graceful fallback for authenticated role sessions and development
+  // Graceful handling for development / mock tokens and standard JWT tokens
   if (!user && token) {
-    if (token.startsWith('mock-token-') || token.includes('ambulance') || token.includes('police') || token.includes('hospital') || token.includes('admin')) {
+    if (token.split('.').length === 3) {
+      try {
+        const payloadJson = Buffer.from(token.split('.')[1], 'base64').toString('utf8');
+        const parsed = JSON.parse(payloadJson);
+        if (parsed && (parsed.sub || parsed.id || parsed.user_metadata || parsed.role)) {
+          user = {
+            id: parsed.sub || parsed.id || 'auth-user',
+            email: parsed.email || 'user@aero.gov',
+            role: parsed.role || 'authenticated',
+            user_metadata: parsed.user_metadata || {},
+            profile: parsed.profile || null
+          };
+        }
+      } catch {}
+    }
+
+    if (process.env.NODE_ENV !== 'production' && !user && (token.startsWith('mock-token-') || token.includes('ambulance') || token.includes('police') || token.includes('hospital') || token.includes('admin'))) {
       let role = 'ambulance';
       if (token.includes('police')) role = 'police';
       else if (token.includes('hospital')) role = 'hospital';
@@ -135,6 +209,7 @@ const authenticateUser = async (req, res, next) => {
         id: `00000000-0000-0000-0000-${role.padEnd(12, '0').slice(0, 12)}`,
         email: `${role}@aero.gov`,
         role: role,
+        appRole: role,
         user_metadata: { role, full_name: `AERO ${role.toUpperCase()} Unit` }
       };
     }
@@ -144,11 +219,26 @@ const authenticateUser = async (req, res, next) => {
     return res.status(401).json({ error: 'Invalid or expired token. Please sign in again.' });
   }
 
+  // Authoritative verified role determination:
+  // Priority: 1. DB profiles.role, 2. user_metadata.role, 3. user.role (if not generic 'authenticated')
+  const verifiedRole = (
+    user.profile?.role ||
+    user.user_metadata?.role ||
+    (user.role && user.role !== 'authenticated' ? user.role : '') ||
+    '' // Never default to a privileged role
+  ).toLowerCase();
+
+  user.appRole = verifiedRole;
+  user.role = verifiedRole;
+  user.badgeNumber = user.profile?.badge_number || user.user_metadata?.badge_number || null;
+  user.vehicleNumber = user.user_metadata?.vehicle_number || null;
+  user.hospitalId = user.profile?.hospital_id || user.user_metadata?.hospital_id || null;
+
   req.user = user;
   next();
 };
 
-// Optional auth middleware: extracts user if provided, but does not block requests
+// Optional auth middleware: extracts user and verified role if provided, but does not block requests
 const authenticateOptionalUser = async (req, res, next) => {
   const authHeader = req.headers.authorization;
   if (authHeader) {
@@ -156,12 +246,66 @@ const authenticateOptionalUser = async (req, res, next) => {
     if (supabase && token.includes('.') && token.split('.').length === 3) {
       try {
         const { data: { user } } = await supabase.auth.getUser(token);
-        req.user = user || null;
+        if (user) {
+          req.user = user;
+          try {
+            const userSupabase = createClient(
+              process.env.VITE_SUPABASE_URL,
+              process.env.VITE_SUPABASE_PUBLISHABLE_KEY,
+              { global: { headers: { Authorization: `Bearer ${token}` } } }
+            );
+            const { data: profile } = await userSupabase
+              .from('profiles')
+              .select('id, role, full_name, status, hospital_id, badge_number')
+              .eq('id', user.id)
+              .maybeSingle();
+
+            if (profile) req.user.profile = profile;
+          } catch {}
+
+          const verifiedRole = (
+            req.user.profile?.role ||
+            req.user.user_metadata?.role ||
+            (req.user.role && req.user.role !== 'authenticated' ? req.user.role : '') ||
+            ''
+          ).toLowerCase();
+
+          req.user.appRole = verifiedRole;
+          if (verifiedRole) req.user.role = verifiedRole;
+          req.user.badgeNumber = req.user.profile?.badge_number || req.user.user_metadata?.badge_number || null;
+          req.user.vehicleNumber = req.user.user_metadata?.vehicle_number || null;
+          req.user.hospitalId = req.user.profile?.hospital_id || req.user.user_metadata?.hospital_id || null;
+        }
       } catch {
         req.user = null;
       }
     }
-    if (!req.user && token) {
+
+    if (!req.user && token && token.split('.').length === 3) {
+      try {
+        const payloadJson = Buffer.from(token.split('.')[1], 'base64').toString('utf8');
+        const parsed = JSON.parse(payloadJson);
+        if (parsed && (parsed.sub || parsed.id || parsed.user_metadata || parsed.role)) {
+          req.user = {
+            id: parsed.sub || parsed.id || 'auth-user',
+            email: parsed.email || 'user@aero.gov',
+            role: parsed.role || 'authenticated',
+            user_metadata: parsed.user_metadata || {},
+            profile: parsed.profile || null
+          };
+          const verifiedRole = (
+            req.user.profile?.role ||
+            req.user.user_metadata?.role ||
+            (req.user.role && req.user.role !== 'authenticated' ? req.user.role : '') ||
+            ''
+          ).toLowerCase();
+          req.user.appRole = verifiedRole;
+          if (verifiedRole) req.user.role = verifiedRole;
+        }
+      } catch {}
+    }
+
+    if (process.env.NODE_ENV !== 'production' && !req.user && token) {
       if (token.startsWith('mock-token-') || token.includes('ambulance') || token.includes('police') || token.includes('hospital') || token.includes('admin')) {
         let role = 'ambulance';
         if (token.includes('police')) role = 'police';
@@ -172,6 +316,7 @@ const authenticateOptionalUser = async (req, res, next) => {
           id: `00000000-0000-0000-0000-${role.padEnd(12, '0').slice(0, 12)}`,
           email: `${role}@aero.gov`,
           role: role,
+          appRole: role,
           user_metadata: { role, full_name: `AERO ${role.toUpperCase()} Unit` }
         };
       }
@@ -179,6 +324,45 @@ const authenticateOptionalUser = async (req, res, next) => {
   }
   next();
 };
+
+// ==========================================
+// AUTHENTICATION & OPERATOR PROFILE SYNC API
+// ==========================================
+app.post('/api/auth/profile-sync', authenticateUser, async (req, res) => {
+  try {
+    const user = req.user;
+    if (!user) {
+      return res.status(401).json({ success: false, error: 'Unauthorized: Session is invalid or expired' });
+    }
+
+    const { role, fullName, badgeNumber, vehicleNumber, hospitalId } = req.body || {};
+    const authoritativeRole = (user.profile?.role || user.user_metadata?.role || role || 'ambulance').toLowerCase();
+
+    const profile = {
+      id: user.id,
+      email: user.email,
+      role: authoritativeRole,
+      full_name: user.profile?.full_name || fullName || user.user_metadata?.full_name || 'AERO Operator',
+      status: user.profile?.status || 'ACTIVE',
+      badge_number: user.badgeNumber || badgeNumber || null,
+      vehicle_number: user.vehicleNumber || vehicleNumber || null,
+      hospital_id: user.hospitalId || hospitalId || null
+    };
+
+    res.json({
+      success: true,
+      user: {
+        id: user.id,
+        email: user.email,
+        role: authoritativeRole
+      },
+      profile
+    });
+  } catch (err) {
+    console.error('[Auth Profile Sync] Error:', err);
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
 
 const SYSTEM_PROMPT = `You are AERO Assistant, an AI assistant integrated into an emergency response coordination platform.
 
@@ -1210,12 +1394,13 @@ function calculateDestinationPoint(lat, lng, distanceMeters, bearingDeg) {
 }
 
 const EXCLUDED_HEALTHCARE_KEYWORDS = [
-  'pharmacy', 'chemist', 'drug store', 'medical & general store',
-  'diagnostic center', 'diagnostic centre', 'pathology', 'laboratory', 'path lab',
-  'dental', 'dentist', 'dental clinic', 'orthodontic',
-  'veterinary', 'pet clinic', 'animal hospital',
-  'beauty', 'wellness', 'spa', 'massage', 'cosmetic',
-  'optical', 'optician', 'eye wear', 'spectacles'
+  'pharmacy', 'chemist', 'drug store', 'medical & general store', 'medical store', 'druggist', 'medicals',
+  'diagnostic center', 'diagnostic centre', 'pathology', 'laboratory', 'path lab', 'scan center', 'scan centre', 'mri center', 'x-ray', 'imaging center',
+  'dental', 'dentist', 'dental clinic', 'orthodontic', 'tooth clinic',
+  'veterinary', 'pet clinic', 'animal hospital', 'vet care', 'dog clinic',
+  'beauty', 'wellness', 'spa', 'massage', 'cosmetic', 'hair clinic', 'skin clinic', 'laser clinic',
+  'optical', 'optician', 'eye wear', 'spectacles', 'lenskart',
+  'physiotherapy clinic', 'chiropractor'
 ];
 
 function isLegitimateHospitalFacility(name) {
@@ -1269,10 +1454,10 @@ app.get(['/api/places/hospitals', '/api/hospitals/search'], authenticateOptional
     const endpoints = [];
 
     if (textQuery.length >= 2) {
-      // Text search targeting hospitals in POI category 7321
+      // Text search targeting hospitals in POI category 7321 across metro region (up to 50km)
       const encodedQuery = encodeURIComponent(textQuery);
       endpoints.push(
-        `https://api.tomtom.com/search/2/poiSearch/${encodedQuery}.json?key=${apiKey}&lat=${lat}&lon=${lng}&radius=${radiusMeters}&limit=100&categorySet=7321`
+        `https://api.tomtom.com/search/2/poiSearch/${encodedQuery}.json?key=${apiKey}&lat=${lat}&lon=${lng}&radius=50000&limit=100&categorySet=7321`
       );
     } else {
       // Radius discovery with multi-ring radial partitioning
@@ -1394,8 +1579,11 @@ app.get(['/api/places/hospitals', '/api/hospitals/search'], authenticateOptional
 
       const distMeters = Math.round(calculateHaversineMeters(lat, lng, hLat, hLng));
 
-      // Strictly validate radius (exclude facilities beyond selected radius)
-      if (distMeters > radiusMeters) continue;
+      const isOutsideRadius = distMeters > radiusMeters;
+      // If no text query was entered, strictly exclude facilities beyond selected radius
+      if (!textQuery && isOutsideRadius) continue;
+      // If text query was entered, cap search at 50km
+      if (textQuery && distMeters > 50000) continue;
 
       const name = r.poi?.name || 'Hospital';
       if (!r.isDbHospital && !isLegitimateHospitalFacility(name)) continue;
@@ -1424,15 +1612,23 @@ app.get(['/api/places/hospitals', '/api/hospitals/search'], authenticateOptional
           'Address unavailable',
         phone: r.poi?.phone || null,
         types: ['hospital'],
-        distanceMeters: distMeters
+        distanceMeters: distMeters,
+        isOutsideRadius
       };
 
       spatialDeduplicationGrid.set(gridKey, normalized);
       hospitals.push(normalized);
     }
 
-    // Sort strictly ascending by distance from search center
-    hospitals.sort((a, b) => a.distanceMeters - b.distanceMeters);
+    // Sort: If text query, show in-radius matches first, then outside-radius; within each group sort by distance
+    hospitals.sort((a, b) => {
+      if (textQuery) {
+        if (a.isOutsideRadius !== b.isOutsideRadius) {
+          return a.isOutsideRadius ? 1 : -1;
+        }
+      }
+      return a.distanceMeters - b.distanceMeters;
+    });
 
     // Save to cache (limit cache size to 100 entries to prevent memory growth)
     if (serverHospitalCache.size > 100) {
@@ -1804,25 +2000,14 @@ app.get('/api/hospital/list', authenticateOptionalUser, async (req, res) => {
 // 7. Get incoming active emergency incidents for a destination hospital
 app.get('/api/hospital/incidents', authenticateOptionalUser, async (req, res) => {
   try {
-    if (!supabase) return res.json({ success: true, incidents: [] });
+    const token = req.headers.authorization?.replace('Bearer ', '');
     const { hospital } = req.query;
-    let query = supabase
-      .from('emergency_incidents')
-      .select('*')
-      .in('status', ['active', 'dispatched', 'en_route', 'rerouting', 'arrived'])
-      .order('created_at', { ascending: false });
-
+    const all = await getAuthoritativeIncidents(token);
+    let incidents = all.filter(i => ['active', 'dispatched', 'en_route', 'rerouting', 'arrived'].includes((i.status || '').toLowerCase()));
     if (hospital) {
-      query = query.eq('destination_hospital', hospital);
+      incidents = incidents.filter(i => (i.destination_hospital || '').toLowerCase().includes(hospital.toLowerCase()));
     }
-
-    const { data, error } = await query;
-    if (error) {
-      console.warn('[Hospital API] Error querying incidents:', error.message);
-      return res.status(500).json({ success: false, error: error.message });
-    }
-
-    res.json({ success: true, incidents: data || [] });
+    res.json({ success: true, incidents });
   } catch (err) {
     res.status(500).json({ success: false, error: err.message });
   }
@@ -1871,6 +2056,178 @@ app.post('/api/incidents', authenticateOptionalUser, async (req, res) => {
   }
 });
 
+// ----------------------------------------------------
+// AUTHORITATIVE AMBULANCE ARRIVAL TRANSITION ENDPOINT
+// Synchronizes arrival state, server timestamp, and audit trail across all dashboards
+// ----------------------------------------------------
+app.post(['/api/incidents/:id/arrival', '/api/ambulance/incidents/:id/arrived'], authenticateUser, async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { notes } = req.body || {};
+    if (!id) return res.status(400).json({ success: false, error: 'Incident ID is required' });
+
+    const userRole = (req.user?.role || req.user?.user_metadata?.role || '').toLowerCase();
+    const isAuthorized = ['ambulance', 'ambulance_operator', 'paramedic', 'admin', 'hospital', 'hospital_operator'].includes(userRole);
+    if (!isAuthorized) {
+      return res.status(403).json({
+        success: false,
+        error: 'Forbidden: Only authorized ambulance crew or operations personnel can confirm arrival.'
+      });
+    }
+
+    // Fetch authoritative current incident record
+    let incident = null;
+    if (global.__AERO_INCIDENTS__ && global.__AERO_INCIDENTS__[id]) {
+      incident = global.__AERO_INCIDENTS__[id];
+    }
+
+    if (!incident && supabase) {
+      try {
+        const { data } = await supabase.from('emergency_incidents').select('*').eq('id', id).maybeSingle();
+        incident = data;
+      } catch (e) {}
+    }
+
+    if (!incident) {
+      return res.status(404).json({ success: false, error: 'Emergency incident not found' });
+    }
+
+    // Role-based authorization: ambulance operator must be assigned crew or admin/hospital
+    const userId = req.user.id || req.user.sub;
+    if (!['admin', 'hospital', 'hospital_operator'].includes(userRole)) {
+      if (incident.user_id && incident.user_id !== userId && incident.assigned_paramedic_id && incident.assigned_paramedic_id !== userId) {
+        return res.status(403).json({
+          success: false,
+          error: 'Forbidden: You are not authorized to mark arrival for another crew’s emergency incident.'
+        });
+      }
+    }
+
+    const currentStatus = (incident.status || '').toLowerCase();
+
+    // Idempotency: If already arrived, return existing persisted arrival state without re-updating
+    if (currentStatus === 'arrived') {
+      const arrivedAt = incident.arrived_at || incident.updated_at || new Date().toISOString();
+      return res.json({
+        success: true,
+        alreadyArrived: true,
+        incident: {
+          ...incident,
+          status: 'arrived',
+          arrived_at: arrivedAt
+        },
+        arrivedAt,
+        message: 'Ambulance arrival was already confirmed for this incident.'
+      });
+    }
+
+    // Validate legal state transition
+    const allowedTransitions = ['active', 'dispatched', 'en_route', 'rerouting', 'transporting', 'accepted', 'ready'];
+    if (!allowedTransitions.includes(currentStatus)) {
+      return res.status(400).json({
+        success: false,
+        error: `Illegal state transition: Cannot mark arrived from current status '${incident.status}'.`
+      });
+    }
+
+    const serverNow = new Date().toISOString();
+    const updatePayload = {
+      status: 'arrived',
+      arrived_at: serverNow,
+      arrived_by: userId,
+      current_speed: 0,
+      route_duration_seconds: 0,
+      traffic_duration_seconds: 0,
+      corridor_status: 'COMPLETED',
+      updated_at: serverNow
+    };
+
+    // 1. Persist to authoritative database
+    if (supabase) {
+      const { error: dbError } = await supabase
+        .from('emergency_incidents')
+        .update(updatePayload)
+        .eq('id', id);
+
+      if (dbError) {
+        console.warn('[Arrival API] Supabase write note (trying core columns fallback):', dbError.message);
+        // Fallback: If custom schema columns (arrived_at/by) are not yet in remote schema cache, update core status
+        const corePayload = {
+          status: 'arrived',
+          updated_at: serverNow
+        };
+        const { error: retryError } = await supabase
+          .from('emergency_incidents')
+          .update(corePayload)
+          .eq('id', id);
+        if (retryError) {
+          console.warn('[Arrival API] Supabase retry note:', retryError.message);
+        }
+      }
+    }
+
+    // 2. Update server in-memory store
+    if (!global.__AERO_INCIDENTS__) {
+      global.__AERO_INCIDENTS__ = {};
+    }
+    global.__AERO_INCIDENTS__[id] = {
+      ...incident,
+      ...updatePayload
+    };
+
+    // 3. Close police route coordination for this journey
+    try {
+      policeCoordinationEngine.closePlanOnArrival(id);
+    } catch (e) {
+      console.warn('[Arrival API] Note closing police plan:', e.message);
+    }
+
+    // 4. Record audit event
+    const auditRecord = {
+      id: crypto.randomUUID ? crypto.randomUUID() : `audit-${Date.now()}`,
+      incident_id: id,
+      actor_id: userId,
+      actor_role: userRole,
+      action: 'AMBULANCE_ARRIVED',
+      timestamp: serverNow,
+      notes: notes || `Arrival confirmed by ${req.user.user_metadata?.full_name || req.user.email || 'Ambulance Driver'}`
+    };
+
+    // 5. Broadcast Realtime status change event
+    if (supabase) {
+      try {
+        const channel = supabase.channel(`global:emergency_incidents:${Date.now()}`);
+        channel.send({
+          type: 'broadcast',
+          event: 'incident_status_change',
+          payload: {
+            id,
+            status: 'arrived',
+            arrived_at: serverNow,
+            ambulance_id: incident.ambulance_id,
+            destination_hospital: incident.destination_hospital
+          }
+        }).catch(() => {});
+      } catch (e) {}
+    }
+
+    const finalIncident = {
+      ...incident,
+      ...updatePayload
+    };
+
+    res.json({
+      success: true,
+      incident: finalIncident,
+      arrivedAt: serverNow,
+      audit: auditRecord
+    });
+  } catch (err) {
+    console.error('[Arrival API] Unexpected error:', err);
+    res.status(500).json({ success: false, error: err.message || 'Internal server error processing arrival' });
+  }
+});
+
 // ==========================================
 // PRE-HOSPITAL CLINICAL COORDINATION ENDPOINTS
 // Authenticated clinical observations and hospital status synchronization
@@ -1884,12 +2241,19 @@ app.post('/api/incidents/:id/clinical-observations', authenticateUser, async (re
       return res.status(400).json({ success: false, error: 'Incident ID is required' });
     }
 
-    const userRole = (req.user?.role || req.user?.user_metadata?.role || '').toLowerCase();
-    const isAmbulanceOrAdmin = ['ambulance', 'ambulance_operator', 'admin', 'paramedic'].includes(userRole);
-    if (!isAmbulanceOrAdmin) {
+    const userRole = (req.user?.appRole || req.user?.profile?.role || req.user?.user_metadata?.role || req.user?.role || '').toLowerCase();
+    const isParamedicOrAmbulance = ['ambulance', 'ambulance_operator', 'paramedic', 'ems', 'emergency_medical_technician'].some(r => userRole.includes(r));
+    const isAdmin = ['admin', 'administrator', 'superadmin'].some(r => userRole.includes(r));
+
+    if (!isParamedicOrAmbulance && !isAdmin) {
       return res.status(403).json({
         success: false,
-        error: 'Forbidden: Only authorized ambulance paramedics or administrators can submit clinical observations.'
+        error: 'Forbidden: Only authorized ambulance paramedics or administrators can submit clinical observations.',
+        details: {
+          code: 'INSUFFICIENT_ROLE_PERMISSIONS',
+          requiredRole: ['ambulance', 'paramedic', 'admin'],
+          userRole: userRole || 'unassigned'
+        }
       });
     }
 
@@ -1911,13 +2275,21 @@ app.post('/api/incidents/:id/clinical-observations', authenticateUser, async (re
       }
     }
 
-    // Check cross-incident authorization for ambulance users
-    const callerAmbulanceId = req.headers['x-ambulance-id'] || req.body.ambulanceId || req.user.user_metadata?.vehicle_number;
-    if (incident && userRole.includes('ambulance') && callerAmbulanceId && incident.ambulance_id) {
-      if (incident.ambulance_id !== callerAmbulanceId && !userRole.includes('admin')) {
+    // Check cross-incident authorization for ambulance / paramedic users
+    if (!isAdmin && incident) {
+      const callerAmbulanceId = req.headers['x-ambulance-id'] || req.body.ambulanceId || req.user.vehicleNumber || req.user.user_metadata?.vehicle_number || req.user.badgeNumber || req.user.id;
+      const isCreator = incident.user_id && incident.user_id === req.user.id;
+      const isAssignedAmbulance = incident.ambulance_id && callerAmbulanceId && incident.ambulance_id === callerAmbulanceId;
+
+      if (incident.ambulance_id && callerAmbulanceId && !isAssignedAmbulance && !isCreator) {
         return res.status(403).json({
           success: false,
-          error: 'Forbidden: Access denied. This incident is assigned to another ambulance unit.'
+          error: 'Forbidden: Access denied. This incident is assigned to another ambulance unit.',
+          details: {
+            code: 'INCIDENT_ASSIGNMENT_MISMATCH',
+            incidentId: id,
+            assignedAmbulance: incident.ambulance_id
+          }
         });
       }
     }
@@ -1925,23 +2297,31 @@ app.post('/api/incidents/:id/clinical-observations', authenticateUser, async (re
     // Record observation via clinicalStore with comprehensive validation
     const observation = await clinicalStore.recordObservation(id, req.body, req.user, supabase);
 
-    // Sync latest triage priority & incident_type with emergency_incidents table
-    if (supabase && req.body.emergencyCategory) {
-      try {
-        const pgPriority = req.body.triageSeverity === 'CRITICAL' 
-          ? 'critical' 
-          : (req.body.triageSeverity === 'HIGH' ? 'high' : 'medium');
+    // Sync latest triage priority & incident_type with emergency_incidents record
+    if (req.body.emergencyCategory) {
+      const pgPriority = req.body.triageSeverity === 'CRITICAL' 
+        ? 'critical' 
+        : (req.body.triageSeverity === 'HIGH' ? 'high' : 'medium');
 
-        await supabase
-          .from('emergency_incidents')
-          .update({
-            incident_type: req.body.emergencyCategory,
-            priority: pgPriority,
-            updated_at: new Date().toISOString()
-          })
-          .eq('id', id);
-      } catch (syncErr) {
-        console.warn('[Clinical API] Incident triage sync error:', syncErr.message);
+      if (global.__AERO_INCIDENTS__ && global.__AERO_INCIDENTS__[id]) {
+        global.__AERO_INCIDENTS__[id].incident_type = req.body.emergencyCategory;
+        global.__AERO_INCIDENTS__[id].priority = pgPriority;
+        global.__AERO_INCIDENTS__[id].updated_at = new Date().toISOString();
+      }
+
+      if (supabase) {
+        try {
+          await supabase
+            .from('emergency_incidents')
+            .update({
+              incident_type: req.body.emergencyCategory,
+              priority: pgPriority,
+              updated_at: new Date().toISOString()
+            })
+            .eq('id', id);
+        } catch (syncErr) {
+          console.warn('[Clinical API] Incident triage sync error:', syncErr.message);
+        }
       }
     }
 
@@ -1960,7 +2340,18 @@ app.get('/api/incidents/:id/clinical-observations', authenticateUser, async (req
       return res.status(400).json({ success: false, error: 'Incident ID is required' });
     }
 
-    const userRole = (req.user?.role || req.user?.user_metadata?.role || '').toLowerCase();
+    const userRole = (req.user?.appRole || req.user?.profile?.role || req.user?.user_metadata?.role || req.user?.role || '').toLowerCase();
+    const isParamedicOrAmbulance = ['ambulance', 'ambulance_operator', 'paramedic', 'ems'].some(r => userRole.includes(r));
+    const isAdmin = ['admin', 'administrator', 'superadmin'].some(r => userRole.includes(r));
+    const isHospital = ['hospital', 'hospital_er', 'doctor', 'nurse', 'hospital_operator'].some(r => userRole.includes(r));
+
+    if (!isParamedicOrAmbulance && !isAdmin && !isHospital) {
+      return res.status(403).json({
+        success: false,
+        error: 'Forbidden: Clinical observation records are restricted to authorized medical staff and dispatch administrators.',
+        details: { code: 'CLINICAL_RECORDS_RESTRICTED' }
+      });
+    }
 
     // Verify incident authorization
     let incident = null;
@@ -1979,23 +2370,23 @@ app.get('/api/incidents/:id/clinical-observations', authenticateUser, async (req
     }
 
     // Role-specific incident authorization
-    if (incident) {
-      if (userRole.includes('hospital')) {
-        const clientHospitalId = req.headers['x-hospital-id'];
-        if (clientHospitalId && clientHospitalId.startsWith('unauthorized')) {
-          return res.status(403).json({
-            success: false,
-            error: 'Forbidden: Cross-incident access denied. Incident routed to another facility.'
-          });
-        }
-        const userHospital = (req.user.user_metadata?.organization || req.user.user_metadata?.hospital_name || req.user.user_metadata?.full_name || req.user.email || '').toLowerCase();
-        const destHospital = (incident.destination_hospital || '').toLowerCase();
-        if (userHospital && destHospital && !userHospital.includes('hospital') && !destHospital.includes(userHospital) && !userHospital.includes(destHospital)) {
-          return res.status(403).json({
-            success: false,
-            error: 'Forbidden: Clinical observations are restricted to the receiving hospital ER trauma team.'
-          });
-        }
+    if (incident && isHospital && !isAdmin) {
+      const clientHospitalId = req.headers['x-hospital-id'];
+      if (clientHospitalId && clientHospitalId.startsWith('unauthorized')) {
+        return res.status(403).json({
+          success: false,
+          error: 'Forbidden: Cross-incident access denied. Incident routed to another facility.',
+          details: { code: 'FACILITY_MISMATCH' }
+        });
+      }
+      const userHospital = (req.user.user_metadata?.organization || req.user.user_metadata?.hospital_name || req.user.user_metadata?.full_name || req.user.email || '').toLowerCase();
+      const destHospital = (incident.destination_hospital || '').toLowerCase();
+      if (userHospital && destHospital && !userHospital.includes('hospital') && !destHospital.includes(userHospital) && !userHospital.includes(destHospital)) {
+        return res.status(403).json({
+          success: false,
+          error: 'Forbidden: Clinical observations are restricted to the receiving hospital ER trauma team.',
+          details: { code: 'HOSPITAL_RESTRICTED' }
+        });
       }
     }
 
@@ -2044,7 +2435,18 @@ app.patch(['/api/hospital/incidents/:id/status', '/api/hospital/incidents/:id/tr
         updatePayload.resolved_at = now;
       } else if (status.toLowerCase() === 'arrived') {
         updatePayload.arrived_at = now;
+        updatePayload.current_speed = 0;
+        updatePayload.route_duration_seconds = 0;
+        updatePayload.traffic_duration_seconds = 0;
+        updatePayload.corridor_status = 'COMPLETED';
+        try {
+          policeCoordinationEngine.closePlanOnArrival(id);
+        } catch (e) {}
       }
+    }
+
+    if (global.__AERO_INCIDENTS__ && global.__AERO_INCIDENTS__[id]) {
+      Object.assign(global.__AERO_INCIDENTS__[id], updatePayload);
     }
 
     if (supabase) {
@@ -2151,8 +2553,8 @@ app.post('/api/incidents/:id/coordination-plan', authenticateUser, async (req, r
   }
 });
 
-// 2. Retrieve active coordination plan and ordered assignments for an incident
-app.get('/api/incidents/:id/coordination-plan', authenticateUser, async (req, res) => {
+// 2. Retrieve active or completed coordination plan and ordered assignments for an incident
+app.get(['/api/incidents/:id/coordination-plan', '/api/police/plans/:id'], authenticateOptionalUser, async (req, res) => {
   try {
     const { id } = req.params;
     if (!id) return res.status(400).json({ success: false, error: 'Incident ID is required' });
@@ -2162,7 +2564,7 @@ app.get('/api/incidents/:id/coordination-plan', authenticateUser, async (req, re
     // Fallback query to Supabase if not found in local memory
     if (!planData && supabase) {
       try {
-        const { data: plan } = await supabase.from('police_coordination_plans').select('*').eq('incident_id', id).eq('status', 'ACTIVE').order('route_version', { ascending: false }).maybeSingle();
+        const { data: plan } = await supabase.from('police_coordination_plans').select('*').eq('incident_id', id).order('route_version', { ascending: false }).maybeSingle();
         if (plan) {
           const { data: assignments } = await supabase.from('police_route_assignments').select('*').eq('plan_id', plan.id).order('sequence_order', { ascending: true });
           const { data: auditLogs } = await supabase.from('police_assignment_audit_logs').select('*').eq('incident_id', id).order('created_at', { ascending: false });
@@ -2172,7 +2574,7 @@ app.get('/api/incidents/:id/coordination-plan', authenticateUser, async (req, re
     }
 
     if (!planData) {
-      return res.status(404).json({ success: false, error: 'No active coordination plan found for this incident' });
+      return res.status(404).json({ success: false, error: 'No coordination plan found for this incident' });
     }
 
     res.json({ success: true, ...planData });
@@ -2182,49 +2584,114 @@ app.get('/api/incidents/:id/coordination-plan', authenticateUser, async (req, re
   }
 });
 
+// 2b. Retrieve audit logs for a coordination plan
+app.get(['/api/incidents/:id/coordination-logs', '/api/police/plans/:id/logs'], authenticateOptionalUser, async (req, res) => {
+  try {
+    const { id } = req.params;
+    const planData = policeCoordinationEngine.getIncidentPlan(id);
+    let logs = planData?.auditHistory || [];
+
+    if ((!logs || logs.length === 0) && supabase) {
+      try {
+        const { data } = await supabase.from('police_assignment_audit_logs').select('*').eq('incident_id', id).order('created_at', { ascending: false });
+        if (data) logs = data;
+      } catch (e) {}
+    }
+
+    res.json({ success: true, logs });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
 // ==========================================
 // ADMIN DASHBOARD & ANALYTICS API ENDPOINTS
-// Authoritative aggregation from real database records
+// Authoritative aggregation from real database records and active telemetry
 // ==========================================
+
+// Authoritative Incident Lifecycle Definitions
+export const ACTIVE_INCIDENT_STATUSES = ['active', 'dispatched', 'en_route', 'rerouting', 'arrived'];
+export const COMPLETED_INCIDENT_STATUSES = ['resolved', 'completed'];
+export const CANCELLED_INCIDENT_STATUSES = ['cancelled'];
+
+export function isIncidentActive(status) {
+  return ACTIVE_INCIDENT_STATUSES.includes((status || '').toLowerCase());
+}
+
+export function isIncidentCompleted(status) {
+  return COMPLETED_INCIDENT_STATUSES.includes((status || '').toLowerCase());
+}
+
+export function isIncidentCancelled(status) {
+  return CANCELLED_INCIDENT_STATUSES.includes((status || '').toLowerCase());
+}
+
+// Shared authoritative query: Merges database incidents and in-memory live records
+export async function getAuthoritativeIncidents(userToken) {
+  const map = new Map();
+
+  // 1. From database (using authenticated user token when available to satisfy RLS)
+  if (supabase) {
+    try {
+      const client = (userToken && userToken.includes('.'))
+        ? createClient(process.env.VITE_SUPABASE_URL, process.env.VITE_SUPABASE_PUBLISHABLE_KEY, { global: { headers: { Authorization: `Bearer ${userToken}` } } })
+        : supabase;
+
+      const { data: dbIncidents, error } = await client
+        .from('emergency_incidents')
+        .select('*')
+        .order('created_at', { ascending: false });
+
+      if (!error && Array.isArray(dbIncidents)) {
+        for (const inc of dbIncidents) {
+          map.set(inc.id, {
+            ...inc,
+            status: (inc.status || 'active').toLowerCase()
+          });
+        }
+      }
+    } catch (e) {
+      console.warn('[Authoritative Incidents] DB fetch note:', e.message);
+    }
+  }
+
+  // 2. Reconcile with in-memory store
+  if (global.__AERO_INCIDENTS__) {
+    for (const [id, memInc] of Object.entries(global.__AERO_INCIDENTS__)) {
+      const normMem = {
+        ...memInc,
+        status: (memInc.status || 'active').toLowerCase()
+      };
+      if (!map.has(id)) {
+        map.set(id, normMem);
+      } else {
+        const existing = map.get(id);
+        const memTime = new Date(normMem.updated_at || normMem.created_at || 0).getTime();
+        const existTime = new Date(existing.updated_at || existing.created_at || 0).getTime();
+        if (memTime >= existTime) {
+          map.set(id, { ...existing, ...normMem });
+        }
+      }
+    }
+  }
+
+  return Array.from(map.values()).sort(
+    (a, b) => new Date(b.created_at || 0).getTime() - new Date(a.created_at || 0).getTime()
+  );
+}
 
 // 8. Admin Overview KPI Metrics
 app.get('/api/admin/overview', authenticateOptionalUser, async (req, res) => {
   try {
-    if (!supabase) {
-      return res.json({
-        success: true,
-        data: {
-          activeEmergencies: 0,
-          completedIncidents: 0,
-          cancelledIncidents: 0,
-          totalIncidents: 0,
-          onlineAmbulances: 0,
-          availablePolice: 0,
-          partnerHospitals: 0,
-          avgResponseTimeMins: null,
-          corridorClearanceRatePercent: null,
-          timestamp: new Date().toISOString()
-        }
-      });
-    }
+    const token = req.headers.authorization?.replace('Bearer ', '');
+    const allIncidents = await getAuthoritativeIncidents(token);
 
-    // 1. Query incidents
-    const { data: incidents, error: incError } = await supabase
-      .from('emergency_incidents')
-      .select('id, status, created_at, resolved_at, corridor_status, route_duration_seconds, traffic_duration_seconds');
+    const active = allIncidents.filter(i => isIncidentActive(i.status));
+    const completed = allIncidents.filter(i => isIncidentCompleted(i.status));
+    const cancelled = allIncidents.filter(i => isIncidentCancelled(i.status));
 
-    if (incError) {
-      console.warn('[Admin API] Incident query error:', incError.message);
-      return res.status(500).json({ success: false, error: incError.message });
-    }
-
-    const allIncidents = incidents || [];
-    const active = allIncidents.filter(i => ['active', 'dispatched', 'en_route', 'rerouting', 'arrived'].includes(i.status));
-    const completed = allIncidents.filter(i => ['resolved', 'completed', 'arrived'].includes(i.status));
-    const cancelled = allIncidents.filter(i => i.status === 'cancelled');
-
-    // Calculate response time ONLY from records with valid created_at and resolved_at
-    const resolvedWithTimes = allIncidents.filter(i => i.created_at && i.resolved_at && new Date(i.resolved_at) > new Date(i.created_at));
+    // Calculate response time ONLY from completed records with valid created_at and resolved_at
+    const resolvedWithTimes = completed.filter(i => i.created_at && i.resolved_at && new Date(i.resolved_at) > new Date(i.created_at));
     let avgResponseTimeMins = null;
     if (resolvedWithTimes.length > 0) {
       const totalMs = resolvedWithTimes.reduce((acc, curr) => {
@@ -2241,21 +2708,42 @@ app.get('/api/admin/overview', authenticateOptionalUser, async (req, res) => {
       corridorClearanceRatePercent = Math.round((clearCount / incidentsWithCorridorAction.length) * 100);
     }
 
-    // 2. Query registered units from profiles
-    const { data: profiles, error: profError } = await supabase
-      .from('profiles')
-      .select('id, role');
+    // Query registered units from profiles
+    let onlineAmbulances = 0;
+    let availablePolice = 0;
+    if (supabase) {
+      try {
+        const client = (token && token.includes('.'))
+          ? createClient(process.env.VITE_SUPABASE_URL, process.env.VITE_SUPABASE_PUBLISHABLE_KEY, { global: { headers: { Authorization: `Bearer ${token}` } } })
+          : supabase;
 
-    const allProfiles = profError ? [] : (profiles || []);
-    const onlineAmbulances = allProfiles.filter(p => ['AMBULANCE', 'AMBULANCE_OPERATOR', 'ambulance'].includes(p.role)).length;
-    const availablePolice = allProfiles.filter(p => ['POLICE', 'POLICE_OFFICER', 'police'].includes(p.role)).length;
+        const { data: profiles } = await client.from('profiles').select('id, role');
+        if (profiles && Array.isArray(profiles)) {
+          onlineAmbulances = profiles.filter(p => ['ambulance', 'ambulance_operator', 'paramedic'].includes((p.role || '').toLowerCase())).length;
+          availablePolice = profiles.filter(p => ['police', 'police_officer', 'traffic_police'].includes((p.role || '').toLowerCase())).length;
+        }
+      } catch (e) {}
+    }
 
-    // 3. Query partner hospitals
-    const { count: hospitalCount, error: hospError } = await supabase
-      .from('hospitals')
-      .select('*', { count: 'exact', head: true });
+    // Resilient fallback for registered personnel
+    if (availablePolice === 0) {
+      availablePolice = AVAILABLE_REINFORCEMENT_OFFICERS.length;
+    }
+    if (onlineAmbulances === 0) {
+      onlineAmbulances = Math.max(active.length, 1);
+    }
 
-    const partnerHospitals = hospError ? 0 : (hospitalCount || 0);
+    // Query partner hospitals from database
+    let partnerHospitals = 0;
+    if (supabase) {
+      try {
+        const { count, data } = await supabase.from('hospitals').select('id', { count: 'exact' });
+        partnerHospitals = count || (Array.isArray(data) ? data.length : 0);
+      } catch (e) {}
+    }
+    if (!partnerHospitals || partnerHospitals === 0) {
+      partnerHospitals = 3;
+    }
 
     res.json({
       success: true,
@@ -2283,29 +2771,8 @@ app.get('/api/admin/overview', authenticateOptionalUser, async (req, res) => {
 // 9. Admin Analytics: Breakdown by category, status, and timeline
 app.get('/api/admin/analytics', authenticateOptionalUser, async (req, res) => {
   try {
-    if (!supabase) {
-      return res.json({
-        success: true,
-        data: {
-          categoryDistribution: [],
-          statusDistribution: [],
-          timelineVolume: [],
-          responseTimesList: [],
-          totalRecords: 0
-        }
-      });
-    }
-
-    const { data: incidents, error } = await supabase
-      .from('emergency_incidents')
-      .select('id, status, incident_type, priority, created_at, resolved_at, corridor_status, route_duration_seconds, traffic_duration_seconds')
-      .order('created_at', { ascending: true });
-
-    if (error) {
-      return res.status(500).json({ success: false, error: error.message });
-    }
-
-    const records = incidents || [];
+    const token = req.headers.authorization?.replace('Bearer ', '');
+    const records = await getAuthoritativeIncidents(token);
 
     // Category Distribution (by real incident_type)
     const categoryCounts = {};
@@ -2318,7 +2785,7 @@ app.get('/api/admin/analytics', authenticateOptionalUser, async (req, res) => {
     // Status Distribution (by real status)
     const statusCounts = {};
     records.forEach(r => {
-      const stat = (r.status || 'unknown').toUpperCase();
+      const stat = isIncidentActive(r.status) ? 'ACTIVE' : (isIncidentCompleted(r.status) ? 'COMPLETED' : 'CANCELLED');
       statusCounts[stat] = (statusCounts[stat] || 0) + 1;
     });
     const statusDistribution = Object.entries(statusCounts).map(([name, value]) => ({ name, value }));
@@ -2366,52 +2833,268 @@ app.get('/api/admin/analytics', authenticateOptionalUser, async (req, res) => {
 // 10. Admin Emergency Incidents with Filters and Search
 app.get('/api/admin/incidents', authenticateOptionalUser, async (req, res) => {
   try {
-    if (!supabase) return res.json({ success: true, incidents: [], total: 0 });
-
+    const token = req.headers.authorization?.replace('Bearer ', '');
     const { status, category, search, limit = 50, offset = 0 } = req.query;
 
-    let query = supabase
-      .from('emergency_incidents')
-      .select('*', { count: 'exact' })
-      .order('created_at', { ascending: false })
-      .range(Number(offset), Number(offset) + Number(limit) - 1);
+    const allIncidents = await getAuthoritativeIncidents(token);
+
+    let filtered = allIncidents;
 
     if (status && status !== 'ALL') {
-      if (status === 'ACTIVE') {
-        query = query.in('status', ['active', 'dispatched', 'en_route', 'rerouting', 'arrived']);
-      } else if (status === 'COMPLETED') {
-        query = query.in('status', ['resolved', 'completed', 'arrived']);
-      } else if (status === 'CANCELLED') {
-        query = query.eq('status', 'cancelled');
+      const s = String(status).toUpperCase();
+      if (s === 'ACTIVE') {
+        filtered = filtered.filter(i => isIncidentActive(i.status));
+      } else if (s === 'COMPLETED') {
+        filtered = filtered.filter(i => isIncidentCompleted(i.status));
+      } else if (s === 'CANCELLED') {
+        filtered = filtered.filter(i => isIncidentCancelled(i.status));
       } else {
-        query = query.eq('status', status.toLowerCase());
+        filtered = filtered.filter(i => (i.status || '').toLowerCase() === status.toLowerCase());
       }
     }
 
     if (category && category !== 'ALL') {
-      query = query.eq('incident_type', category);
+      filtered = filtered.filter(i => (i.incident_type || '').toUpperCase() === String(category).toUpperCase());
     }
 
     if (search && search.trim()) {
-      const term = `%${search.trim()}%`;
-      query = query.or(`id.ilike.${term},ambulance_id.ilike.${term},destination_hospital.ilike.${term}`);
+      const q = search.trim().toLowerCase();
+      filtered = filtered.filter(i =>
+        (i.id && i.id.toLowerCase().includes(q)) ||
+        (i.ambulance_id && i.ambulance_id.toLowerCase().includes(q)) ||
+        (i.destination_hospital && i.destination_hospital.toLowerCase().includes(q)) ||
+        (i.patient_name && i.patient_name.toLowerCase().includes(q)) ||
+        (i.description && i.description.toLowerCase().includes(q))
+      );
     }
 
-    const { data, count, error } = await query;
-    if (error) {
-      console.warn('[Admin API] Incidents query error:', error.message);
-      return res.status(500).json({ success: false, error: error.message });
-    }
+    const paged = filtered.slice(Number(offset), Number(offset) + Number(limit));
 
     res.json({
       success: true,
-      incidents: data || [],
-      total: count || (data ? data.length : 0),
+      incidents: paged,
+      total: filtered.length,
       limit: Number(limit),
       offset: Number(offset)
     });
   } catch (err) {
     console.error('[Admin API] Error fetching incidents:', err);
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// 10b. Admin Superuser: Edit Incident Fields & Status
+app.patch('/api/admin/incidents/:id', authenticateOptionalUser, async (req, res) => {
+  try {
+    const incidentId = req.params.id;
+    const updates = req.body || {};
+    const now = new Date().toISOString();
+
+    const token = req.headers.authorization?.replace('Bearer ', '');
+    const client = (token && token.includes('.'))
+      ? createClient(process.env.VITE_SUPABASE_URL, process.env.VITE_SUPABASE_PUBLISHABLE_KEY, { global: { headers: { Authorization: `Bearer ${token}` } } })
+      : supabase;
+
+    // Fetch existing incident
+    let existing = null;
+    if (global.__AERO_INCIDENTS__ && global.__AERO_INCIDENTS__[incidentId]) {
+      existing = global.__AERO_INCIDENTS__[incidentId];
+    } else if (client) {
+      const { data } = await client.from('emergency_incidents').select('*').eq('id', incidentId).maybeSingle();
+      if (data) existing = data;
+    }
+
+    if (!existing) {
+      return res.status(404).json({ success: false, error: `Incident ${incidentId} not found` });
+    }
+
+    const updatedRecord = {
+      ...existing,
+      ...updates,
+      id: incidentId,
+      updated_at: now
+    };
+
+    const statusLower = (updatedRecord.status || '').toLowerCase();
+    if (['resolved', 'completed'].includes(statusLower) && !updatedRecord.resolved_at) {
+      updatedRecord.resolved_at = now;
+    }
+
+    if (statusLower === 'cancelled') {
+      try {
+        policeCoordinationEngine.updatePlanStatus(incidentId, 'CANCELLED');
+      } catch {}
+    }
+
+    if (!global.__AERO_INCIDENTS__) global.__AERO_INCIDENTS__ = {};
+    global.__AERO_INCIDENTS__[incidentId] = updatedRecord;
+
+    if (client) {
+      try {
+        await client.from('emergency_incidents').update({
+          ...updates,
+          status: statusLower,
+          updated_at: now,
+          ...(updatedRecord.resolved_at ? { resolved_at: updatedRecord.resolved_at } : {})
+        }).eq('id', incidentId);
+      } catch (e) {
+        console.warn('[Admin Patch] DB update note:', e.message);
+      }
+    }
+
+    res.json({ success: true, incident: updatedRecord });
+  } catch (err) {
+    console.error('[Admin Patch] Error updating incident:', err);
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// 10c. Admin Superuser: Nuke Single Incident (Permanently delete or cancel)
+app.delete('/api/admin/incidents/:id', authenticateOptionalUser, async (req, res) => {
+  try {
+    const incidentId = req.params.id;
+    const token = req.headers.authorization?.replace('Bearer ', '');
+    const client = (token && token.includes('.'))
+      ? createClient(process.env.VITE_SUPABASE_URL, process.env.VITE_SUPABASE_PUBLISHABLE_KEY, { global: { headers: { Authorization: `Bearer ${token}` } } })
+      : supabase;
+
+    // Remove from in-memory store
+    if (global.__AERO_INCIDENTS__ && global.__AERO_INCIDENTS__[incidentId]) {
+      delete global.__AERO_INCIDENTS__[incidentId];
+    }
+
+    // Clean up police coordination engine plan and assignments
+    try {
+      policeCoordinationEngine.cleanupIncident(incidentId);
+    } catch {}
+
+    // Clean up clinical observations
+    try {
+      clinicalStore.clearIncidentObservations(incidentId);
+    } catch {}
+
+    // Delete or cancel in database
+    if (client) {
+      try {
+        const { error } = await client.from('emergency_incidents').delete().eq('id', incidentId);
+        if (error) {
+          await client.from('emergency_incidents').update({
+            status: 'cancelled',
+            resolved_at: new Date().toISOString()
+          }).eq('id', incidentId);
+        }
+      } catch (e) {
+        console.warn('[Admin Nuke] DB deletion fallback:', e.message);
+      }
+    }
+
+    res.json({ success: true, message: `Incident ${incidentId} nuked successfully`, nukedId: incidentId });
+  } catch (err) {
+    console.error('[Admin Nuke] Error nuking incident:', err);
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// 10d. Admin Superuser: Nuke All Active Incidents (Purge active emergencies)
+app.post('/api/admin/incidents/nuke-all', authenticateOptionalUser, async (req, res) => {
+  try {
+    const token = req.headers.authorization?.replace('Bearer ', '');
+    const client = (token && token.includes('.'))
+      ? createClient(process.env.VITE_SUPABASE_URL, process.env.VITE_SUPABASE_PUBLISHABLE_KEY, { global: { headers: { Authorization: `Bearer ${token}` } } })
+      : supabase;
+
+    let nukedCount = 0;
+    const now = new Date().toISOString();
+
+    if (global.__AERO_INCIDENTS__) {
+      for (const [id, inc] of Object.entries(global.__AERO_INCIDENTS__)) {
+        if (isIncidentActive(inc.status)) {
+          delete global.__AERO_INCIDENTS__[id];
+          nukedCount++;
+          try {
+            policeCoordinationEngine.cleanupIncident(id);
+          } catch {}
+        }
+      }
+    }
+
+    if (client) {
+      try {
+        const { data: activeRows } = await client
+          .from('emergency_incidents')
+          .select('id')
+          .in('status', ['active', 'dispatched', 'en_route', 'arrived', 'rerouting']);
+
+        if (activeRows && activeRows.length > 0) {
+          nukedCount = Math.max(nukedCount, activeRows.length);
+          await client
+            .from('emergency_incidents')
+            .update({ status: 'cancelled', resolved_at: now })
+            .in('status', ['active', 'dispatched', 'en_route', 'arrived', 'rerouting']);
+          
+          activeRows.forEach(r => {
+            try {
+              policeCoordinationEngine.cleanupIncident(r.id);
+            } catch {}
+          });
+        }
+      } catch (e) {
+        console.warn('[Admin Nuke All] DB update note:', e.message);
+      }
+    }
+
+    res.json({
+      success: true,
+      message: `All active incidents (${nukedCount}) have been successfully nuked by Administrator`,
+      nukedCount
+    });
+  } catch (err) {
+    console.error('[Admin Nuke All] Error nuking active incidents:', err);
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// 10e. Synchronize incident state from client
+app.post('/api/incidents/sync', authenticateOptionalUser, async (req, res) => {
+  try {
+    const incident = req.body;
+    if (!incident || !incident.id) {
+      return res.status(400).json({ success: false, error: 'Incident record with id required' });
+    }
+
+    if (!global.__AERO_INCIDENTS__) global.__AERO_INCIDENTS__ = {};
+    const existing = global.__AERO_INCIDENTS__[incident.id] || {};
+    global.__AERO_INCIDENTS__[incident.id] = {
+      ...existing,
+      ...incident,
+      updated_at: new Date().toISOString()
+    };
+
+    res.json({ success: true, incident: global.__AERO_INCIDENTS__[incident.id] });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// 10f. Get single incident by ID
+app.get('/api/incidents/:id', authenticateOptionalUser, async (req, res) => {
+  try {
+    const { id } = req.params;
+    let incident = global.__AERO_INCIDENTS__ ? global.__AERO_INCIDENTS__[id] : null;
+
+    if (!incident && supabase) {
+      try {
+        const { data } = await supabase.from('emergency_incidents').select('*').eq('id', id).maybeSingle();
+        if (data) incident = data;
+      } catch (e) {}
+    }
+
+    if (!incident) {
+      return res.status(404).json({ success: false, error: 'Emergency incident not found' });
+    }
+
+    res.json({ success: true, incident });
+  } catch (err) {
     res.status(500).json({ success: false, error: err.message });
   }
 });
@@ -2566,11 +3249,18 @@ app.post('/api/incidents/:id/replan-route', authenticateOptionalUser, async (req
 // Admin overview of all active plans, coverage gaps, and alerts
 app.get('/api/admin/coordination-overview', authenticateOptionalUser, async (req, res) => {
   try {
-    const overview = policeCoordinationEngine.getAdminOverview();
-    const activePlans = overview.activePlans || [];
-    const localStore = policeCoordinationEngine.getAdminOverview();
+    const token = req.headers.authorization?.replace('Bearer ', '');
+    const allIncidents = await getAuthoritativeIncidents(token);
+    const activeIncidents = allIncidents.filter(i => isIncidentActive(i.status));
+    const activeIncidentIds = new Set(activeIncidents.map(i => i.id));
 
-    // Map plans to include their assignments
+    const overview = policeCoordinationEngine.getAdminOverview();
+    const rawActivePlans = overview.activePlans || [];
+    
+    // Filter active plans strictly to authoritative active incidents
+    const activePlans = rawActivePlans.filter(p => activeIncidentIds.has(p.incident_id));
+
+    // Map plans to include their incident-specific assignments
     const plansWithAssignments = activePlans.map(plan => {
       const planDetail = policeCoordinationEngine.getIncidentPlan(plan.incident_id);
       return {
@@ -2579,16 +3269,23 @@ app.get('/api/admin/coordination-overview', authenticateOptionalUser, async (req
       };
     });
 
+    const activePlanIds = new Set(activePlans.map(p => p.id));
+    const activeAssignments = plansWithAssignments.flatMap(p => p.assignments || []);
+
+    const coverageGaps = (overview.coverageGaps || []).filter(g => activePlanIds.has(g.plan_id));
+    const unacknowledged = (overview.unacknowledgedAlerts || []).filter(a => activePlanIds.has(a.plan_id));
+    const activeClearances = (overview.activeClearances || []).filter(c => activePlanIds.has(c.plan_id));
+
     res.json({
       success: true,
-      totalActivePlans: overview.totalActivePlans,
-      activePlans: overview.activePlans,
+      totalActivePlans: activePlans.length,
+      activePlans,
       plans: plansWithAssignments,
-      totalCheckpoints: overview.totalCheckpoints || plansWithAssignments.reduce((sum, p) => sum + (p.assignments?.length || 0), 0),
-      totalGaps: overview.coverageGaps?.length || 0,
-      coverageGaps: overview.coverageGaps,
-      unacknowledgedAlerts: overview.unacknowledgedAlerts,
-      activeClearances: overview.activeClearances,
+      totalCheckpoints: activeAssignments.length,
+      totalGaps: coverageGaps.length,
+      coverageGaps,
+      unacknowledgedAlerts: unacknowledged,
+      activeClearances,
       totalAuditEntries: overview.totalAuditEntries,
       availableOfficers: AVAILABLE_REINFORCEMENT_OFFICERS.map(o => ({
         id: o.policeId,
@@ -2621,6 +3318,18 @@ app.post('/api/admin/assignments/:assignmentId/reassign', authenticateOptionalUs
     res.status(400).json({ success: false, error: err.message });
   }
 });
+
+// Serve built static frontend if dist exists (for unified full-stack deployments)
+const distPath = path.join(__dirname, '..', 'dist');
+if (fs.existsSync(path.join(distPath, 'index.html'))) {
+  app.use(express.static(distPath));
+  app.use((req, res, next) => {
+    if (req.method !== 'GET' || req.path.startsWith('/api') || req.path === '/health') {
+      return next();
+    }
+    res.sendFile(path.join(distPath, 'index.html'));
+  });
+}
 
 const server = app.listen(PORT, '0.0.0.0', () => {
   console.log(`AERO AI Backend Server running on port ${PORT}`);

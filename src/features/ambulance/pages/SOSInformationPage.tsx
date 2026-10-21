@@ -4,19 +4,26 @@ import { AppShell } from '../../../components/layout/AppShell';
 import { supabase } from '../../../lib/supabase';
 import { useAuth } from '../../../providers/AuthProvider';
 import { realtimeService } from '../../../services/realtimeService';
-import type { EmergencyIncident, SOSState, Hospital } from '../../../types';
-import { ArrowLeft, Clock, Activity, Target, Shield, CheckCircle2, AlertTriangle, ChevronRight } from 'lucide-react';
+import { ambulanceService } from '../../../services/ambulanceService';
+import type { EmergencyIncident, SOSState, Hospital, ConnectionState } from '../../../types';
+import { ArrowLeft, Clock, Activity, Target, Shield, CheckCircle2, AlertTriangle, ChevronRight, Loader2 } from 'lucide-react';
 
 export function SOSInformationPage() {
   const { user } = useAuth();
   const navigate = useNavigate();
   const [loading, setLoading] = useState(true);
+  const [isArriving, setIsArriving] = useState(false);
+  const [connectionState, setConnectionState] = useState<ConnectionState>(realtimeService.getConnectionState());
   // const [error, setError] = useState<string | null>(null);
   
   const [sosState, setSosState] = useState<SOSState | null>(null);
   const [incident, setIncident] = useState<EmergencyIncident | null>(null);
 
   useEffect(() => {
+    realtimeService.initialize();
+    const unsubConn = realtimeService.on('connection_change', (state: ConnectionState) => {
+      setConnectionState(state);
+    });
     let mounted = true;
     if (!user) return;
 
@@ -27,7 +34,7 @@ export function SOSInformationPage() {
           .from('emergency_incidents')
           .select('*')
           .eq('user_id', user.id)
-          .in('status', ['active', 'dispatched', 'en_route'])
+          .in('status', ['active', 'dispatched', 'en_route', 'arrived'])
           .order('created_at', { ascending: false })
           .limit(1)
           .maybeSingle();
@@ -56,7 +63,7 @@ export function SOSInformationPage() {
     // Listen for realtime updates
     const unsub = realtimeService.on('incidents_updated', (incidents: EmergencyIncident[]) => {
       if (!mounted) return;
-      const myActive = incidents.find(inc => inc.user_id === user.id && ['active', 'dispatched', 'en_route'].includes(inc.status));
+      const myActive = incidents.find(inc => inc.user_id === user.id && ['active', 'dispatched', 'en_route', 'arrived'].includes(inc.status));
       if (myActive) {
         setIncident(myActive);
         mapToSosState(myActive);
@@ -72,17 +79,19 @@ export function SOSInformationPage() {
 
     return () => {
       mounted = false;
+      unsubConn();
       unsub();
     };
   }, [user]);
 
   const mapToSosState = (inc: EmergencyIncident) => {
+    const isArr = inc.status === 'arrived';
     const state: SOSState = {
-      status: inc.status === 'cancelled' ? 'ABORTED' : (inc.status === 'resolved' || inc.status === 'arrived' ? 'COMPLETED' : 'ACTIVE'),
+      status: inc.status === 'cancelled' ? 'ABORTED' : (inc.status === 'resolved' ? 'COMPLETED' : (isArr ? 'COMPLETED' : 'ACTIVE')),
       emergencyId: inc.id,
       routeStatus: inc.route_geometry ? 'SUCCESS' : 'PENDING',
       policeStatus: inc.police_acknowledged_at ? 'DELIVERED' : (inc.corridor_status !== 'PENDING' ? 'SENT' : 'PENDING'),
-      hospitalStatus: 'PENDING', // We don't have hospital tracking yet
+      hospitalStatus: isArr ? 'DELIVERED' : (inc.hospital_acknowledged_at ? 'DELIVERED' : 'PENDING'),
       ambulanceLocation: { latitude: inc.current_latitude || 0, longitude: inc.current_longitude || 0 },
       destination: {
         id: 'dest',
@@ -91,9 +100,9 @@ export function SOSInformationPage() {
         location: { latitude: inc.destination_latitude, longitude: inc.destination_longitude },
         emergencyCapable: true,
       } as Hospital,
-      distanceMeters: inc.route_distance_meters,
-      etaSeconds: inc.route_duration_seconds,
-      trafficAwareEtaSeconds: inc.traffic_duration_seconds,
+      distanceMeters: isArr ? 0 : inc.route_distance_meters,
+      etaSeconds: isArr ? 0 : inc.route_duration_seconds,
+      trafficAwareEtaSeconds: isArr ? 0 : inc.traffic_duration_seconds,
       trafficStatus: inc.traffic_status as any,
       startedAt: inc.created_at,
       updatedAt: inc.updated_at,
@@ -118,26 +127,33 @@ export function SOSInformationPage() {
   };
 
   const handleComplete = async () => {
-    if (!incident || !window.confirm("Mark this emergency as completed/arrived?")) return;
+    if (!incident || isArriving) return;
+    if (!window.confirm("Confirm arrival of ambulance at destination hospital?")) return;
     
+    setIsArriving(true);
     try {
-      const { error } = await supabase
-        .from('emergency_incidents')
-        .update({ status: 'arrived', resolved_at: new Date().toISOString() })
-        .eq('id', incident.id);
-        
-      if (error) throw error;
-      navigate('/ambulance');
+      const res = await ambulanceService.markArrived(incident.id);
+      if (res.success) {
+        const arrivedTime = res.arrivedAt || new Date().toISOString();
+        setIncident(prev => prev ? {
+          ...prev,
+          status: 'arrived',
+          arrived_at: arrivedTime,
+          current_speed: 0
+        } : null);
+      } else {
+        alert(`Failed to record arrival: ${res.error || 'Server error'}`);
+      }
     } catch (err: any) {
-      alert(`Failed to complete: ${err.message}`);
+      alert(`Failed to complete arrival: ${err.message}`);
+    } finally {
+      setIsArriving(false);
     }
   };
 
-  const connState = realtimeService.getConnectionState();
-
   if (loading) {
     return (
-      <AppShell userRole="AMBULANCE" userName="Ambulance" connectionState={connState} gpsState="active">
+      <AppShell userRole="AMBULANCE" userName="Ambulance" connectionState={connectionState} gpsState="active">
         <div className="flex h-full items-center justify-center bg-aero-background text-aero-text-primary">
            Loading SOS Information...
         </div>
@@ -145,9 +161,9 @@ export function SOSInformationPage() {
     );
   }
 
-  if (!incident || !sosState || sosState.status === 'ABORTED' || sosState.status === 'COMPLETED') {
+  if (!incident || !sosState || sosState.status === 'ABORTED' || (sosState.status === 'COMPLETED' && incident.status !== 'arrived')) {
     return (
-      <AppShell userRole="AMBULANCE" userName="Ambulance" connectionState={connState} gpsState="active">
+      <AppShell userRole="AMBULANCE" userName="Ambulance" connectionState={connectionState} gpsState="active">
         <div className="flex flex-col h-full items-center justify-center bg-aero-background p-6 text-center">
           <AlertTriangle className="w-16 h-16 text-yellow-500 mb-4" />
           <h2 className="text-2xl font-bold text-aero-text-primary mb-2">NO ACTIVE SOS</h2>
@@ -164,7 +180,7 @@ export function SOSInformationPage() {
   }
 
   return (
-    <AppShell userRole="AMBULANCE" userName="Ambulance" connectionState={connState} gpsState="active">
+    <AppShell userRole="AMBULANCE" userName="Ambulance" connectionState={connectionState} gpsState="active">
       <div className="flex flex-col h-full bg-aero-background overflow-y-auto">
         {/* Header */}
         <div className="sticky top-0 z-10 bg-aero-background/80 backdrop-blur-md border-b border-aero-border p-4">
@@ -177,10 +193,22 @@ export function SOSInformationPage() {
                <span className="font-medium text-sm">Map View</span>
              </button>
              <h1 className="text-lg font-bold text-aero-text-primary tracking-widest">SOS INFORMATION</h1>
-             <div className="flex items-center gap-2 text-xs font-bold text-aero-red bg-aero-red-soft px-3 py-1.5 rounded-full border border-[#FF3B30]/20 animate-pulse">
-               <span className="w-2 h-2 rounded-full bg-aero-red" />
-               ACTIVE
-             </div>
+             {incident.status === 'arrived' ? (
+               <div className="flex items-center gap-2 text-xs font-bold text-emerald-400 bg-emerald-500/10 px-3 py-1.5 rounded-full border border-emerald-500/30">
+                 <span className="w-2 h-2 rounded-full bg-emerald-500" />
+                 ARRIVED AT HOSPITAL
+               </div>
+             ) : isArriving ? (
+               <div className="flex items-center gap-2 text-xs font-bold text-amber-400 bg-amber-500/10 px-3 py-1.5 rounded-full border border-amber-500/30">
+                 <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                 ARRIVING...
+               </div>
+             ) : (
+               <div className="flex items-center gap-2 text-xs font-bold text-aero-red bg-aero-red-soft px-3 py-1.5 rounded-full border border-[#FF3B30]/20 animate-pulse">
+                 <span className="w-2 h-2 rounded-full bg-aero-red" />
+                 ACTIVE
+               </div>
+             )}
           </div>
         </div>
 
@@ -231,25 +259,49 @@ export function SOSInformationPage() {
                <div>
                  <div className="text-xs text-aero-text-secondary uppercase">Distance Remaining</div>
                  <div className="text-xl font-bold text-aero-text-primary mt-1">
-                   {incident.route_distance_meters ? (incident.route_distance_meters / 1000).toFixed(1) + ' km' : 'Calculating...'}
+                   {incident.status === 'arrived' ? (
+                     <span className="text-emerald-400">At ER Bay</span>
+                   ) : incident.route_distance_meters ? (
+                     (incident.route_distance_meters / 1000).toFixed(1) + ' km'
+                   ) : (
+                     'Calculating...'
+                   )}
                  </div>
                </div>
                <div>
                  <div className="text-xs text-aero-text-secondary uppercase flex items-center gap-2">
                    ETA
-                   {incident.traffic_status === 'LIVE' && (
+                   {incident.status !== 'arrived' && incident.traffic_status === 'LIVE' && (
                      <span className="text-[9px] bg-aero-surface-soft text-aero-text-secondary px-1 py-0.5 rounded border border-aero-border font-bold uppercase">ROUTE ETA</span>
                    )}
                  </div>
                  <div className="text-xl font-bold text-aero-text-primary mt-1">
-                   {(incident.traffic_duration_seconds || incident.route_duration_seconds) ? Math.round((incident.traffic_duration_seconds || incident.route_duration_seconds!) / 60) + ' min' : 'Calculating...'}
+                   {incident.status === 'arrived' ? (
+                     <span className="text-emerald-400 text-sm">
+                       {incident.arrived_at
+                         ? `ARRIVED (${new Date(incident.arrived_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })})`
+                         : 'ARRIVED AT BAY'}
+                     </span>
+                   ) : (incident.traffic_duration_seconds || incident.route_duration_seconds) ? (
+                     Math.round((incident.traffic_duration_seconds || incident.route_duration_seconds!) / 60) + ' min'
+                   ) : (
+                     'Calculating...'
+                   )}
                  </div>
                </div>
                <div className="md:col-span-2">
                  <div className="text-xs text-aero-text-secondary uppercase">Navigation Status</div>
                  <div className="text-sm font-bold text-aero-blue mt-1 flex items-center gap-2">
                     <ChevronRight className="w-4 h-4" />
-                    {sosState.routeStatus === 'SUCCESS' ? 'ON ROUTE' : (sosState.routeStatus === 'ERROR' ? 'ROUTE ERROR' : 'REROUTING / PENDING')}
+                    {incident.status === 'arrived' ? (
+                      <span className="text-emerald-400 font-semibold">ARRIVED AT ER BAY • HANDOVER IN PROGRESS</span>
+                    ) : sosState.routeStatus === 'SUCCESS' ? (
+                      'ON ROUTE'
+                    ) : sosState.routeStatus === 'ERROR' ? (
+                      'ROUTE ERROR'
+                    ) : (
+                      'REROUTING / PENDING'
+                    )}
                  </div>
                </div>
             </div>
@@ -277,7 +329,7 @@ export function SOSInformationPage() {
                <div>
                  <div className="text-xs text-aero-text-secondary uppercase">Speed</div>
                  <div className="text-sm font-bold text-aero-text-primary mt-1">
-                    {incident.current_speed ? `${Math.round(incident.current_speed)} km/h` : '0 km/h'}
+                    {incident.status === 'arrived' ? '0 km/h (At Destination)' : incident.current_speed ? `${Math.round(incident.current_speed)} km/h` : '0 km/h'}
                  </div>
                </div>
                <div>
@@ -319,20 +371,38 @@ export function SOSInformationPage() {
             </div>
           </section>
           
-          <div className="pt-4 border-t border-aero-border flex items-center justify-between">
-             <button
-               onClick={handleAbort}
-               className="px-6 py-3 rounded-lg bg-aero-surface hover:bg-aero-red-soft text-aero-red border border-aero-red/20 transition-colors font-bold text-sm"
-             >
-               ABORT EMERGENCY
-             </button>
-             <button
-               onClick={handleComplete}
-               className="px-6 py-3 rounded-lg bg-aero-green-soft hover:bg-aero-green-soft text-aero-green border border-aero-green/30 transition-colors font-bold text-sm"
-             >
-               MARK ARRIVED
-             </button>
-          </div>
+          {incident.status === 'arrived' ? (
+            <div className="pt-4 border-t border-aero-border flex flex-col sm:flex-row items-center justify-between gap-3">
+              <div className="flex items-center gap-2 text-sm font-bold text-emerald-400">
+                <CheckCircle2 className="w-5 h-5 text-emerald-500" />
+                ARRIVED AT DESTINATION HOSPITAL
+              </div>
+              <button
+                onClick={() => navigate('/ambulance')}
+                className="w-full sm:w-auto px-6 py-3 rounded-lg bg-aero-surface hover:bg-aero-surface-soft text-aero-text-primary border border-aero-border transition-colors font-bold text-sm"
+              >
+                BACK TO MAP VIEW
+              </button>
+            </div>
+          ) : (
+            <div className="pt-4 border-t border-aero-border flex items-center justify-between">
+              <button
+                onClick={handleAbort}
+                disabled={isArriving}
+                className="px-6 py-3 rounded-lg bg-aero-surface hover:bg-aero-red-soft text-aero-red border border-aero-red/20 transition-colors font-bold text-sm disabled:opacity-50"
+              >
+                ABORT EMERGENCY
+              </button>
+              <button
+                onClick={handleComplete}
+                disabled={isArriving}
+                className="px-6 py-3 rounded-lg bg-aero-green-soft hover:bg-aero-green-soft text-aero-green border border-aero-green/30 transition-colors font-bold text-sm flex items-center gap-2 disabled:opacity-50"
+              >
+                {isArriving ? <Loader2 className="w-4 h-4 animate-spin" /> : null}
+                {isArriving ? 'RECORDING ARRIVAL...' : 'MARK ARRIVED'}
+              </button>
+            </div>
+          )}
         </div>
       </div>
     </AppShell>

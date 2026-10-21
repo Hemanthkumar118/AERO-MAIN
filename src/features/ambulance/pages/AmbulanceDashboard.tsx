@@ -20,10 +20,12 @@ import type { NormalizedHospital } from '../../../services/hospitalSearch/types'
 import type {
   EmergencyIncident,
   Hospital,
+  ConnectionState,
 } from '../../../types';
 import { supabase } from '../../../lib/supabase';
 import { useAuth } from '../../../providers/AuthProvider';
 import { policeCoordinationService } from '../../../services/policeCoordinationService';
+import { ambulanceService } from '../../../services/ambulanceService';
 
 export function AmbulanceDashboard() {
   const { user, profile } = useAuth();
@@ -51,6 +53,7 @@ export function AmbulanceDashboard() {
   const [routingError, setRoutingError] = useState<string | null>(null);
   const [selectedAlternativeIndex, setSelectedAlternativeIndex] = useState(0);
   const [showClinicalModal, setShowClinicalModal] = useState(false);
+  const [isArriving, setIsArriving] = useState(false);
   // Centralized Route & Traffic Calculation
   const calculateRouteForHospital = async (
     hosp: Hospital, 
@@ -117,33 +120,52 @@ export function AmbulanceDashboard() {
 
   // Emergency State
   const [activeIncident, setActiveIncident] = useState<EmergencyIncident | null>(null);
+  const [connectionState, setConnectionState] = useState<ConnectionState>(realtimeService.getConnectionState());
 
   const locationUpdateInterval = useRef<any>(null);
   const currentAccuracy = 5;
 
   // 1. Initialize Realtime Services
   useEffect(() => {
+    realtimeService.initialize();
+
+    const unsubConn = realtimeService.on('connection_change', (state: ConnectionState) => {
+      setConnectionState(state);
+    });
+
     // Check initial active incident
     const fetchInitial = async () => {
       const { data } = await supabase
         .from('emergency_incidents')
         .select('*')
         .eq('ambulance_id', ambulance.id)
-        .in('status', ['active', 'dispatched', 'en_route'])
+        .in('status', ['active', 'dispatched', 'en_route', 'arrived'])
+        .order('created_at', { ascending: false })
+        .limit(1)
         .maybeSingle();
-      if (data) setActiveIncident(data as EmergencyIncident);
+      if (data) {
+        setActiveIncident(data as EmergencyIncident);
+        if (data.status === 'arrived') {
+          setNavigationStatus('arrived');
+        }
+      }
     };
     fetchInitial();
 
     const unsub = realtimeService.on('incidents_updated', (incidents: EmergencyIncident[]) => {
-      const myActive = incidents.find(inc => ['active', 'dispatched', 'en_route'].includes(inc.status) && inc.ambulance_id === ambulance.id);
+      const myActive = incidents.find(inc => ['active', 'dispatched', 'en_route', 'arrived'].includes(inc.status) && inc.ambulance_id === ambulance.id);
       setActiveIncident(myActive || null);
-      if (!myActive) {
+      if (!myActive || myActive.status === 'resolved' || myActive.status === 'cancelled') {
         setNavigationStatus('idle');
         setRouteInfo(null);
+      } else if (myActive.status === 'arrived') {
+        setNavigationStatus('arrived');
       }
     });
-    return () => unsub();
+    return () => {
+      unsubConn();
+      unsub();
+    };
   }, [ambulance.id]);
 
   // Generate route coordination plan for advance police alerts whenever active incident has route geometry
@@ -191,19 +213,37 @@ export function AmbulanceDashboard() {
   };
 
   const handleComplete = async () => {
-    if (!activeIncident || !window.confirm("Mark this emergency as completed/arrived?")) return;
+    if (!activeIncident || isArriving) return;
+    if (!window.confirm("Confirm arrival of ambulance at destination hospital?")) return;
+    setIsArriving(true);
     try {
-      const { error } = await supabase
-        .from('emergency_incidents')
-        .update({ status: 'arrived', resolved_at: new Date().toISOString() })
-        .eq('id', activeIncident.id);
-      if (error) throw error;
-      setActiveIncident(null);
-      setNavigationStatus('idle');
-      setRouteInfo(null);
+      const res = await ambulanceService.markArrived(activeIncident.id);
+      if (res.success) {
+        const arrivedTime = res.arrivedAt || new Date().toISOString();
+        setActiveIncident(prev => prev ? {
+          ...prev,
+          status: 'arrived',
+          arrived_at: arrivedTime,
+          current_speed: 0
+        } : null);
+        setNavigationStatus('arrived');
+        if (locationUpdateInterval.current) {
+          clearInterval(locationUpdateInterval.current);
+        }
+      } else {
+        alert(`Failed to record arrival: ${res.error || 'Server error'}`);
+      }
     } catch (err: any) {
-      alert(`Failed to complete: ${err.message}`);
+      alert(`Failed to complete arrival: ${err.message}`);
+    } finally {
+      setIsArriving(false);
     }
+  };
+
+  const handleReturnToStandby = () => {
+    setActiveIncident(null);
+    setNavigationStatus('idle');
+    setRouteInfo(null);
   };
 
   // 2. Initialize Geolocation for Base Point
@@ -443,7 +483,7 @@ export function AmbulanceDashboard() {
     <AppShell
       userRole="AMBULANCE"
       userName={`${ambulance.name} (${ambulance.vehicleNumber})`}
-      connectionState={realtimeService.getConnectionState()}
+      connectionState={connectionState}
       gpsState={currentGpsState}
       gpsAccuracy={currentAccuracy}
       gpsTimestamp={lastGpsTimestamp ? new Date(lastGpsTimestamp) : null}
@@ -517,8 +557,10 @@ export function AmbulanceDashboard() {
               incident={activeIncident}
               navigationStatus={navigationStatus}
               routeInfo={routeInfo}
+              isArriving={isArriving}
               onAbort={handleAbort}
               onComplete={handleComplete}
+              onStandby={handleReturnToStandby}
               onOpenClinicalAssessment={() => setShowClinicalModal(true)}
             />
           )}
@@ -535,7 +577,7 @@ export function AmbulanceDashboard() {
           )}
 
           {/* Floating Action / Hospital Panel at Bottom Right */}
-          <div className="absolute bottom-6 right-6 z-[1000] flex flex-col gap-4 items-end pointer-events-none">
+          <div className="absolute bottom-3 right-3 sm:bottom-6 sm:right-6 z-[1000] flex flex-col gap-2 sm:gap-4 items-end pointer-events-none max-w-[calc(100vw-24px)]">
             {/* Checkbox */}
             <div className="bg-bg-surface/90 backdrop-blur border border-border-subtle rounded-lg px-3 py-2 pointer-events-auto shadow-lg">
               <label className="flex items-center gap-2 cursor-pointer">

@@ -11,9 +11,56 @@ export function GlobalEmergencyBanner({ userRole, userName }: { userRole?: strin
   const isAmbulance = role === 'AMBULANCE' || role === 'AMBULANCE_OPERATOR';
 
   useEffect(() => {
+    // 1. Authoritative initial load from backend
+    fetch('/api/admin/incidents?status=ACTIVE&limit=10')
+      .then(res => res.ok ? res.json() : null)
+      .then(data => {
+        if (data?.success && Array.isArray(data.incidents)) {
+          const active = data.incidents.find((i: any) => {
+            const statusLower = (i.status || '').toLowerCase();
+            const isActiveState = ['active', 'dispatched', 'en_route', 'rerouting', 'arrived'].includes(statusLower);
+            if (!isActiveState) return false;
+            if (role === 'HOSPITAL' || role === 'HOSPITAL_ER') {
+              return i.destination_hospital === userName;
+            }
+            return true;
+          });
+          if (active) {
+            setActiveEmergency({
+              id: active.id,
+              status: 'ACTIVE',
+              priority: (active.priority || 'CODE_RED').toUpperCase(),
+              ambulanceId: active.ambulance_id || 'UNAVAILABLE',
+              ambulanceDisplayName: active.ambulance_id || 'AERO ALS',
+              hospital: { name: active.destination_hospital || 'Hospital', id: '', address: '', location: { latitude: 0, longitude: 0 }, emergencyCapable: true },
+              patient: {
+                name: active.patient_name || 'Emergency Patient',
+                category: active.incident_type || 'GENERAL',
+                priority: (active.priority || 'CODE_RED').toUpperCase(),
+                chiefComplaint: active.description || 'Emergency dispatch',
+                vitals: { heartRate: 0, bloodPressure: '--/--', spo2: 0, respiratoryRate: 0, gcsScore: 0 }
+              },
+              currentSpeedKmH: active.current_speed || 0,
+              route: {
+                etaSeconds: active.route_duration_seconds || 0,
+                polyline: active.route_geometry || [],
+                distanceMeters: active.route_distance_meters || 0
+              },
+              vehicleNumber: active.ambulance_id || 'UNAVAILABLE',
+              createdAt: active.created_at
+            });
+          } else {
+            setActiveEmergency(null);
+          }
+        }
+      })
+      .catch(() => {});
+
+    // 2. Realtime subscription
     const unsubscribe = realtimeService.on('incidents_updated', (incidents: any[]) => {
       const active = incidents.find(i => {
-        const isActiveState = i.status === 'active' || i.status === 'dispatched' || i.status === 'en_route';
+        const statusLower = (i.status || '').toLowerCase();
+        const isActiveState = ['active', 'dispatched', 'en_route', 'rerouting', 'arrived'].includes(statusLower);
         if (!isActiveState) return false;
         
         if (role === 'HOSPITAL' || role === 'HOSPITAL_ER') {
@@ -25,16 +72,16 @@ export function GlobalEmergencyBanner({ userRole, userName }: { userRole?: strin
         setActiveEmergency({
           id: active.id,
           status: 'ACTIVE',
-          priority: active.priority || 'CODE_RED',
+          priority: (active.priority || 'CODE_RED').toUpperCase(),
           ambulanceId: active.ambulance_id || 'UNAVAILABLE',
           ambulanceDisplayName: active.ambulance_id || 'AERO ALS',
           hospital: { name: active.destination_hospital || 'Hospital', id: '', address: '', location: { latitude: 0, longitude: 0 }, emergencyCapable: true },
           patient: {
             name: active.patient_name || 'Emergency Patient',
             category: active.incident_type || 'GENERAL',
-            priority: active.priority || 'CODE_RED',
+            priority: (active.priority || 'CODE_RED').toUpperCase(),
             chiefComplaint: active.description || 'Emergency dispatch',
-            vitals: { heartRate: 0, bloodPressure: '--/--', spo2: 0, respiratoryRate: 0, gcsScore: 0 } // Live vitals not implemented in DB yet
+            vitals: { heartRate: 0, bloodPressure: '--/--', spo2: 0, respiratoryRate: 0, gcsScore: 0 }
           },
           currentSpeedKmH: active.current_speed || 0,
           route: {
@@ -51,7 +98,7 @@ export function GlobalEmergencyBanner({ userRole, userName }: { userRole?: strin
     });
 
     return () => unsubscribe();
-  }, []);
+  }, [role, userName]);
 
   if (isAmbulance || !activeEmergency || activeEmergency.status === 'COMPLETED' || activeEmergency.status === 'CANCELLED') {
     return null;

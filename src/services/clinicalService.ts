@@ -1,6 +1,8 @@
 import { supabase } from '../lib/supabase';
 
-const API_BASE_URL = (typeof import.meta !== 'undefined' && import.meta.env?.VITE_BACKEND_URL) || 'http://localhost:3001';
+import { getBackendUrl } from './apiConfig';
+
+const API_BASE_URL = getBackendUrl();
 
 export interface ClinicalObservationPayload {
   ambulanceId?: string;
@@ -57,8 +59,17 @@ async function getAuthToken(): Promise<string | null> {
     if (session?.access_token) return session.access_token;
   } catch (e) {}
 
-  // Fallback to role-based local storage tokens for dev/test sessions
   if (typeof window !== 'undefined') {
+    // Check unified AERO session key
+    const unified = localStorage.getItem('aero-auth-session');
+    if (unified) {
+      try {
+        const parsed = JSON.parse(unified);
+        if (parsed.access_token) return parsed.access_token;
+      } catch (e) {}
+    }
+
+    // Fallback to legacy role-based local storage tokens for dev sessions
     const roles = ['ambulance', 'police', 'hospital', 'admin', 'default'];
     for (const r of roles) {
       const stored = localStorage.getItem(`aero-session-${r}`);
@@ -70,7 +81,12 @@ async function getAuthToken(): Promise<string | null> {
       }
     }
   }
-  return 'mock-token-ambulance';
+
+  // Non-production fallback only
+  if (typeof import.meta !== 'undefined' && import.meta.env?.DEV) {
+    return 'mock-token-ambulance';
+  }
+  return null;
 }
 
 export const clinicalService = {

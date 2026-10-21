@@ -548,6 +548,14 @@ export const policeCoordinationEngine = {
     }
 
     const currentStatus = asg.status;
+    if (currentStatus === newStatus) {
+      return {
+        success: true,
+        assignment: asg,
+        auditEntry: null
+      };
+    }
+
     const validNextStates = VALID_TRANSITIONS[currentStatus] || [];
     
     // Validate transition
@@ -555,12 +563,13 @@ export const policeCoordinationEngine = {
       throw new Error(`Invalid state transition: Cannot move assignment from ${currentStatus} to ${newStatus}. Allowed next states: ${validNextStates.join(', ') || 'None (Terminal state)'}`);
     }
 
-    // Role verification
+    // Role verification: Allow assigned officer, any police/traffic role, admin superusers, or ambulances (for PASSED)
     const userRole = (user?.role || user?.user_metadata?.role || '').toLowerCase();
-    const isOwner = asg.police_id && (asg.police_id === user?.id);
-    const isAdmin = ['admin', 'traffic_operator'].includes(userRole);
+    const isOwner = asg.police_id && (asg.police_id === user?.id || asg.police_id === user?.badgeNumber);
+    const isPolice = userRole.includes('police') || userRole.includes('traffic');
+    const isAdmin = ['admin', 'traffic_operator', 'superadmin'].includes(userRole);
 
-    if (!isOwner && !isAdmin && !userRole.includes('ambulance')) {
+    if (!isOwner && !isPolice && !isAdmin && !userRole.includes('ambulance')) {
       // Ambulances can record PASSED when crossing
       if (newStatus === 'PASSED' && (userRole.includes('ambulance') || userRole.includes('driver'))) {
         // permitted
@@ -820,5 +829,106 @@ export const policeCoordinationEngine = {
         availability: 'AVAILABLE'
       }))
     };
+  },
+
+  /**
+   * Cleans up all plans and assignments for an incident (e.g. when incident is nuked)
+   */
+  cleanupIncident(incidentId) {
+    const localStore = loadLocalStore();
+    for (const [planId, plan] of Object.entries(localStore.plans)) {
+      if (plan.incident_id === incidentId) {
+        plan.status = 'CANCELLED';
+      }
+    }
+    for (const [asgId, asg] of Object.entries(localStore.assignments)) {
+      if (asg.incident_id === incidentId) {
+        asg.status = 'CANCELLED';
+      }
+    }
+    saveLocalStore(localStore);
+  },
+
+  /**
+   * Updates coordination plan status (e.g. to CANCELLED)
+   */
+  updatePlanStatus(incidentId, status) {
+    const localStore = loadLocalStore();
+    for (const [planId, plan] of Object.entries(localStore.plans)) {
+      if (plan.incident_id === incidentId) {
+        plan.status = status;
+      }
+    }
+    if (status === 'CANCELLED') {
+      for (const [asgId, asg] of Object.entries(localStore.assignments)) {
+        if (asg.incident_id === incidentId) {
+          asg.status = 'CANCELLED';
+        }
+      }
+    }
+    saveLocalStore(localStore);
+  },
+
+  /**
+   * Retrieves active or completed coordination plan, assignments, and audit history for an incident
+   */
+  getIncidentPlan(incidentId) {
+    const localStore = loadLocalStore();
+    const plans = Object.values(localStore.plans || {})
+      .filter(p => p.incident_id === incidentId)
+      .sort((a, b) => (b.route_version || 1) - (a.route_version || 1));
+    const plan = plans[0] || null;
+    if (!plan) return null;
+
+    const assignments = Object.values(localStore.assignments || {})
+      .filter(a => a.plan_id === plan.id || a.incident_id === incidentId)
+      .sort((a, b) => (a.sequence_order || 0) - (b.sequence_order || 0));
+
+    const auditHistory = (localStore.auditLogs || [])
+      .filter(l => l.incident_id === incidentId);
+
+    return { plan, assignments, auditHistory };
+  },
+
+  /**
+   * Closes active coordination plan when ambulance reaches hospital destination
+   * Preserves checkpoint audit history and records completion
+   */
+  closePlanOnArrival(incidentId) {
+    const localStore = loadLocalStore();
+    const now = new Date().toISOString();
+    let updated = false;
+
+    for (const [planId, plan] of Object.entries(localStore.plans)) {
+      if (plan.incident_id === incidentId) {
+        plan.status = 'COMPLETED';
+        plan.corridor_closed = true;
+        plan.completed_at = now;
+        plan.updated_at = now;
+        updated = true;
+      }
+    }
+    for (const [asgId, asg] of Object.entries(localStore.assignments)) {
+      if (asg.incident_id === incidentId) {
+        asg.corridor_closed = true;
+        asg.closed_at = now;
+        if (asg.status !== 'CLEARANCE_CONFIRMED') {
+          asg.status = 'COMPLETED';
+        }
+        asg.updated_at = now;
+        updated = true;
+      }
+    }
+    if (updated) {
+      localStore.auditLogs.unshift({
+        id: crypto.randomUUID ? crypto.randomUUID() : `audit-${Date.now()}`,
+        incident_id: incidentId,
+        action: 'PLAN_CLOSED_ON_ARRIVAL',
+        actor: 'SYSTEM',
+        timestamp: now,
+        notes: 'Ambulance safely reached hospital; traffic corridor cleared and route coordination closed.'
+      });
+      saveLocalStore(localStore);
+    }
   }
 };

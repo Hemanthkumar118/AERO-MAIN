@@ -22,6 +22,13 @@ const roleLabels: Record<UserRole, string> = {
   ADMIN: 'Control Center Admin',
 };
 
+const roleLabelsShort: Record<UserRole, string> = {
+  AMBULANCE: 'Ambulance',
+  POLICE: 'Police',
+  HOSPITAL: 'Hospital',
+  ADMIN: 'Admin',
+};
+
 const roleBadgeVariant: Record<UserRole, 'info' | 'warning' | 'emergency' | 'neutral'> = {
   AMBULANCE: 'info',
   POLICE: 'warning',
@@ -44,12 +51,12 @@ export function StatusBar({
   const userName = propUserName || profile?.full_name || 'Operator';
 
   return (
-    <header className="relative z-40 h-14 bg-aero-surface border-b border-aero-border flex items-center justify-between px-4 sm:px-6 shrink-0">
+    <header className="relative z-40 h-14 bg-aero-surface border-b border-aero-border flex items-center justify-between px-3 sm:px-6 shrink-0">
       {/* Left: Brand & Role */}
-      <div className="flex items-center gap-3 sm:gap-4">
+      <div className="flex items-center gap-2 sm:gap-4">
         <div
           onClick={() => navigate('/')}
-          className="flex items-center gap-2.5 cursor-pointer hover:opacity-80 transition-opacity"
+          className="flex items-center gap-2 sm:gap-2.5 cursor-pointer hover:opacity-80 transition-opacity"
         >
           {/* AERO Logo Mark */}
           <div className="w-8 h-8 rounded-lg bg-[#EF3B3A] flex items-center justify-center shadow-[0_0_12px_rgba(229,57,53,0.4)]">
@@ -64,9 +71,10 @@ export function StatusBar({
         </div>
 
         {userRole && (
-          <div className="flex items-center ml-2 border-l border-aero-border pl-4">
+          <div className="flex items-center ml-1 sm:ml-2 border-l border-aero-border pl-2 sm:pl-4">
             <Badge variant={roleBadgeVariant[userRole]} size="sm">
-              {roleLabels[userRole]}
+              <span className="hidden sm:inline">{roleLabels[userRole]}</span>
+              <span className="sm:hidden">{roleLabelsShort[userRole]}</span>
             </Badge>
           </div>
         )}

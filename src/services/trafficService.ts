@@ -1,5 +1,6 @@
 import { supabase } from '../lib/supabase';
 import type { Junction, TrafficIncident, TomTomIncident, CongestionSegment, JunctionStatus } from '../types';
+import { getBackendUrl } from './apiConfig';
 
 export const trafficService = {
   async getJunctions(): Promise<Junction[]> {
@@ -69,7 +70,7 @@ export const trafficService = {
    */
   async getTomTomIncidents(params?: { lat?: number; lng?: number; radiusKm?: number; bbox?: string }): Promise<TomTomIncident[]> {
     try {
-      const backendUrl = import.meta.env.VITE_BACKEND_URL || 'http://localhost:3001';
+      const backendUrl = getBackendUrl();
       let url = `${backendUrl}/api/traffic/incidents`;
       const queryParts: string[] = [];
       if (params?.bbox) {

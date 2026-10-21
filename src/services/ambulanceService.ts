@@ -1,4 +1,5 @@
 import { supabase } from '../lib/supabase';
+import { getBackendUrl } from './apiConfig';
 
 import type { Emergency, Hospital, PatientInfo, TrafficIncident, RouteInfo } from '../types';
 
@@ -156,6 +157,21 @@ export const ambulanceService = {
       throw new Error(`Failed to create emergency incident: ${sanitizedMsg}`);
     }
 
+    // Sync authoritative incident to Express backend
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      await fetch(`${getBackendUrl()}/api/incidents/sync`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...(session?.access_token ? { 'Authorization': `Bearer ${session.access_token}` } : {})
+        },
+        body: JSON.stringify(data)
+      });
+    } catch (syncErr) {
+      console.warn('[ambulanceService] Backend incident sync notice:', syncErr);
+    }
+
     return {
       id: data.id,
       status: 'ACTIVE',
@@ -218,14 +234,112 @@ export const ambulanceService = {
   },
 
   async cancelSOS(emergencyId: string) {
-    const { error } = await supabase.from('emergency_incidents').update({ status: 'resolved' }).eq('id', emergencyId);
+    const now = new Date().toISOString();
+    const { error } = await supabase.from('emergency_incidents').update({ status: 'cancelled', resolved_at: now }).eq('id', emergencyId);
     if (error) throw new Error(`Failed to cancel SOS: ${error.message}`);
+
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      await fetch(`${getBackendUrl()}/api/incidents/sync`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...(session?.access_token ? { 'Authorization': `Bearer ${session.access_token}` } : {})
+        },
+        body: JSON.stringify({ id: emergencyId, status: 'cancelled', resolved_at: now })
+      });
+    } catch {}
+
     return { success: true };
   },
 
   async completeSOS(emergencyId: string) {
-    const { error } = await supabase.from('emergency_incidents').update({ status: 'resolved' }).eq('id', emergencyId);
+    const now = new Date().toISOString();
+    const { error } = await supabase.from('emergency_incidents').update({ status: 'resolved', resolved_at: now }).eq('id', emergencyId);
     if (error) throw new Error(`Failed to complete SOS: ${error.message}`);
+
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      await fetch(`${getBackendUrl()}/api/incidents/sync`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...(session?.access_token ? { 'Authorization': `Bearer ${session.access_token}` } : {})
+        },
+        body: JSON.stringify({ id: emergencyId, status: 'resolved', resolved_at: now })
+      });
+    } catch {}
+
     return { success: true };
+  },
+
+  /**
+   * Authoritative arrival transition:
+   * Calls the server endpoint to atomically persist arrival, set server arrived_at,
+   * close police route coordination, and broadcast to all dashboards.
+   */
+  async markArrived(emergencyId: string, notes?: string): Promise<{ success: boolean; incident: any; arrivedAt: string }> {
+    const { data: { session } } = await supabase.auth.getSession();
+    const token = session?.access_token;
+
+    // 1. Authoritative Backend Endpoint Call
+    try {
+      const res = await fetch(`${getBackendUrl()}/api/incidents/${emergencyId}/arrival`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...(token ? { 'Authorization': `Bearer ${token}` } : {})
+        },
+        body: JSON.stringify({ notes })
+      });
+
+      if (res.ok) {
+        const body = await res.json();
+        if (body.success) {
+          return {
+            success: true,
+            incident: body.incident,
+            arrivedAt: body.arrivedAt || body.incident?.arrived_at || new Date().toISOString()
+          };
+        }
+      } else {
+        const errJson = await res.json().catch(() => ({}));
+        if (res.status === 403 || res.status === 400 || res.status === 404) {
+          throw new Error(errJson.error || `Arrival failed with status ${res.status}`);
+        }
+      }
+    } catch (apiErr: any) {
+      if (apiErr.message?.includes('Forbidden') || apiErr.message?.includes('Illegal state transition') || apiErr.message?.includes('not found')) {
+        throw apiErr;
+      }
+      console.warn('[AmbulanceService] Backend arrival endpoint notice, falling back to direct Supabase write:', apiErr.message);
+    }
+
+    // 2. Direct Supabase Fallback (client-only / offline resilience)
+    const now = new Date().toISOString();
+    const { data, error } = await supabase
+      .from('emergency_incidents')
+      .update({
+        status: 'arrived',
+        arrived_at: now,
+        current_speed: 0,
+        route_duration_seconds: 0,
+        traffic_duration_seconds: 0,
+        corridor_status: 'COMPLETED',
+        updated_at: now
+      })
+      .eq('id', emergencyId)
+      .select()
+      .maybeSingle();
+
+    if (error) {
+      throw new Error(`Failed to record arrival in database: ${error.message}`);
+    }
+
+    return {
+      success: true,
+      incident: data || { id: emergencyId, status: 'arrived', arrived_at: now },
+      arrivedAt: now
+    };
   },
 };

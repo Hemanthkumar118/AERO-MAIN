@@ -103,6 +103,20 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     let mounted = true;
 
+    // Immediately restore session from unified storage if available
+    supabase.auth.getSession().then(async (res: any) => {
+      if (!mounted) return;
+      const existingSession = res.data?.session;
+      if (existingSession?.user) {
+        setSession(existingSession);
+        setUser(existingSession.user);
+        await fetchProfile(existingSession.user);
+      }
+      setAuthLoading(false);
+    }).catch(() => {
+      if (mounted) setAuthLoading(false);
+    });
+
     const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event: AuthChangeEvent, newSession: Session | null) => {
       if (!mounted) return;
       
@@ -110,7 +124,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       setUser(newSession?.user ?? null);
       
       if (newSession?.user) {
-        // Fetch profile on initial load, sign in, or user update
         if (event === 'INITIAL_SESSION' || event === 'SIGNED_IN' || event === 'USER_UPDATED') {
           await fetchProfile(newSession.user);
         }

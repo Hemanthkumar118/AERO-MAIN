@@ -47,6 +47,7 @@ export function HospitalDashboard() {
   const [hospital, setHospital] = useState<Hospital | null>(null);
   const [incomingEmergencies, setIncomingEmergencies] = useState<Emergency[]>([]);
   const [selectedEmergency, setSelectedEmergency] = useState<Emergency | null>(null);
+  const [mobileTab, setMobileTab] = useState<'map' | 'details'>('map');
   const [readinessState, setReadinessState] = useState<HospitalReadinessState | null>(null);
   const [isLoadingReadiness, setIsLoadingReadiness] = useState<boolean>(false);
   const [isConfirmingReadiness, setIsConfirmingReadiness] = useState<boolean>(false);
@@ -173,7 +174,8 @@ export function HospitalDashboard() {
         )
         .map(i => {
           const patient = parsePatientData(i);
-          const activeDuration = i.traffic_duration_seconds != null ? i.traffic_duration_seconds : i.route_duration_seconds;
+          const isArrived = (i.status || '').toLowerCase() === 'arrived';
+          const activeDuration = isArrived ? 0 : (i.traffic_duration_seconds != null ? i.traffic_duration_seconds : i.route_duration_seconds);
           return {
             id: i.id,
             status: (i.status || 'ACTIVE').toUpperCase(),
@@ -184,23 +186,26 @@ export function HospitalDashboard() {
             vehicleNumber: i.ambulance_id || 'UNAVAILABLE',
             hospital: hospital,
             patient,
-            currentSpeedKmH: i.current_speed != null ? Math.round(i.current_speed) : undefined,
+            currentSpeedKmH: isArrived ? 0 : (i.current_speed != null ? Math.round(i.current_speed) : undefined),
             route: {
               etaSeconds: activeDuration,
-              trafficAwareEtaSeconds: i.traffic_duration_seconds,
+              trafficAwareEtaSeconds: isArrived ? 0 : i.traffic_duration_seconds,
               isTrafficAware: i.traffic_status === 'LIVE' || i.route_provider === 'tomtom',
-              trafficDelaySeconds: (i.traffic_duration_seconds && i.route_duration_seconds)
+              trafficDelaySeconds: (i.traffic_duration_seconds && i.route_duration_seconds && !isArrived)
                 ? Math.max(0, i.traffic_duration_seconds - i.route_duration_seconds)
                 : 0,
               routeProvider: i.route_provider || 'tomtom',
               polyline: i.route_geometry || [],
-              distanceMeters: i.route_distance_meters || 0
+              distanceMeters: isArrived ? 0 : (i.route_distance_meters || 0)
             },
-            route_duration_seconds: i.route_duration_seconds,
-            traffic_duration_seconds: i.traffic_duration_seconds,
+            route_duration_seconds: isArrived ? 0 : i.route_duration_seconds,
+            traffic_duration_seconds: isArrived ? 0 : i.traffic_duration_seconds,
             isTrafficAware: i.traffic_status === 'LIVE' || i.route_provider === 'tomtom',
             route_provider: i.route_provider || 'tomtom',
-            createdAt: i.created_at
+            createdAt: i.created_at,
+            arrivedAt: i.arrived_at,
+            arrived_at: i.arrived_at,
+            hospital_status: i.hospital_status
           } as Emergency;
         });
 
@@ -575,9 +580,41 @@ export function HospitalDashboard() {
   return (
     <AppShell userRole="HOSPITAL" userName={hospital.name} connectionState={connectionState}>
       <div className="flex flex-col lg:flex-row h-full overflow-hidden bg-[#07090C] text-slate-100">
+        {/* Mobile View Switcher (lg:hidden) */}
+        <div className="lg:hidden flex items-center justify-around bg-[#0D111A] border-b border-[#1E293B] p-2 shrink-0 z-30">
+          <button
+            onClick={() => setMobileTab('map')}
+            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+              mobileTab === 'map'
+                ? 'bg-cyan-500/20 text-cyan-400 border border-cyan-500/40 shadow-sm'
+                : 'text-slate-400 hover:text-white'
+            }`}
+          >
+            <span>Live Map & Queue</span>
+            {incomingEmergencies.length > 0 && (
+              <span className="w-4 h-4 rounded-full bg-cyan-500 text-black text-[10px] flex items-center justify-center font-bold">
+                {incomingEmergencies.length}
+              </span>
+            )}
+          </button>
+
+          <button
+            onClick={() => setMobileTab('details')}
+            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer relative ${
+              mobileTab === 'details'
+                ? 'bg-red-500/20 text-red-400 border border-red-500/40 shadow-sm'
+                : 'text-slate-400 hover:text-white'
+            }`}
+          >
+            <span>ER Triage & Prep</span>
+            {selectedEmergency && (
+              <span className="w-2 h-2 rounded-full bg-red-400 animate-pulse"></span>
+            )}
+          </button>
+        </div>
         
         {/* Left Side: Map & Incoming Ambulances Stream */}
-        <div className="flex-1 flex flex-col min-h-0 border-r border-[#1E293B]">
+        <div className={`flex-1 flex-col min-h-0 border-r border-[#1E293B] ${mobileTab === 'map' ? 'flex' : 'hidden lg:flex'}`}>
           
           {/* Top ER Header Status Bar */}
           <div className="relative z-30 bg-[#0D111A] px-4 py-3 border-b border-[#1E293B] flex items-center justify-between shrink-0 shadow-sm">
@@ -696,15 +733,30 @@ export function HospitalDashboard() {
                 animate={{ scale: 1, opacity: 1 }}
                 className="absolute top-4 left-4 z-30 bg-[#0D111A]/95 backdrop-blur-md border border-[#1E293B] rounded-xl p-3 shadow-xl flex items-center gap-3.5 max-w-sm"
               >
-                <div className="w-9 h-9 rounded-lg bg-red-500/10 border border-red-500/25 flex items-center justify-center text-lg shrink-0">
-                  🚑
+                <div className={`w-9 h-9 rounded-lg flex items-center justify-center text-lg shrink-0 ${
+                  selectedEmergency.status === 'ARRIVED'
+                    ? 'bg-emerald-500/10 border border-emerald-500/30'
+                    : 'bg-red-500/10 border border-red-500/25'
+                }`}>
+                  {selectedEmergency.status === 'ARRIVED' ? '🏥' : '🚑'}
                 </div>
                 <div>
                   <div className="flex items-center gap-1.5 flex-wrap">
-                    <span className="text-[10px] font-bold text-red-400 uppercase tracking-wider">
-                      INCOMING UNIT
-                    </span>
-                    {selectedEmergency.isTrafficAware ? (
+                    {selectedEmergency.status === 'ARRIVED' ? (
+                      <span className="text-[10px] font-bold text-emerald-400 uppercase tracking-wider flex items-center gap-1">
+                        <CheckCircle2 className="w-3 h-3 text-emerald-400" />
+                        AMBULANCE AT ER BAY
+                      </span>
+                    ) : (
+                      <span className="text-[10px] font-bold text-red-400 uppercase tracking-wider">
+                        INCOMING UNIT
+                      </span>
+                    )}
+                    {selectedEmergency.status === 'ARRIVED' ? (
+                      <span className="text-[8px] bg-emerald-500/15 text-emerald-400 px-1 py-0.5 rounded border border-emerald-500/25 font-bold tracking-wider">
+                        PERSISTED ARRIVAL
+                      </span>
+                    ) : selectedEmergency.isTrafficAware ? (
                       <span className="text-[8px] bg-emerald-500/15 text-emerald-400 px-1 py-0.5 rounded border border-emerald-500/25 font-bold tracking-wider">
                         TOMTOM LIVE TRAFFIC
                       </span>
@@ -714,14 +766,25 @@ export function HospitalDashboard() {
                       </span>
                     )}
                   </div>
-                  <div className="text-lg font-bold font-mono text-slate-100 tabular-nums">
-                    {etaMinutes != null && etaSecondsDisplay != null 
-                      ? `${etaMinutes}m ${etaSecondsDisplay.toString().padStart(2, '0')}s` 
-                      : 'ETA CALCULATING...'}
-                    <span className="text-xs font-medium text-slate-400 ml-2 font-sans">
-                      ({selectedEmergency.currentSpeedKmH != null ? `${selectedEmergency.currentSpeedKmH} km/h` : 'Telemetry active'})
-                    </span>
-                  </div>
+                  {selectedEmergency.status === 'ARRIVED' ? (
+                    <div className="text-base font-bold text-emerald-400 font-mono">
+                      ARRIVED AT BAY
+                      <span className="text-xs font-normal text-slate-400 ml-2 font-sans">
+                        {selectedEmergency.arrivedAt || selectedEmergency.arrived_at
+                          ? `(${new Date(selectedEmergency.arrivedAt || selectedEmergency.arrived_at!).toLocaleTimeString()})`
+                          : '(Vehicle parked)'}
+                      </span>
+                    </div>
+                  ) : (
+                    <div className="text-lg font-bold font-mono text-slate-100 tabular-nums">
+                      {etaMinutes != null && etaSecondsDisplay != null 
+                        ? `${etaMinutes}m ${etaSecondsDisplay.toString().padStart(2, '0')}s` 
+                        : 'ETA CALCULATING...'}
+                      <span className="text-xs font-medium text-slate-400 ml-2 font-sans">
+                        ({selectedEmergency.currentSpeedKmH != null ? `${selectedEmergency.currentSpeedKmH} km/h` : 'Telemetry active'})
+                      </span>
+                    </div>
+                  )}
                 </div>
               </motion.div>
             )}
@@ -749,8 +812,11 @@ export function HospitalDashboard() {
                   return (
                     <button
                       key={emg.id}
-                      onClick={() => setSelectedEmergency(emg)}
-                      className={`px-3 py-2 rounded-lg border text-left transition-all shrink-0 min-w-[210px] max-w-[260px] ${
+                      onClick={() => {
+                        setSelectedEmergency(emg);
+                        setMobileTab('details');
+                      }}
+                      className={`px-3 py-2 rounded-lg border text-left transition-all shrink-0 min-w-[210px] max-w-[260px] cursor-pointer ${
                         isSelected
                           ? 'bg-[#131826] border-red-500/50 shadow-md ring-1 ring-red-500/20'
                           : 'bg-[#07090C] border-[#1E293B] hover:border-slate-600'
@@ -766,9 +832,13 @@ export function HospitalDashboard() {
                         {complaint}
                       </p>
                       <div className="flex items-center justify-between text-[10px] text-slate-500 mt-1.5 pt-1 border-t border-[#1E293B]">
-                        <span>Status: <strong className="text-slate-300 font-semibold">{emg.status}</strong></span>
+                        <span>Status: <strong className={emg.status === 'ARRIVED' ? 'text-emerald-400 font-bold' : 'text-slate-300 font-semibold'}>{emg.status}</strong></span>
                         <span className="font-mono text-slate-400">
-                          {emg.route?.etaSeconds != null ? `${Math.round(emg.route.etaSeconds / 60)}m ETA` : ''}
+                          {emg.status === 'ARRIVED' ? (
+                            <span className="text-emerald-400 font-bold">AT ER BAY</span>
+                          ) : emg.route?.etaSeconds != null ? (
+                            `${Math.round(emg.route.etaSeconds / 60)}m ETA`
+                          ) : ''}
                         </span>
                       </div>
                     </button>
@@ -780,7 +850,9 @@ export function HospitalDashboard() {
         </div>
 
         {/* Right Side: Patient Triage & Hospital Preparation Checklist */}
-        <div className="w-full lg:w-[460px] bg-[#07090C] flex flex-col shrink-0 overflow-y-auto p-4 space-y-4 border-l border-[#1E293B]">
+        <div className={`w-full lg:w-[460px] bg-[#07090C] flex-col shrink-0 overflow-y-auto p-3 sm:p-4 space-y-4 border-l border-[#1E293B] ${
+          mobileTab === 'details' ? 'flex flex-1' : 'hidden lg:flex'
+        }`}>
           
           <AnimatePresence mode="wait">
             {selectedEmergency ? (
@@ -1050,113 +1122,122 @@ export function HospitalDashboard() {
                   </div>
 
                   {/* 4 Sequential Lifecycle Steps */}
-                  <div className="grid grid-cols-2 gap-2">
-                    {/* Step 1: Acknowledge */}
-                    <button
-                      onClick={() => handleUpdateHospitalLifecycle('ACCEPTED', 'Acknowledge Incoming Emergency')}
-                      disabled={statusActionLoading !== null || ['ACCEPTED', 'READY', 'ARRIVED', 'RESOLVED'].includes(selectedEmergency.status)}
-                      className={`p-2.5 rounded-lg border text-left flex flex-col justify-between transition-all ${
-                        ['ACCEPTED', 'READY', 'ARRIVED', 'RESOLVED'].includes(selectedEmergency.status)
-                          ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-400 cursor-default'
-                          : 'bg-[#131826] border-[#1E293B] hover:border-blue-500 text-slate-200 cursor-pointer'
-                      }`}
-                    >
-                      <div className="flex items-center justify-between text-[11px] font-bold">
-                        <span>1. Acknowledge Alert</span>
-                        {['ACCEPTED', 'READY', 'ARRIVED', 'RESOLVED'].includes(selectedEmergency.status) ? (
-                          <Check className="w-3.5 h-3.5" />
-                        ) : statusActionLoading === 'ACCEPTED' ? (
-                          <Activity className="w-3.5 h-3.5 animate-spin text-blue-400" />
-                        ) : (
-                          <ArrowRight className="w-3.5 h-3.5 text-blue-400" />
-                        )}
-                      </div>
-                      <span className="text-[9px] text-slate-400 mt-1">
-                        {['ACCEPTED', 'READY', 'ARRIVED', 'RESOLVED'].includes(selectedEmergency.status) ? 'Confirmed by ER desk' : 'Confirm incoming reception'}
-                      </span>
-                    </button>
+                  {(() => {
+                    const isAcknowledged = ['ACCEPTED', 'READY'].includes(selectedEmergency.hospital_status || '') || 
+                      ['ACCEPTED', 'READY'].includes((selectedEmergency as any).hospitalStatus || '');
+                    const isArrived = ['ARRIVED', 'arrived'].includes(selectedEmergency.status.toLowerCase());
+                    const isResolved = (selectedEmergency.status as string) === 'RESOLVED';
 
-                    {/* Step 2: Bay Ready */}
-                    <button
-                      onClick={handleConfirmReadiness}
-                      disabled={statusActionLoading !== null || isConfirmedReady || isConfirmingReadiness}
-                      className={`p-2.5 rounded-lg border text-left flex flex-col justify-between transition-all ${
-                        isConfirmedReady || ['READY', 'ARRIVED', 'RESOLVED'].includes(selectedEmergency.status)
-                          ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-400 cursor-default'
-                          : allMandatoryReady
-                            ? 'bg-blue-500/10 border-blue-500/30 hover:border-blue-400 text-blue-200 cursor-pointer'
-                            : 'bg-[#131826] border-[#1E293B] text-slate-400 cursor-pointer'
-                      }`}
-                    >
-                      <div className="flex items-center justify-between text-[11px] font-bold">
-                        <span>2. Confirm Bay Ready</span>
-                        {isConfirmedReady || ['READY', 'ARRIVED', 'RESOLVED'].includes(selectedEmergency.status) ? (
-                          <Check className="w-3.5 h-3.5" />
-                        ) : isConfirmingReadiness ? (
-                          <Activity className="w-3.5 h-3.5 animate-spin text-emerald-400" />
-                        ) : (
-                          <ShieldCheck className="w-3.5 h-3.5 text-emerald-400" />
-                        )}
-                      </div>
-                      <span className="text-[9px] text-slate-400 mt-1">
-                        {isConfirmedReady ? 'Bay primed & team alerted' : allMandatoryReady ? 'Ready for confirmation' : 'Requires checklist ready'}
-                      </span>
-                    </button>
+                    return (
+                      <div className="grid grid-cols-2 gap-2">
+                        {/* Step 1: Acknowledge */}
+                        <button
+                          onClick={() => handleUpdateHospitalLifecycle('ACCEPTED', 'Acknowledge Incoming Emergency')}
+                          disabled={statusActionLoading !== null || isAcknowledged || isResolved}
+                          className={`p-2.5 rounded-lg border text-left flex flex-col justify-between transition-all ${
+                            isAcknowledged || isResolved
+                              ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-400 cursor-default'
+                              : 'bg-[#131826] border-[#1E293B] hover:border-blue-500 text-slate-200 cursor-pointer'
+                          }`}
+                        >
+                          <div className="flex items-center justify-between text-[11px] font-bold">
+                            <span>1. Acknowledge Alert</span>
+                            {isAcknowledged || isResolved ? (
+                              <Check className="w-3.5 h-3.5" />
+                            ) : statusActionLoading === 'ACCEPTED' ? (
+                              <Activity className="w-3.5 h-3.5 animate-spin text-blue-400" />
+                            ) : (
+                              <ArrowRight className="w-3.5 h-3.5 text-blue-400" />
+                            )}
+                          </div>
+                          <span className="text-[9px] text-slate-400 mt-1">
+                            {isAcknowledged || isResolved ? 'Confirmed by ER desk' : 'Confirm incoming reception'}
+                          </span>
+                        </button>
 
-                    {/* Step 3: Arrived */}
-                    <button
-                      onClick={() => handleUpdateHospitalLifecycle('arrived', 'Confirm Ambulance Bay Arrival')}
-                      disabled={statusActionLoading !== null || ['ARRIVED', 'RESOLVED'].includes(selectedEmergency.status)}
-                      className={`p-2.5 rounded-lg border text-left flex flex-col justify-between transition-all ${
-                        ['ARRIVED', 'RESOLVED'].includes(selectedEmergency.status)
-                          ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-400 cursor-default'
-                          : ['ACCEPTED', 'READY'].includes(selectedEmergency.status)
-                            ? 'bg-[#131826] border-[#1E293B] hover:border-purple-500 text-slate-200 cursor-pointer'
-                            : 'bg-[#131826]/50 border-[#1E293B] text-slate-500 cursor-not-allowed'
-                      }`}
-                    >
-                      <div className="flex items-center justify-between text-[11px] font-bold">
-                        <span>3. Ambulance Arrival</span>
-                        {['ARRIVED', 'RESOLVED'].includes(selectedEmergency.status) ? (
-                          <Check className="w-3.5 h-3.5" />
-                        ) : statusActionLoading === 'arrived' ? (
-                          <Activity className="w-3.5 h-3.5 animate-spin text-purple-400" />
-                        ) : (
-                          <Radio className="w-3.5 h-3.5 text-purple-400" />
-                        )}
-                      </div>
-                      <span className="text-[9px] text-slate-400 mt-1">
-                        {['ARRIVED', 'RESOLVED'].includes(selectedEmergency.status) ? 'Vehicle at bay' : 'Mark arrival at bay'}
-                      </span>
-                    </button>
+                        {/* Step 2: Bay Ready */}
+                        <button
+                          onClick={handleConfirmReadiness}
+                          disabled={statusActionLoading !== null || isConfirmedReady || isConfirmingReadiness || isResolved}
+                          className={`p-2.5 rounded-lg border text-left flex flex-col justify-between transition-all ${
+                            isConfirmedReady || isResolved
+                              ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-400 cursor-default'
+                              : allMandatoryReady
+                                ? 'bg-blue-500/10 border-blue-500/30 hover:border-blue-400 text-blue-200 cursor-pointer'
+                                : 'bg-[#131826] border-[#1E293B] text-slate-400 cursor-pointer'
+                          }`}
+                        >
+                          <div className="flex items-center justify-between text-[11px] font-bold">
+                            <span>2. Confirm Bay Ready</span>
+                            {isConfirmedReady || isResolved ? (
+                              <Check className="w-3.5 h-3.5" />
+                            ) : isConfirmingReadiness ? (
+                              <Activity className="w-3.5 h-3.5 animate-spin text-emerald-400" />
+                            ) : (
+                              <ShieldCheck className="w-3.5 h-3.5 text-emerald-400" />
+                            )}
+                          </div>
+                          <span className="text-[9px] text-slate-400 mt-1">
+                            {isConfirmedReady ? 'Bay primed & team alerted' : allMandatoryReady ? 'Ready for confirmation' : 'Requires checklist ready'}
+                          </span>
+                        </button>
 
-                    {/* Step 4: Handover */}
-                    <button
-                      onClick={() => handleUpdateHospitalLifecycle('resolved', 'Complete Clinical Handover & Transfer')}
-                      disabled={statusActionLoading !== null || (selectedEmergency.status as string) === 'RESOLVED' || !['ARRIVED', 'arrived'].includes(selectedEmergency.status.toLowerCase())}
-                      className={`p-2.5 rounded-lg border text-left flex flex-col justify-between transition-all ${
-                        (selectedEmergency.status as string) === 'RESOLVED'
-                          ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-400 cursor-default'
-                          : ['ARRIVED', 'arrived'].includes(selectedEmergency.status.toLowerCase())
-                            ? 'bg-amber-500/10 border-amber-500/30 hover:border-amber-400 text-amber-200 cursor-pointer'
-                            : 'bg-[#131826]/50 border-[#1E293B] text-slate-500 cursor-not-allowed'
-                      }`}
-                    >
-                      <div className="flex items-center justify-between text-[11px] font-bold">
-                        <span>4. Complete Handover</span>
-                        {(selectedEmergency.status as string) === 'RESOLVED' ? (
-                          <Check className="w-3.5 h-3.5" />
-                        ) : statusActionLoading === 'resolved' ? (
-                          <Activity className="w-3.5 h-3.5 animate-spin text-amber-400" />
-                        ) : (
-                          <FileText className="w-3.5 h-3.5 text-amber-400" />
-                        )}
+                        {/* Step 3: Arrived */}
+                        <button
+                          onClick={() => handleUpdateHospitalLifecycle('arrived', 'Confirm Ambulance Bay Arrival')}
+                          disabled={statusActionLoading !== null || isArrived || isResolved}
+                          className={`p-2.5 rounded-lg border text-left flex flex-col justify-between transition-all ${
+                            isArrived || isResolved
+                              ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-400 cursor-default'
+                              : isAcknowledged
+                                ? 'bg-[#131826] border-[#1E293B] hover:border-purple-500 text-slate-200 cursor-pointer'
+                                : 'bg-[#131826]/50 border-[#1E293B] text-slate-500 cursor-not-allowed'
+                          }`}
+                        >
+                          <div className="flex items-center justify-between text-[11px] font-bold">
+                            <span>3. Ambulance Arrival</span>
+                            {isArrived || isResolved ? (
+                              <Check className="w-3.5 h-3.5" />
+                            ) : statusActionLoading === 'arrived' ? (
+                              <Activity className="w-3.5 h-3.5 animate-spin text-purple-400" />
+                            ) : (
+                              <Radio className="w-3.5 h-3.5 text-purple-400" />
+                            )}
+                          </div>
+                          <span className="text-[9px] text-slate-400 mt-1">
+                            {isArrived || isResolved ? 'Vehicle at bay (Confirmed)' : 'Mark arrival at bay'}
+                          </span>
+                        </button>
+
+                        {/* Step 4: Handover */}
+                        <button
+                          onClick={() => handleUpdateHospitalLifecycle('resolved', 'Complete Clinical Handover & Transfer')}
+                          disabled={statusActionLoading !== null || isResolved || !isArrived}
+                          className={`p-2.5 rounded-lg border text-left flex flex-col justify-between transition-all ${
+                            isResolved
+                              ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-400 cursor-default'
+                              : isArrived
+                                ? 'bg-amber-500/10 border-amber-500/30 hover:border-amber-400 text-amber-200 cursor-pointer'
+                                : 'bg-[#131826]/50 border-[#1E293B] text-slate-500 cursor-not-allowed'
+                          }`}
+                        >
+                          <div className="flex items-center justify-between text-[11px] font-bold">
+                            <span>4. Complete Handover</span>
+                            {isResolved ? (
+                              <Check className="w-3.5 h-3.5" />
+                            ) : statusActionLoading === 'resolved' ? (
+                              <Activity className="w-3.5 h-3.5 animate-spin text-amber-400" />
+                            ) : (
+                              <FileText className="w-3.5 h-3.5 text-amber-400" />
+                            )}
+                          </div>
+                          <span className="text-[9px] text-slate-400 mt-1">
+                            {isResolved ? 'Care transferred' : isArrived ? 'Ready for transfer' : 'Awaiting arrival at bay'}
+                          </span>
+                        </button>
                       </div>
-                      <span className="text-[9px] text-slate-400 mt-1">
-                        {(selectedEmergency.status as string) === 'RESOLVED' ? 'Care transferred' : 'Sign off patient transfer'}
-                      </span>
-                    </button>
-                  </div>
+                    );
+                  })()}
                 </div>
 
                 {/* 4. Database-Backed ER Preparation Checklist */}

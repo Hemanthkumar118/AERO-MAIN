@@ -1,5 +1,6 @@
 import type { RouteInfo, LatLng } from '../types';
 import { routingService } from './routingService';
+import { getBackendUrl } from './apiConfig';
 
 export interface TrafficRoutingOptions {
   provider?: 'tomtom' | 'google' | 'ors' | 'osrm';
@@ -61,7 +62,7 @@ export class TrafficAwareRoutingProvider {
     const provider = options.provider || configuredProvider;
 
     try {
-      const backendUrl = import.meta.env.VITE_BACKEND_URL || 'http://localhost:3001';
+      const backendUrl = getBackendUrl();
       const response = await fetch(`${backendUrl}/api/route/calculate`, {
         method: 'POST',
         headers: {

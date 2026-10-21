@@ -3,6 +3,7 @@ import { supabase } from '../../../lib/supabase';
 import { PageHeader as Header } from '../../../components/layout/PageHeader';
 import { Button } from '../../../components/ui/Button';
 import { Input } from '../../../components/ui/Input';
+import { getRemainingCooldown, setCooldown } from '../../../utils/authCooldown';
 
 interface UserData {
   email?: string;
@@ -108,6 +109,11 @@ export function SecurityPrivacyPage() {
 
   const handleResendVerification = async () => {
     if (!userData?.email) return;
+    const remaining = getRemainingCooldown('resend_confirmation');
+    if (remaining > 0) {
+      showBanner('error', `Please wait ${remaining}s before requesting another verification email.`);
+      return;
+    }
     try {
       showBanner('info', 'Sending verification email...', 0);
       const { error } = await supabase.auth.resend({
@@ -121,6 +127,7 @@ export function SecurityPrivacyPage() {
         if (error.status === 429) throw new Error('Too many requests. Please wait before trying again.');
         throw error;
       }
+      setCooldown('resend_confirmation', 60);
       showBanner('success', 'Verification email sent. Please check your inbox.');
     } catch (error: any) {
       console.error(error);

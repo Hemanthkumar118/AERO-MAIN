@@ -1,4 +1,5 @@
 import type { NormalizedHospital } from './types';
+import { getBackendUrl } from '../apiConfig';
 
 /**
  * Discovers nearby hospitals using TomTom Places/POI Search API via backend proxy
@@ -11,7 +12,7 @@ export async function searchTomTomHospitals(
   query?: string
 ): Promise<NormalizedHospital[]> {
   try {
-    const backendUrl = import.meta.env.VITE_BACKEND_URL || 'http://localhost:3001';
+    const backendUrl = getBackendUrl();
     let url = `${backendUrl}/api/places/hospitals?lat=${lat}&lng=${lng}&radius=${radiusMeters}`;
     if (query && query.trim()) {
       url += `&query=${encodeURIComponent(query.trim())}`;

@@ -1,6 +1,7 @@
 import type { RouteInfo, LatLng } from '../types';
 import { routingService } from './routingService';
 import { ROUTING_CONFIG } from './routingConfig';
+import { getBackendUrl } from './apiConfig';
 
 export interface RoutingOptions {
   provider?: 'tomtom' | 'ors' | 'osrm';
@@ -59,7 +60,7 @@ export class RoutingProvider {
     const provider = options.provider || ROUTING_CONFIG.PRIMARY_PROVIDER;
 
     try {
-      const backendUrl = import.meta.env.VITE_BACKEND_URL || 'http://localhost:3001';
+      const backendUrl = getBackendUrl();
       const response = await fetch(`${backendUrl}/api/route/calculate`, {
         method: 'POST',
         headers: {

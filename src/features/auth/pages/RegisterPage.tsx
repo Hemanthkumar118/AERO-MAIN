@@ -1,12 +1,15 @@
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect, useMemo, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Drawer } from '../../../components/ui/Drawer';
 import { EmergencyProtocolContent, TermsOfServiceContent } from '../../public/components/LegalContent';
 import { supabase } from '../../../lib/supabase';
+import { validateEmailAddress } from '../../../utils/emailValidation';
+import { getRemainingCooldown, setCooldown } from '../../../utils/authCooldown';
 import { hospitalService } from '../../../services/hospitalService';
 import { geolocationService } from '../../../services/geolocationService';
-import { discoverHospitals, autocompleteGooglePlaces, getGooglePlaceDetails } from '../../../services/hospitalSearch';
+import { discoverHospitals } from '../../../services/hospitalSearch';
+import { searchTomTomHospitals } from '../../../services/hospitalSearch/tomtomProvider';
 import type { Hospital } from '../../../types';
 import type { NormalizedHospital } from '../../../services/hospitalSearch/types';
 
@@ -30,6 +33,12 @@ export function RegisterPage({ onRegister }: RegisterPageProps) {
   const [agreed, setAgreed] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState('');
+  const [isRegistrationComplete, setIsRegistrationComplete] = useState(false);
+  const [registeredEmail, setRegisteredEmail] = useState('');
+  const [resendCooldown, setResendCooldown] = useState(() => getRemainingCooldown('resend_confirmation'));
+  const [isResending, setIsResending] = useState(false);
+  const [resendMessage, setResendMessage] = useState<string | null>(null);
+  const [resendError, setResendError] = useState<string | null>(null);
   const [mapHospitals, setMapHospitals] = useState<NormalizedHospital[]>([]);
   const [searchRadius, setSearchRadius] = useState(5000);
   const [_isSearchingRadius, setIsSearchingRadius] = useState(false);
@@ -38,37 +47,123 @@ export function RegisterPage({ onRegister }: RegisterPageProps) {
   const [legalDrawerOpen, setLegalDrawerOpen] = useState(false);
   const [legalDrawerType, setLegalDrawerType] = useState<'protocol' | 'terms'>('protocol');
 
-  // Combobox state
+  // Live countdown timer for resend cooldown
+  useEffect(() => {
+    const timer = setInterval(() => {
+      setResendCooldown(getRemainingCooldown('resend_confirmation'));
+    }, 1000);
+    return () => clearInterval(timer);
+  }, []);
+
+  const handleResendFromRegister = async () => {
+    if (!registeredEmail) return;
+    const remaining = getRemainingCooldown('resend_confirmation');
+    if (remaining > 0) {
+      setResendError(`Please wait ${remaining}s before requesting another confirmation email.`);
+      return;
+    }
+    setIsResending(true);
+    setResendMessage(null);
+    setResendError(null);
+    try {
+      const redirectUrl = `${window.location.origin}/auth/callback`;
+      const { error: resendErr } = await supabase.auth.resend({
+        type: 'signup',
+        email: registeredEmail,
+        options: {
+          emailRedirectTo: redirectUrl,
+        }
+      });
+      if (resendErr) {
+        if (resendErr.message?.toLowerCase().includes('rate limit')) {
+          setResendError('Email rate limit reached. Please wait a moment before requesting another confirmation email.');
+        } else {
+          setResendError(resendErr.message || 'Failed to resend confirmation email.');
+        }
+      } else {
+        setCooldown('resend_confirmation', 60);
+        setResendCooldown(60);
+        setResendMessage(`Confirmation email resent to ${registeredEmail}! Please check your inbox and spam folder.`);
+      }
+    } catch (err: any) {
+      setResendError(err.message || 'Error sending confirmation email.');
+    } finally {
+      setIsResending(false);
+    }
+  };
+
+  // Combobox & Search state
   const [hospitalSearchTerm, setHospitalSearchTerm] = useState('');
   const [isDropdownOpen, setIsDropdownOpen] = useState(false);
-  
-  const [userLocation, setUserLocation] = useState<[number, number]>([17.44, 78.34]);
-  const [autocompleteResults, setAutocompleteResults] = useState<any[]>([]);
-  const [autocompleteLoading, setAutocompleteLoading] = useState(false);
-  const [fetchingDetailsId, setFetchingDetailsId] = useState<string | null>(null);
+  const [searchResults, setSearchResults] = useState<NormalizedHospital[]>([]);
+  const [searchLoading, setSearchLoading] = useState(false);
+  const [searchError, setSearchError] = useState('');
+  const [selectedIndex, setSelectedIndex] = useState(-1);
+  const [selectedHospitalObj, setSelectedHospitalObj] = useState<NormalizedHospital | Hospital | null>(null);
 
-  // Debounce autocomplete search
+  const [userLocation, setUserLocation] = useState<[number, number]>([17.44, 78.34]);
+  const searchAbortRef = useRef<AbortController | null>(null);
+  const searchInputRef = useRef<HTMLInputElement>(null);
+  const containerRef = useRef<HTMLDivElement>(null);
+
+  // Close dropdown when clicking outside
   useEffect(() => {
-    if (!hospitalSearchTerm.trim()) {
-      setAutocompleteResults([]);
+    const handleClickOutside = (e: MouseEvent) => {
+      if (containerRef.current && !containerRef.current.contains(e.target as Node)) {
+        setIsDropdownOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, []);
+
+  // Debounced search for hospital facilities (Apollo, KIMS, Yashoda, CARE, etc.)
+  useEffect(() => {
+    const trimmed = hospitalSearchTerm.trim();
+    if (trimmed.length < 2) {
+      setSearchResults([]);
+      setSearchLoading(false);
+      setSearchError('');
+      setSelectedIndex(-1);
       return;
     }
 
-    const handler = setTimeout(async () => {
-      setAutocompleteLoading(true);
-      try {
-        const results = await autocompleteGooglePlaces(hospitalSearchTerm, userLocation[0], userLocation[1], 50000);
-        setAutocompleteResults(results);
-      } catch (err) {
-        console.error("Autocomplete failed:", err);
-        setAutocompleteResults([]);
-      } finally {
-        setAutocompleteLoading(false);
-      }
-    }, 400);
+    if (searchAbortRef.current) {
+      searchAbortRef.current.abort();
+    }
+    const controller = new AbortController();
+    searchAbortRef.current = controller;
 
-    return () => clearTimeout(handler);
-  }, [hospitalSearchTerm, userLocation]);
+    setSearchLoading(true);
+    setSearchError('');
+    setSelectedIndex(-1);
+
+    const handler = setTimeout(async () => {
+      try {
+        const results = await searchTomTomHospitals(
+          userLocation[0],
+          userLocation[1],
+          searchRadius,
+          controller.signal,
+          trimmed
+        );
+        if (!controller.signal.aborted) {
+          setSearchResults(results);
+          setSearchLoading(false);
+        }
+      } catch (err: any) {
+        if (err.name !== 'AbortError') {
+          console.error('[RegisterPage] Hospital search error:', err);
+          setSearchError('Search failed. Please try again.');
+          setSearchLoading(false);
+        }
+      }
+    }, 250);
+
+    return () => {
+      clearTimeout(handler);
+    };
+  }, [hospitalSearchTerm, userLocation, searchRadius]);
 
   const loadMapHospitals = (lat: number, lng: number, radiusMeters: number) => {
     setIsSearchingRadius(true);
@@ -76,15 +171,10 @@ export function RegisterPage({ onRegister }: RegisterPageProps) {
       .then(data => {
         setMapHospitals(data.results);
         
-        // If we have a selected hospital, check if it's still in the results
+        // Auto-select first only if nothing is currently selected
         setFormData(prev => {
-          if (prev.hospitalId) {
-            const stillExists = data.results.some((h: any) => h.id === prev.hospitalId);
-            if (!stillExists) {
-              return { ...prev, hospitalId: '' }; // clear if out of range
-            }
-          } else if (data.results.length > 0) {
-            // Auto-select first if none selected
+          if (!prev.hospitalId && data.results.length > 0) {
+            setSelectedHospitalObj(data.results[0]);
             return { ...prev, hospitalId: data.results[0].id };
           }
           return prev;
@@ -109,12 +199,13 @@ export function RegisterPage({ onRegister }: RegisterPageProps) {
     hospitalService.getAllHospitals().then(data => {
       setHospitals(data);
       if (data.length > 0 && !formData.hospitalId) {
+        setSelectedHospitalObj(data[0]);
         setFormData(prev => ({ ...prev, hospitalId: data[0].id }));
       }
     });
   }, []);
 
-  // Fetch hospitals whenever location or radius changes
+  // Fetch nearby hospitals whenever location or radius changes
   useEffect(() => {
     loadMapHospitals(userLocation[0], userLocation[1], searchRadius);
   }, [userLocation, searchRadius]);
@@ -156,40 +247,49 @@ export function RegisterPage({ onRegister }: RegisterPageProps) {
     });
   }, [hospitals, mapHospitals]);
 
-  const filteredHospitals = activeHospitals.filter(h => 
-    h.name.toLowerCase().includes(hospitalSearchTerm.toLowerCase()) || 
-    (h.address && h.address.toLowerCase().includes(hospitalSearchTerm.toLowerCase()))
-  );
-  const selectedHospitalName = activeHospitals.find(h => h.id === formData.hospitalId)?.name || '';
+  const isQuerySearch = hospitalSearchTerm.trim().length >= 2;
+  const displayedHospitals: NormalizedHospital[] = isQuerySearch
+    ? searchResults
+    : (activeHospitals as NormalizedHospital[]);
 
-  const handleSelectAutocomplete = async (placeId: string) => {
-    setFetchingDetailsId(placeId);
-    try {
-      const details = await getGooglePlaceDetails(placeId);
-      if (!details) throw new Error("Place details not found");
-      
-      const normalized: NormalizedHospital = {
-        id: details.providerId,
-        providerId: details.providerId,
-        provider: details.provider,
-        name: details.name,
-        lat: details.lat,
-        lng: details.lng,
-        address: details.address,
-        phone: details.phone,
-        types: details.types,
-        distanceMeters: 0,
-      };
+  const selectedHospitalName = useMemo(() => {
+    if (selectedHospitalObj?.name) return selectedHospitalObj.name;
+    const found = activeHospitals.find(h => h.id === formData.hospitalId) || searchResults.find(h => h.id === formData.hospitalId);
+    return found?.name || '';
+  }, [selectedHospitalObj, activeHospitals, searchResults, formData.hospitalId]);
 
-      setMapHospitals(prev => [normalized, ...prev]);
-      setFormData(prev => ({ ...prev, hospitalId: normalized.id }));
-      setHospitalSearchTerm('');
+  const handleSelectHospital = (h: NormalizedHospital | Hospital) => {
+    setSelectedHospitalObj(h);
+    setFormData(prev => ({ ...prev, hospitalId: h.id }));
+    setHospitalSearchTerm('');
+    setIsDropdownOpen(false);
+    setSelectedIndex(-1);
+  };
+
+  const handleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (!isDropdownOpen) {
+      if (e.key === 'ArrowDown' || e.key === 'Enter') {
+        setIsDropdownOpen(true);
+        e.preventDefault();
+      }
+      return;
+    }
+
+    if (e.key === 'ArrowDown') {
+      e.preventDefault();
+      setSelectedIndex(prev => (prev < displayedHospitals.length - 1 ? prev + 1 : 0));
+    } else if (e.key === 'ArrowUp') {
+      e.preventDefault();
+      setSelectedIndex(prev => (prev > 0 ? prev - 1 : displayedHospitals.length - 1));
+    } else if (e.key === 'Enter') {
+      e.preventDefault();
+      if (selectedIndex >= 0 && selectedIndex < displayedHospitals.length) {
+        handleSelectHospital(displayedHospitals[selectedIndex]);
+      }
+    } else if (e.key === 'Escape') {
+      e.preventDefault();
       setIsDropdownOpen(false);
-    } catch (err) {
-      console.error("Failed to get place details:", err);
-      alert("Failed to load hospital details. Please try again.");
-    } finally {
-      setFetchingDetailsId(null);
+      setSelectedIndex(-1);
     }
   };
 
@@ -210,7 +310,10 @@ export function RegisterPage({ onRegister }: RegisterPageProps) {
       // If user selected a map-based hospital (id is not a UUID)
       const isUuid = /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/.test(finalHospitalId);
       if (!isUuid && ['HOSPITAL', 'AMBULANCE'].includes(formData.role) && finalHospitalId) {
-        const selectedMapHosp = mapHospitals.find(h => h.id === finalHospitalId);
+        const selectedMapHosp = (selectedHospitalObj as NormalizedHospital) ||
+          mapHospitals.find(h => h.id === finalHospitalId) ||
+          searchResults.find(h => h.id === finalHospitalId);
+
         if (selectedMapHosp) {
           const { data, error: rpcError } = await supabase.rpc('get_or_create_hospital', {
             p_name: selectedMapHosp.name,
@@ -224,24 +327,57 @@ export function RegisterPage({ onRegister }: RegisterPageProps) {
           if (data) finalHospitalId = data;
         }
       }
-      const { data: _data, error: signUpError } = await supabase.auth.signUp({
-        email: formData.email,
+
+      const rawEmail = formData.email.trim().toLowerCase();
+      const emailValidation = validateEmailAddress(rawEmail);
+      if (!emailValidation.isValid) {
+        setError(emailValidation.error || 'Please enter a valid official email address.');
+        setIsLoading(false);
+        return;
+      }
+
+      const cleanEmail = emailValidation.normalizedEmail;
+      const cleanFullName = formData.fullName.trim();
+      const redirectUrl = `${window.location.origin}/auth/callback`;
+
+      const { data: signUpData, error: signUpError } = await supabase.auth.signUp({
+        email: cleanEmail,
         password: formData.password,
         options: {
+          emailRedirectTo: redirectUrl,
           data: {
-            full_name: formData.fullName,
+            full_name: cleanFullName,
             role: formData.role.toLowerCase(),
-            badge_number: formData.badgeNumber,
-            vehicle_number: formData.vehicleNumber,
+            badge_number: formData.badgeNumber?.trim() || null,
+            vehicle_number: formData.vehicleNumber?.trim() || null,
             hospital_id: finalHospitalId || null,
           },
         },
       });
 
       if (signUpError) throw signUpError;
-      
-      // Successfully registered and (if email confirmations are disabled) logged in.
-      // Assuming automatic login:
+
+      // Check if session was returned immediately (email confirmation disabled or auto-confirmed)
+      if (!signUpData?.session) {
+        setIsRegistrationComplete(true);
+        setRegisteredEmail(cleanEmail);
+        return;
+      }
+
+      // If session exists, persist profile row in public.profiles
+      if (signUpData.user?.id) {
+        try {
+          await supabase.from('profiles').upsert({
+            id: signUpData.user.id,
+            role: formData.role.toLowerCase(),
+            full_name: cleanFullName,
+            status: 'ACTIVE'
+          }, { onConflict: 'id' });
+        } catch (profErr) {
+          console.warn('[Register] Profile auto-creation warning:', profErr);
+        }
+      }
+
       onRegister(formData.role);
     } catch (err: any) {
       console.error('Registration error:', err);
@@ -374,31 +510,94 @@ export function RegisterPage({ onRegister }: RegisterPageProps) {
           </div>
 
           <div className="relative">
-            <motion.div
-              initial={{ opacity: 0, y: 12 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ delay: 0.05, duration: 0.3, ease: 'easeOut' }}
-              className="mb-7"
-            >
-              <p className="text-aero-text-secondary text-xs font-bold uppercase tracking-widest mb-2 transition-colors focus-within:text-aero-text-primary">New Operator</p>
-              <h1 className="text-2xl font-black text-aero-text-primary tracking-tight">Create Account</h1>
-            </motion.div>
-
-            <AnimatePresence mode="wait">
-              {error && (
-                <motion.div
-                  initial={{ opacity: 0, height: 0 }}
-                  animate={{ opacity: 1, height: 'auto' }}
-                  exit={{ opacity: 0, height: 0 }}
-                  className="mb-5 flex items-center gap-3 bg-[#EF3B3A]/10 border border-[#EF3B3A]/20 rounded-xl px-4 py-3 text-sm text-[#EF3B3A] font-medium overflow-hidden"
-                >
-                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" className="shrink-0">
-                    <circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/>
+            {isRegistrationComplete ? (
+              <motion.div
+                initial={{ opacity: 0, scale: 0.96 }}
+                animate={{ opacity: 1, scale: 1 }}
+                className="bg-[#0B1528] border border-white/10 rounded-2xl p-8 text-center shadow-2xl"
+              >
+                <div className="w-16 h-16 rounded-2xl bg-[#12B981]/20 border border-[#12B981]/40 mx-auto flex items-center justify-center mb-5 text-[#12B981]">
+                  <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                    <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/>
                   </svg>
-                  <span>{error}</span>
+                </div>
+                <span className="text-[10px] font-mono font-bold tracking-widest text-[#12B981] uppercase px-3 py-1 rounded-full bg-[#12B981]/10 border border-[#12B981]/30 inline-block mb-3">
+                  Account Registered
+                </span>
+                <h2 className="text-2xl font-black text-white tracking-tight mb-3">Check Your Email</h2>
+                <p className="text-xs text-slate-300 mb-6 leading-relaxed">
+                  We've sent a verification link to <strong className="text-white">{registeredEmail}</strong>.<br />
+                  Please confirm your email address to activate your AERO operator access, then sign in.
+                </p>
+
+                {resendMessage && (
+                  <div className="mb-4 bg-[#12B981]/15 border border-[#12B981]/30 rounded-xl p-3 text-xs text-[#12B981] font-medium text-left">
+                    {resendMessage}
+                  </div>
+                )}
+
+                {resendError && (
+                  <div className="mb-4 bg-[#E53935]/15 border border-[#E53935]/30 rounded-xl p-3 text-xs text-[#E53935] font-medium text-left">
+                    {resendError}
+                  </div>
+                )}
+
+                <div className="space-y-3 pt-2">
+                  <button
+                    type="button"
+                    onClick={() => navigate('/login')}
+                    className="w-full py-3.5 rounded-xl text-xs font-black tracking-widest uppercase bg-[#E53935] hover:bg-[#ef5350] text-white transition-all shadow-[0_4px_16px_rgba(229,57,53,0.35)]"
+                  >
+                    PROCEED TO SIGN IN
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleResendFromRegister}
+                    disabled={isResending || resendCooldown > 0}
+                    className="w-full py-2.5 rounded-xl text-xs font-bold text-slate-300 hover:text-white border border-white/10 hover:border-white/20 bg-white/5 transition-all disabled:opacity-50"
+                  >
+                    {isResending ? 'SENDING CONFIRMATION...' : resendCooldown > 0 ? `RESEND EMAIL IN ${resendCooldown}S` : 'RESEND CONFIRMATION EMAIL'}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setIsRegistrationComplete(false);
+                      setResendMessage(null);
+                      setResendError(null);
+                    }}
+                    className="w-full py-2 rounded-xl text-xs font-medium text-slate-400 hover:text-white transition-colors"
+                  >
+                    Register another account
+                  </button>
+                </div>
+              </motion.div>
+            ) : (
+              <>
+                <motion.div
+                  initial={{ opacity: 0, y: 12 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  transition={{ delay: 0.05, duration: 0.3, ease: 'easeOut' }}
+                  className="mb-7"
+                >
+                  <p className="text-aero-text-secondary text-xs font-bold uppercase tracking-widest mb-2 transition-colors focus-within:text-aero-text-primary">New Operator</p>
+                  <h1 className="text-2xl font-black text-aero-text-primary tracking-tight">Create Account</h1>
                 </motion.div>
-              )}
-            </AnimatePresence>
+
+                <AnimatePresence mode="wait">
+                  {error && (
+                    <motion.div
+                      initial={{ opacity: 0, height: 0 }}
+                      animate={{ opacity: 1, height: 'auto' }}
+                      exit={{ opacity: 0, height: 0 }}
+                      className="mb-5 flex items-center gap-3 bg-[#EF3B3A]/10 border border-[#EF3B3A]/20 rounded-xl px-4 py-3 text-sm text-[#EF3B3A] font-medium overflow-hidden"
+                    >
+                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" className="shrink-0">
+                        <circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/>
+                      </svg>
+                      <span>{error}</span>
+                    </motion.div>
+                  )}
+                </AnimatePresence>
 
             <form onSubmit={handleSubmit} className="space-y-4" noValidate>
               {/* Full Name */}
@@ -429,9 +628,12 @@ export function RegisterPage({ onRegister }: RegisterPageProps) {
                 <label className="block text-[10px] font-bold text-aero-text-secondary uppercase tracking-widest mb-2 transition-colors group-focus-within:text-aero-text-primary">Official Email</label>
                 <input
                   type="email"
-                  placeholder="name@emergency.gov.in"
+                  placeholder="operator@agency.org"
                   value={formData.email}
                   onChange={(e) => setFormData({...formData, email: e.target.value})}
+                  autoCapitalize="none"
+                  autoCorrect="off"
+                  spellCheck={false}
                   required
                   className="aero-input focus:border-[#EF3B3A] focus:ring-1 focus:ring-[#EF3B3A]/30 focus:shadow-[0_0_15px_rgba(229,57,53,0.15)] transition duration-200"
                 />
@@ -488,10 +690,19 @@ export function RegisterPage({ onRegister }: RegisterPageProps) {
                 )}
 
                 {['HOSPITAL', 'AMBULANCE'].includes(formData.role) && (
-                  <motion.div initial={{ opacity: 0, y: -8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -8 }} transition={{ duration: 0.3 }} className="group relative z-20">
+                  <motion.div
+                    ref={containerRef}
+                    initial={{ opacity: 0, y: -8 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    exit={{ opacity: 0, y: -8 }}
+                    transition={{ duration: 0.3 }}
+                    className="group relative z-20"
+                  >
                     <div className="flex items-center justify-between mb-2">
-                      <label className="block text-[10px] font-bold text-aero-text-secondary uppercase tracking-widest transition-colors group-focus-within:text-aero-text-primary">Assigned Hospital Facility</label>
-                      <div className="flex gap-1">
+                      <label htmlFor="hospital-search-input" className="block text-[10px] font-bold text-aero-text-secondary uppercase tracking-widest transition-colors group-focus-within:text-aero-text-primary">
+                        Assigned Hospital Facility
+                      </label>
+                      <div className="flex gap-1" role="group" aria-label="Search Radius Filter">
                         {[5, 15, 25, 50].map(r => (
                           <button
                             key={r}
@@ -499,7 +710,7 @@ export function RegisterPage({ onRegister }: RegisterPageProps) {
                             onClick={() => setSearchRadius(r * 1000)}
                             className={`px-2 py-0.5 text-[9px] font-bold rounded transition-colors ${
                               searchRadius === r * 1000 
-                                ? 'bg-[#EF3B3A] text-aero-text-primary' 
+                                ? 'bg-[#EF3B3A] text-aero-text-primary shadow-[0_0_10px_rgba(239,59,58,0.3)]' 
                                 : 'bg-[#1A1D24] text-aero-text-secondary hover:text-aero-text-primary border border-aero-border'
                             }`}
                           >
@@ -508,87 +719,189 @@ export function RegisterPage({ onRegister }: RegisterPageProps) {
                         ))}
                       </div>
                     </div>
+
+                    {/* Search Input Container */}
                     <div className="relative">
-                      <input
-                        type="text"
-                        placeholder="Search hospital..."
-                        value={isDropdownOpen ? hospitalSearchTerm : (selectedHospitalName || hospitalSearchTerm)}
-                        onChange={(e) => {
-                          setHospitalSearchTerm(e.target.value);
-                          setIsDropdownOpen(true);
-                        }}
-                        onFocus={() => {
-                          setHospitalSearchTerm('');
-                          setIsDropdownOpen(true);
-                        }}
-                        onBlur={() => setTimeout(() => setIsDropdownOpen(false), 200)}
-                        className="aero-input focus:border-[#EF3B3A] focus:ring-1 focus:ring-[#EF3B3A]/30 focus:shadow-[0_0_15px_rgba(229,57,53,0.15)] transition duration-200"
-                      />
+                      <div className="relative flex items-center">
+                        <input
+                          id="hospital-search-input"
+                          ref={searchInputRef}
+                          type="text"
+                          autoComplete="off"
+                          placeholder={formData.hospitalId ? (selectedHospitalName || 'Search hospital name...') : 'Type hospital (e.g. Apollo, KIMS, Yashoda, CARE)...'}
+                          value={hospitalSearchTerm}
+                          onChange={(e) => {
+                            setHospitalSearchTerm(e.target.value);
+                            setIsDropdownOpen(true);
+                          }}
+                          onFocus={() => {
+                            setIsDropdownOpen(true);
+                          }}
+                          onKeyDown={handleKeyDown}
+                          className="aero-input pr-16 focus:border-[#EF3B3A] focus:ring-1 focus:ring-[#EF3B3A]/30 focus:shadow-[0_0_15px_rgba(229,57,53,0.15)] transition duration-200"
+                        />
+                        {/* Clear and Status Action Buttons */}
+                        <div className="absolute right-2.5 flex items-center gap-1.5">
+                          {hospitalSearchTerm && (
+                            <button
+                              type="button"
+                              onClick={(e) => {
+                                e.preventDefault();
+                                e.stopPropagation();
+                                setHospitalSearchTerm('');
+                                setSearchResults([]);
+                                searchInputRef.current?.focus();
+                              }}
+                              aria-label="Clear search"
+                              className="w-5 h-5 rounded-full bg-white/10 hover:bg-white/20 text-aero-text-secondary hover:text-white flex items-center justify-center text-xs transition"
+                            >
+                              ✕
+                            </button>
+                          )}
+                          {searchLoading && (
+                            <div className="w-4 h-4 rounded-full border-2 border-[#EF3B3A] border-t-transparent animate-spin" />
+                          )}
+                        </div>
+                      </div>
+
+                      {/* Dropdown Menu */}
                       <AnimatePresence>
                         {isDropdownOpen && (
                           <motion.div 
                             initial={{ opacity: 0, y: 5 }}
                             animate={{ opacity: 1, y: 0 }}
                             exit={{ opacity: 0, y: 5 }}
-                            className="absolute z-[100] w-full mt-2 max-h-60 overflow-y-auto bg-aero-surface border border-aero-border rounded-xl shadow-2xl custom-scrollbar"
+                            className="absolute z-[100] w-full mt-2 max-h-64 overflow-y-auto bg-[#0E121A] border border-slate-700/80 rounded-xl shadow-[0_12px_40px_rgba(0,0,0,0.8)] custom-scrollbar"
                           >
-                            {hospitalSearchTerm.trim() ? (
-                              <>
-                                {autocompleteLoading && <div className="p-4 text-sm text-aero-text-secondary text-center">Searching Google Places...</div>}
-                                {!autocompleteLoading && autocompleteResults.length === 0 && (
-                                  <div className="p-4 text-sm text-aero-text-secondary text-center">No hospitals found</div>
-                                )}
-                                {!autocompleteLoading && autocompleteResults.map((place) => (
-                                  <div
-                                    key={place.placePrediction.placeId}
-                                    onClick={() => handleSelectAutocomplete(place.placePrediction.placeId)}
-                                    className={`p-3 hover:bg-white/5 cursor-pointer border-b border-white/5 last:border-0 transition-colors flex justify-between items-start gap-4 ${fetchingDetailsId === place.placePrediction.placeId ? 'opacity-50 cursor-not-allowed' : ''}`}
-                                  >
-                                    <div className="flex-1 min-w-0">
-                                      <h4 className="text-sm font-bold text-aero-text-primary mb-0.5">{place.placePrediction.text.text}</h4>
-                                      <p className="text-xs text-aero-text-secondary truncate">Google Places Result</p>
-                                    </div>
-                                    {fetchingDetailsId === place.placePrediction.placeId && (
-                                      <div className="w-4 h-4 rounded-full border-2 border-[#EF3B3A] border-t-transparent animate-spin"></div>
-                                    )}
-                                  </div>
-                                ))}
-                              </>
-                            ) : (
-                              <>
-                                {filteredHospitals.length === 0 ? (
-                                  <div className="p-4 text-sm text-aero-text-secondary text-center">No nearby hospitals found</div>
+                            {/* Loading State */}
+                            {searchLoading && (
+                              <div className="p-4 text-xs text-slate-400 text-center flex items-center justify-center gap-2">
+                                <div className="w-3.5 h-3.5 rounded-full border-2 border-[#EF3B3A] border-t-transparent animate-spin" />
+                                Searching verified hospitals...
+                              </div>
+                            )}
+
+                            {/* Error State */}
+                            {!searchLoading && searchError && (
+                              <div className="p-4 text-xs text-rose-400 text-center flex flex-col items-center gap-2">
+                                <span>{searchError}</span>
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setSearchError('');
+                                    setSearchRadius(prev => prev);
+                                  }}
+                                  className="text-[10px] font-bold uppercase text-[#EF3B3A] hover:underline"
+                                >
+                                  Retry Search
+                                </button>
+                              </div>
+                            )}
+
+                            {/* Empty Results State */}
+                            {!searchLoading && !searchError && displayedHospitals.length === 0 && (
+                              <div className="p-4 text-xs text-slate-400 text-center">
+                                {isQuerySearch ? (
+                                  <>
+                                    <p className="font-semibold text-slate-300">No hospitals found matching "{hospitalSearchTerm}"</p>
+                                    <p className="text-[10px] text-slate-500 mt-1">Try expanding radius to 25km or 50km or check spelling</p>
+                                  </>
                                 ) : (
-                                  filteredHospitals.map(h => (
-                                    <div
-                                      key={h.id}
-                                      onClick={() => {
-                                        setFormData({...formData, hospitalId: h.id});
-                                        setHospitalSearchTerm('');
-                                        setIsDropdownOpen(false);
-                                      }}
-                                      className="p-3 hover:bg-white/5 cursor-pointer border-b border-white/5 last:border-0 transition-colors flex justify-between items-start gap-4"
-                                    >
-                                      <div>
-                                        <div className="text-aero-text-primary text-sm font-medium">{h.name}</div>
-                                        {h.address && <div className="text-aero-text-secondary text-[10px] mt-0.5 line-clamp-1">{h.address}</div>}
-                                      </div>
-                                      {('distanceMeters' in h) && (
-                                        <div className="text-xs font-bold text-[#12B981] shrink-0 bg-[#12B981]/10 px-2 py-0.5 rounded-full">
-                                          {((h as NormalizedHospital).distanceMeters / 1000).toFixed(1)} km
-                                        </div>
+                                  <>
+                                    <p className="font-semibold text-slate-300">No verified hospitals found within {searchRadius / 1000}km</p>
+                                    <p className="text-[10px] text-slate-500 mt-1">Increase radius above or type hospital name directly</p>
+                                  </>
+                                )}
+                              </div>
+                            )}
+
+                            {/* Hospital Items List */}
+                            {!searchLoading && !searchError && displayedHospitals.map((h, idx) => {
+                              const isSelected = h.id === formData.hospitalId;
+                              const isKeyboardFocused = idx === selectedIndex;
+                              const isOutside = (h as any).isOutsideRadius || (('distanceMeters' in h) && (h as any).distanceMeters > searchRadius);
+
+                              return (
+                                <div
+                                  key={h.id || idx}
+                                  role="option"
+                                  aria-selected={isSelected}
+                                  onPointerDown={(e) => {
+                                    e.preventDefault();
+                                    e.stopPropagation();
+                                    handleSelectHospital(h);
+                                  }}
+                                  onClick={(e) => {
+                                    e.preventDefault();
+                                    e.stopPropagation();
+                                    handleSelectHospital(h);
+                                  }}
+                                  className={`p-3 cursor-pointer border-b border-slate-800/80 last:border-0 transition-colors flex justify-between items-start gap-3 ${
+                                    isKeyboardFocused ? 'bg-white/10' : (isSelected ? 'bg-[#EF3B3A]/10 border-l-2 border-l-[#EF3B3A]' : 'hover:bg-white/5')
+                                  }`}
+                                >
+                                  <div className="flex-1 min-w-0">
+                                    <div className="flex items-center gap-1.5">
+                                      <h4 className="text-sm font-bold text-white truncate">{h.name}</h4>
+                                      {isSelected && (
+                                        <span className="text-[9px] bg-[#EF3B3A] text-white px-1.5 py-0.2 rounded font-black tracking-wider">
+                                          SELECTED
+                                        </span>
                                       )}
                                     </div>
-                                  ))
-                                )}
-                              </>
-                            )}
+                                    {h.address && (
+                                      <p className="text-[11px] text-slate-400 mt-0.5 truncate">{h.address}</p>
+                                    )}
+                                  </div>
+
+                                  <div className="shrink-0 text-right">
+                                    {isOutside ? (
+                                      <span className="text-[9px] font-bold text-amber-400 bg-amber-950/40 border border-amber-600/40 px-2 py-0.5 rounded-full block">
+                                        Outside {searchRadius / 1000}km ({(('distanceMeters' in h) ? (h as any).distanceMeters / 1000 : 0).toFixed(1)} km)
+                                      </span>
+                                    ) : (
+                                      ('distanceMeters' in h) && (
+                                        <span className="text-[10px] font-bold text-[#12B981] bg-[#12B981]/10 px-2 py-0.5 rounded-full block">
+                                          {((h as any).distanceMeters / 1000).toFixed(1)} km
+                                        </span>
+                                      )
+                                    )}
+                                  </div>
+                                </div>
+                              );
+                            })}
                           </motion.div>
                         )}
                       </AnimatePresence>
                     </div>
+
+                    {/* Selected Facility Card */}
+                    {formData.hospitalId && selectedHospitalName && (
+                      <div className="mt-2.5 p-3 rounded-xl bg-[#0D111A] border border-emerald-500/30 flex items-center justify-between gap-3">
+                        <div className="flex items-center gap-2.5 min-w-0">
+                          <div className="w-7 h-7 rounded-lg bg-emerald-500/20 text-emerald-400 flex items-center justify-center shrink-0">
+                            🏥
+                          </div>
+                          <div className="min-w-0">
+                            <span className="text-[9px] font-bold text-emerald-400 uppercase tracking-widest block">Selected Facility</span>
+                            <h4 className="text-xs font-bold text-white truncate">{selectedHospitalName}</h4>
+                          </div>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setIsDropdownOpen(true);
+                            searchInputRef.current?.focus();
+                          }}
+                          className="text-[10px] font-bold text-slate-400 hover:text-white uppercase tracking-wider px-2 py-1 rounded bg-white/5 hover:bg-white/10 transition"
+                        >
+                          Change
+                        </button>
+                      </div>
+                    )}
+
                     {mapHospitals.length > 0 && (
-                      <p className="text-[10px] text-[#12B981] mt-1.5 font-bold">📡 Loaded from Live Map Data</p>
+                      <p className="text-[10px] text-[#12B981] mt-1.5 font-bold">📡 Loaded from Live Verified Facility Network</p>
                     )}
                   </motion.div>
                 )}
@@ -608,6 +921,9 @@ export function RegisterPage({ onRegister }: RegisterPageProps) {
                     placeholder="Min 6 characters"
                     value={formData.password}
                     onChange={(e) => setFormData({...formData, password: e.target.value})}
+                    autoCapitalize="none"
+                    autoCorrect="off"
+                    spellCheck={false}
                     required
                     className="aero-input focus:border-[#EF3B3A] focus:ring-1 focus:ring-[#EF3B3A]/30 focus:shadow-[0_0_15px_rgba(229,57,53,0.15)] transition duration-200"
                   />
@@ -630,6 +946,9 @@ export function RegisterPage({ onRegister }: RegisterPageProps) {
                     placeholder="Re-enter password"
                     value={confirmPassword}
                     onChange={(e) => setConfirmPassword(e.target.value)}
+                    autoCapitalize="none"
+                    autoCorrect="off"
+                    spellCheck={false}
                     required
                     className="aero-input focus:border-[#EF3B3A] focus:ring-1 focus:ring-[#EF3B3A]/30 focus:shadow-[0_0_15px_rgba(229,57,53,0.15)] transition duration-200"
                   />
@@ -727,9 +1046,11 @@ export function RegisterPage({ onRegister }: RegisterPageProps) {
                 Sign In
               </button>
             </motion.div>
-          </div>
-        </div>
+          </>
+        )}
       </div>
+    </div>
+  </div>
 
       {/* Legal Drawer */}
       <Drawer

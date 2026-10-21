@@ -94,37 +94,87 @@ export function ClinicalAssessmentModal({
     return () => { mounted = false; };
   }, [isOpen, incidentId]);
 
-  // Client-side range validation
+  // Client-side range and integrity validation
   const validateForm = (): boolean => {
     const errs: string[] = [];
 
-    if (heartRate) {
+    // 1. Heart rate (20-300 bpm, non-zero)
+    if (heartRate !== '') {
       const v = Number(heartRate);
-      if (isNaN(v) || v < 20 || v > 300) errs.push('Heart rate must be between 20 and 300 bpm.');
+      if (isNaN(v) || !Number.isInteger(v) || v <= 0) {
+        errs.push('Heart rate must be a positive integer in bpm (0 is rejected).');
+      } else if (v < 20 || v > 300) {
+        errs.push(`Heart rate (${v} bpm) is outside physiological limits (20-300 bpm).`);
+      }
     }
-    if (systolicBp) {
-      const v = Number(systolicBp);
-      if (isNaN(v) || v < 40 || v > 300) errs.push('Systolic BP must be between 40 and 300 mmHg.');
+
+    // 2. Coupled Blood Pressure (both required together, systolic > diastolic, non-zero)
+    const hasSys = systolicBp !== '';
+    const hasDia = diastolicBp !== '';
+
+    if (hasSys && !hasDia) {
+      errs.push('Incomplete blood pressure: Diastolic BP is required when Systolic BP is entered.');
+    } else if (!hasSys && hasDia) {
+      errs.push('Incomplete blood pressure: Systolic BP is required when Diastolic BP is entered.');
+    } else if (hasSys && hasDia) {
+      const sys = Number(systolicBp);
+      const dia = Number(diastolicBp);
+
+      if (isNaN(sys) || !Number.isInteger(sys) || sys <= 0) {
+        errs.push('Systolic BP must be a positive integer in mmHg (0 is rejected).');
+      } else if (sys < 40 || sys > 300) {
+        errs.push(`Systolic BP (${sys} mmHg) must be between 40 and 300 mmHg.`);
+      }
+
+      if (isNaN(dia) || !Number.isInteger(dia) || dia <= 0) {
+        errs.push('Diastolic BP must be a positive integer in mmHg (0 is rejected).');
+      } else if (dia < 20 || dia > 200) {
+        errs.push(`Diastolic BP (${dia} mmHg) must be between 20 and 200 mmHg.`);
+      }
+
+      if (!isNaN(sys) && !isNaN(dia) && sys > 0 && dia > 0 && sys <= dia) {
+        errs.push(`Physiological inconsistency: Systolic BP (${sys} mmHg) must be strictly higher than Diastolic BP (${dia} mmHg).`);
+      }
     }
-    if (diastolicBp) {
-      const v = Number(diastolicBp);
-      if (isNaN(v) || v < 20 || v > 200) errs.push('Diastolic BP must be between 20 and 200 mmHg.');
-    }
-    if (spo2) {
+
+    // 3. SpO2 (50-100%, non-zero)
+    if (spo2 !== '') {
       const v = Number(spo2);
-      if (isNaN(v) || v < 50 || v > 100) errs.push('SpO2 must be between 50% and 100%.');
+      if (isNaN(v) || !Number.isInteger(v) || v <= 0) {
+        errs.push('SpO2 oxygen saturation must be a positive integer % (0 is rejected).');
+      } else if (v < 50 || v > 100) {
+        errs.push(`SpO2 (${v}%) must be between 50% and 100%.`);
+      }
     }
-    if (respiratoryRate) {
+
+    // 4. Respiratory rate (4-80 breaths/min, non-zero)
+    if (respiratoryRate !== '') {
       const v = Number(respiratoryRate);
-      if (isNaN(v) || v < 4 || v > 80) errs.push('Respiratory rate must be between 4 and 80 breaths/min.');
+      if (isNaN(v) || !Number.isInteger(v) || v <= 0) {
+        errs.push('Respiratory rate must be a positive integer in breaths/min (0 is rejected).');
+      } else if (v < 4 || v > 80) {
+        errs.push(`Respiratory rate (${v} breaths/min) must be between 4 and 80 breaths/min.`);
+      }
     }
-    if (gcs) {
+
+    // 5. Glasgow Coma Scale (3-15, non-zero)
+    if (gcs !== '') {
       const v = Number(gcs);
-      if (isNaN(v) || v < 3 || v > 15) errs.push('Glasgow Coma Scale (GCS) must be between 3 and 15.');
+      if (isNaN(v) || !Number.isInteger(v) || v <= 0) {
+        errs.push('Glasgow Coma Scale (GCS) must be an integer between 3 and 15 (0 is rejected).');
+      } else if (v < 3 || v > 15) {
+        errs.push(`Glasgow Coma Scale (${v}) must be between 3 and 15.`);
+      }
     }
-    if (temperature) {
+
+    // 6. Temperature (30.0-45.0 °C, non-zero)
+    if (temperature !== '') {
       const v = Number(temperature);
-      if (isNaN(v) || v < 30.0 || v > 45.0) errs.push('Temperature must be between 30.0°C and 45.0°C.');
+      if (isNaN(v) || v <= 0) {
+        errs.push('Body temperature must be a valid positive number in °C (0 is rejected).');
+      } else if (v < 30.0 || v > 45.0) {
+        errs.push(`Temperature (${v}°C) must be between 30.0°C and 45.0°C.`);
+      }
     }
 
     setFormErrors(errs);
@@ -143,13 +193,13 @@ export function ClinicalAssessmentModal({
       hospitalName: destinationHospital,
       emergencyCategory,
       triageSeverity,
-      heartRate: heartRate ? Number(heartRate) : null,
-      systolicBp: systolicBp ? Number(systolicBp) : null,
-      diastolicBp: diastolicBp ? Number(diastolicBp) : null,
-      spo2: spo2 ? Number(spo2) : null,
-      respiratoryRate: respiratoryRate ? Number(respiratoryRate) : null,
-      gcs: gcs ? Number(gcs) : null,
-      temperature: temperature ? Number(temperature) : null,
+      heartRate: heartRate !== '' ? Number(heartRate) : null,
+      systolicBp: systolicBp !== '' ? Number(systolicBp) : null,
+      diastolicBp: diastolicBp !== '' ? Number(diastolicBp) : null,
+      spo2: spo2 !== '' ? Number(spo2) : null,
+      respiratoryRate: respiratoryRate !== '' ? Number(respiratoryRate) : null,
+      gcs: gcs !== '' ? Number(gcs) : null,
+      temperature: temperature !== '' ? Number(temperature) : null,
       chiefComplaint: chiefComplaint ? chiefComplaint.trim() : null,
       clinicalNotes: clinicalNotes ? clinicalNotes.trim() : null,
       isManual: true,
@@ -175,11 +225,12 @@ export function ClinicalAssessmentModal({
       setActiveTab('history');
     } catch (err: any) {
       console.error('[Clinical Assessment] Submit error:', err);
-      setFormErrors([err.message || 'Failed to transmit clinical observations to hospital.']);
+      const errMsg = err.message || 'Failed to transmit clinical observations to hospital.';
+      setFormErrors([errMsg]);
       addToast({
         variant: 'error',
         title: 'Transmission Failed',
-        message: err.message || 'Network error transmitting vitals.'
+        message: errMsg
       });
     } finally {
       setIsSubmitting(false);
@@ -301,7 +352,7 @@ export function ClinicalAssessmentModal({
                 <label className="block text-xs font-bold text-slate-300 uppercase tracking-wider mb-2">
                   Initial Triage Severity
                 </label>
-                <div className="grid grid-cols-4 gap-2">
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
                   {[
                     { id: 'CRITICAL', label: 'Critical (Red)', style: 'bg-red-500/20 text-red-400 border-red-500/40' },
                     { id: 'HIGH', label: 'High (Amber)', style: 'bg-amber-500/20 text-amber-400 border-amber-500/40' },
@@ -355,20 +406,20 @@ export function ClinicalAssessmentModal({
                   </div>
 
                   {/* Blood Pressure Systolic / Diastolic */}
-                  <div className="bg-[#0E1524] p-3 rounded-xl border border-[#1E293B] focus-within:border-cyan-500/50">
+                  <div className="bg-[#0E1524] p-3 rounded-xl border border-[#1E293B] focus-within:border-cyan-500/50 col-span-2 sm:col-span-1">
                     <div className="flex items-center justify-between text-xs text-slate-400 mb-1">
                       <span className="flex items-center gap-1 font-semibold text-slate-300">
                         <Gauge className="w-3.5 h-3.5 text-amber-400" /> Blood Press.
                       </span>
                       <span className="text-[10px] text-slate-500">Sys / Dia</span>
                     </div>
-                    <div className="flex items-center gap-1">
+                    <div className="flex items-center gap-1.5">
                       <input
                         type="number"
                         placeholder="Sys"
                         value={systolicBp}
                         onChange={e => setSystolicBp(e.target.value)}
-                        className="w-14 bg-transparent text-slate-100 font-mono font-bold text-sm focus:outline-none"
+                        className="w-16 sm:w-14 bg-transparent text-slate-100 font-mono font-bold text-sm focus:outline-none"
                       />
                       <span className="text-slate-600">/</span>
                       <input
@@ -376,7 +427,7 @@ export function ClinicalAssessmentModal({
                         placeholder="Dia"
                         value={diastolicBp}
                         onChange={e => setDiastolicBp(e.target.value)}
-                        className="w-14 bg-transparent text-slate-100 font-mono font-bold text-sm focus:outline-none"
+                        className="w-16 sm:w-14 bg-transparent text-slate-100 font-mono font-bold text-sm focus:outline-none"
                       />
                       <span className="text-[10px] text-slate-500 ml-auto">mmHg</span>
                     </div>

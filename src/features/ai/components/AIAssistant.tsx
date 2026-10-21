@@ -55,6 +55,7 @@ export function AIAssistantInner({ incidentContext }: AIAssistantProps) {
 
   const { session, user, authLoading } = useAuth();
   const isAuthenticated = Boolean(session || user || (typeof window !== 'undefined' && (
+    localStorage.getItem('aero-auth-session') ||
     localStorage.getItem('aero-session-ambulance') ||
     localStorage.getItem('aero-session-police') ||
     localStorage.getItem('aero-session-hospital') ||
@@ -209,7 +210,7 @@ export function AIAssistantInner({ incidentContext }: AIAssistantProps) {
       <button
         onClick={() => setIsOpen(true)}
         aria-label="Open AERO Intelligence"
-        className={`fixed bottom-5 right-5 sm:bottom-6 sm:right-6 z-[990] w-14 h-14 bg-[#0F172A] hover:bg-[#1E293B] border-2 border-cyan-500/60 text-cyan-400 rounded-full shadow-[0_0_24px_rgba(6,182,212,0.35)] flex items-center justify-center transition-all hover:scale-105 active:scale-95 cursor-pointer ${
+        className={`fixed bottom-20 right-4 sm:bottom-6 sm:right-6 z-[990] w-14 h-14 bg-[#0F172A] hover:bg-[#1E293B] border-2 border-cyan-500/60 text-cyan-400 rounded-full shadow-[0_0_24px_rgba(6,182,212,0.35)] flex items-center justify-center transition-all hover:scale-105 active:scale-95 cursor-pointer ${
           isOpen ? 'scale-0 opacity-0 pointer-events-none' : 'scale-100 opacity-100'
         }`}
       >

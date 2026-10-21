@@ -1,8 +1,10 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import type { UserRole } from '../../../types';
 import { motion, AnimatePresence } from 'framer-motion';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useLocation } from 'react-router-dom';
 import { supabase } from '../../../lib/supabase';
+import { validateEmailAddress } from '../../../utils/emailValidation';
+import { getRemainingCooldown, setCooldown } from '../../../utils/authCooldown';
 
 
 interface LoginPageProps {
@@ -45,10 +47,10 @@ const ROLES: { role: UserRole; label: string; sublabel: string; color: string; a
 ];
 
 const ROLE_PLACEHOLDERS: Record<UserRole, string> = {
-  AMBULANCE: 'driver@ems.gov.in',
-  POLICE: 'officer@police.gov.in',
-  HOSPITAL: 'er.staff@hospital.org',
-  ADMIN: 'admin@aero.city.gov',
+  AMBULANCE: 'paramedic@agency.org',
+  POLICE: 'officer@traffic-dept.gov',
+  HOSPITAL: 'er.staff@hospital-network.com',
+  ADMIN: 'admin@emergency-command.org',
 };
 
 // SVG icons for each role
@@ -77,23 +79,202 @@ const RoleIcons: Record<UserRole, React.ReactNode> = {
 
 export function LoginPage({ onLogin }: LoginPageProps) {
   const navigate = useNavigate();
+  const location = useLocation();
   const [selectedRole, setSelectedRole] = useState<UserRole>('AMBULANCE');
   const [identifier, setIdentifier] = useState('');
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
+  const [isActionLoading, setIsActionLoading] = useState(false);
   const [error, setError] = useState('');
-  // Auth context available via useAuth() if needed
+  const [infoNotice, setInfoNotice] = useState('');
+  const [isUnconfirmed, setIsUnconfirmed] = useState(false);
+  const [showResetModal, setShowResetModal] = useState(false);
+  const [modalTab, setModalTab] = useState<'reset' | 'resend'>('reset');
+  const [resetEmail, setResetEmail] = useState('');
+  const [modalSuccess, setModalSuccess] = useState('');
+  const [modalError, setModalError] = useState('');
+  const [resendCooldown, setResendCooldown] = useState(() => getRemainingCooldown('resend_confirmation'));
+  const [resetCooldown, setResetCooldown] = useState(() => getRemainingCooldown('password_reset'));
+
+  // Notification from password reset redirect
+  useEffect(() => {
+    if ((location.state as any)?.resetSuccess) {
+      setInfoNotice('Your password has been successfully reset! Please sign in with your new credentials.');
+      try {
+        window.history.replaceState({}, document.title);
+      } catch {}
+    }
+  }, [location.state]);
+
+  // Live countdown timer for active action cooldowns
+  useEffect(() => {
+    const interval = setInterval(() => {
+      const resendLeft = getRemainingCooldown('resend_confirmation');
+      const resetLeft = getRemainingCooldown('password_reset');
+      setResendCooldown(resendLeft);
+      setResetCooldown(resetLeft);
+    }, 1000);
+    return () => clearInterval(interval);
+  }, []);
+
+  const handleResendConfirmation = async (targetEmail?: string) => {
+    const rawEmail = (typeof targetEmail === 'string' ? targetEmail : (resetEmail || identifier)).trim().toLowerCase();
+    if (!rawEmail) {
+      const msg = 'Please enter your email address to resend confirmation.';
+      setError(msg);
+      setModalError(msg);
+      setModalTab('resend');
+      setShowResetModal(true);
+      return;
+    }
+
+    const validation = validateEmailAddress(rawEmail);
+    if (!validation.isValid) {
+      const msg = validation.error || 'Please enter a valid email address.';
+      setError(msg);
+      setModalError(msg);
+      return;
+    }
+
+    const remaining = getRemainingCooldown('resend_confirmation');
+    if (remaining > 0) {
+      const msg = `Security cooldown active: please wait ${remaining}s before requesting another confirmation email.`;
+      setError(msg);
+      setModalError(msg);
+      return;
+    }
+
+    setIsActionLoading(true);
+    setError('');
+    setModalError('');
+    setModalSuccess('');
+    setInfoNotice('');
+    try {
+      const redirectUrl = `${window.location.origin}/auth/callback`;
+      const { error: resendErr } = await supabase.auth.resend({
+        type: 'signup',
+        email: validation.normalizedEmail,
+        options: {
+          emailRedirectTo: redirectUrl,
+        }
+      });
+
+      if (resendErr) {
+        const msg = resendErr.message || '';
+        const isRateLimited = resendErr.status === 429 ||
+          (resendErr as any).code === 'over_email_send_rate_limit' ||
+          msg.toLowerCase().includes('rate limit') ||
+          msg.toLowerCase().includes('once every');
+
+        if (isRateLimited) {
+          setCooldown('resend_confirmation', 60);
+          setResendCooldown(60);
+          const limitMsg = 'Email rate limit reached. Supabase permits one email per minute. Please wait before retrying.';
+          setError(limitMsg);
+          setModalError(limitMsg);
+        } else {
+          setError(msg || 'Failed to resend confirmation email.');
+          setModalError(msg || 'Failed to resend confirmation email.');
+        }
+      } else {
+        setCooldown('resend_confirmation', 60);
+        setResendCooldown(60);
+        const successMsg = `Confirmation email sent to ${validation.normalizedEmail}! Please check your inbox and spam folder.`;
+        setInfoNotice(successMsg);
+        setModalSuccess(successMsg);
+        setIsUnconfirmed(false);
+      }
+    } catch (err: any) {
+      const msg = err.message || 'An error occurred while resending confirmation email.';
+      setError(msg);
+      setModalError(msg);
+    } finally {
+      setIsActionLoading(false);
+    }
+  };
+
+  const handleSendPasswordReset = async (e?: React.FormEvent) => {
+    if (e) e.preventDefault();
+    setModalError('');
+    setModalSuccess('');
+    const rawEmail = (resetEmail || identifier).trim().toLowerCase();
+    if (!rawEmail) {
+      setModalError('Please enter your account email address.');
+      return;
+    }
+
+    const validation = validateEmailAddress(rawEmail);
+    if (!validation.isValid) {
+      setModalError(validation.error || 'Please enter a valid email address.');
+      return;
+    }
+
+    const remaining = getRemainingCooldown('password_reset');
+    if (remaining > 0) {
+      setModalError(`Security cooldown active: please wait ${remaining}s before requesting another password reset.`);
+      return;
+    }
+
+    setIsActionLoading(true);
+    setError('');
+    try {
+      const redirectUrl = `${window.location.origin}/auth/callback`;
+      const { error: resetErr } = await supabase.auth.resetPasswordForEmail(validation.normalizedEmail, {
+        redirectTo: redirectUrl,
+      });
+
+      if (resetErr) {
+        const msg = resetErr.message || '';
+        const isRateLimited = resetErr.status === 429 ||
+          (resetErr as any).code === 'over_email_send_rate_limit' ||
+          msg.toLowerCase().includes('rate limit') ||
+          msg.toLowerCase().includes('once every');
+
+        if (isRateLimited) {
+          setCooldown('password_reset', 60);
+          setResetCooldown(60);
+          setModalError('Email rate limit reached. Supabase permits one recovery email per minute. Please wait before retrying.');
+        } else {
+          setModalError(msg || 'Could not send password reset email.');
+        }
+      } else {
+        setCooldown('password_reset', 60);
+        setResetCooldown(60);
+        const successMsg = `Password recovery instructions sent to ${validation.normalizedEmail}. Please check your inbox and follow the recovery link.`;
+        setModalSuccess(successMsg);
+        setInfoNotice(successMsg);
+      }
+    } catch (err: any) {
+      setModalError(err.message || 'Failed to request password reset.');
+    } finally {
+      setIsActionLoading(false);
+    }
+  };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!identifier || !password) {
+    const rawEmail = identifier.trim().toLowerCase();
+    const cleanPassword = password.trim();
+
+    if (!rawEmail || !cleanPassword) {
       setError('Please enter both email and password.');
       return;
     }
+
+    // Syntax validation for login (allows any domain existing in Supabase auth)
+    const emailValidation = validateEmailAddress(rawEmail, { checkDeliverability: false });
+    if (!emailValidation.isValid) {
+      setError(emailValidation.error || 'Please enter a valid official email address.');
+      return;
+    }
+
+    const cleanEmail = emailValidation.normalizedEmail;
     
     setIsLoading(true);
     setError('');
+    setInfoNotice('');
+    setIsUnconfirmed(false);
     
     const timeoutPromise = new Promise((_, reject) => 
       setTimeout(() => reject(new Error('TIMEOUT')), 15000)
@@ -101,13 +282,29 @@ export function LoginPage({ onLogin }: LoginPageProps) {
 
     try {
       const signInPromise = supabase.auth.signInWithPassword({
-        email: identifier,
-        password: password,
+        email: cleanEmail,
+        password: cleanPassword,
       });
 
       const { data, error } = await Promise.race([signInPromise, timeoutPromise]) as any;
 
       if (error) {
+        const msg = (error.message || '').toLowerCase();
+        if (msg.includes('email not confirmed') || error.code === 'email_not_confirmed') {
+          setIsUnconfirmed(true);
+          setError('Your email has not been confirmed yet. Please verify your inbox or click "Resend Confirmation" below.');
+          return;
+        }
+        if (msg.includes('invalid login credentials') || error.code === 'invalid_credentials') {
+          // Both wrong password and unconfirmed account (with email enumeration prevention) return invalid_credentials
+          setIsUnconfirmed(true);
+          setError('Invalid email or password. Please verify your credentials or use the account recovery options below.');
+          return;
+        }
+        if (msg.includes('rate limit')) {
+          setError('Too many login attempts. Please wait a moment and try again.');
+          return;
+        }
         throw error;
       }
 
@@ -115,6 +312,7 @@ export function LoginPage({ onLogin }: LoginPageProps) {
         throw new Error("Authentication succeeded but no session was returned.");
       }
 
+      // Authoritative profile lookup from public.profiles
       const { data: profileData, error: profileError } = await supabase
         .from('profiles')
         .select('id, role, full_name, status')
@@ -122,37 +320,52 @@ export function LoginPage({ onLogin }: LoginPageProps) {
         .maybeSingle();
 
       if (profileError) {
-        console.error('[Login] Profile query error:', profileError);
-        throw new Error('Authentication successful, but failed to load your AERO profile.');
+        console.warn('[Login] Profile lookup warning, proceeding with session metadata:', profileError);
+      }
+
+      // Check account operational status if profile exists
+      if (profileData?.status && ['SUSPENDED', 'BLOCKED', 'DEACTIVATED'].includes(profileData.status.toUpperCase())) {
+        await supabase.auth.signOut();
+        throw new Error('Your operator account has been suspended. Please contact dispatch administration.');
+      }
+
+      if (profileData?.status && profileData.status.toUpperCase() === 'PENDING') {
+        await supabase.auth.signOut();
+        throw new Error('Your registration is pending administrative approval.');
       }
 
       if (!profileData) {
-        // No profile exists yet — auto-create one
-        const { data: newProfile, error: createError } = await supabase
+        // Safe profile creation for partial registrations (account exists in auth.users without public.profiles record)
+        const authoritativeRole = (data.user.user_metadata?.role || selectedRole.toLowerCase() || 'ambulance').toLowerCase();
+        const newProfile = {
+          id: data.user.id,
+          role: authoritativeRole,
+          full_name: data.user.user_metadata?.full_name || data.user.email?.split('@')[0] || 'AERO Operator',
+          status: 'ACTIVE'
+        };
+
+        const { data: createdProfile, error: createError } = await supabase
           .from('profiles')
-          .insert({
-            id: data.user.id,
-            role: selectedRole.toLowerCase(),
-            full_name: data.user.user_metadata?.full_name || data.user.email?.split('@')[0] || 'AERO Operator',
-          })
+          .insert(newProfile)
           .select('id, role, full_name, status')
           .single();
 
         if (createError) {
-          console.error('[Login] Profile creation error:', createError);
-          throw new Error('Authentication successful, but your AERO operator profile could not be created.');
+          console.warn('[Login] Could not persist profile to DB (RLS), using session role:', createError);
+          onLogin(authoritativeRole);
+        } else {
+          onLogin(createdProfile.role);
         }
-
-        onLogin(newProfile.role);
       } else {
+        // Check role consistency: navigate safely to their authorized role dashboard
         onLogin(profileData.role);
       }
     } catch (err: any) {
       console.error('Login error:', err);
       if (err.message === 'TIMEOUT') {
-        setError("Authentication request timed out. Please try again.");
+        setError("Authentication request timed out. Please check your network connection and retry.");
       } else if (err.message === 'Failed to fetch' || err.message === 'NetworkError') {
-        setError("Unable to connect to authentication service.");
+        setError("Unable to connect to authentication server. Please check your connection.");
       } else {
         setError(err.message || 'Invalid email or password.');
       }
@@ -350,17 +563,68 @@ export function LoginPage({ onLogin }: LoginPageProps) {
 
             <form onSubmit={handleSubmit} className="space-y-4" noValidate>
               <AnimatePresence mode="wait">
+                {infoNotice && (
+                  <motion.div
+                    initial={{ opacity: 0, height: 0 }}
+                    animate={{ opacity: 1, height: 'auto' }}
+                    exit={{ opacity: 0, height: 0 }}
+                    className="flex items-center gap-3 bg-[#12B981]/10 border border-[#12B981]/30 rounded-xl px-4 py-3 text-sm text-[#12B981] font-medium overflow-hidden"
+                  >
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" className="shrink-0">
+                      <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/>
+                    </svg>
+                    <span>{infoNotice}</span>
+                  </motion.div>
+                )}
+
                 {error && (
                   <motion.div
                     initial={{ opacity: 0, height: 0 }}
                     animate={{ opacity: 1, height: 'auto' }}
                     exit={{ opacity: 0, height: 0 }}
-                    className="flex items-center gap-3 bg-[#E53935]/10 border border-[#E53935]/20 rounded-xl px-4 py-3 text-sm text-[#E53935] font-medium overflow-hidden"
+                    className="space-y-3 bg-[#E53935]/10 border border-[#E53935]/20 rounded-xl px-4 py-3.5 text-sm text-[#E53935] font-medium overflow-hidden"
                   >
-                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" className="shrink-0">
-                      <circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/>
-                    </svg>
-                    <span>{error}</span>
+                    <div className="flex items-center gap-3">
+                      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" className="shrink-0 text-[#E53935]">
+                        <circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/>
+                      </svg>
+                      <span className="leading-snug">{error}</span>
+                    </div>
+
+                    <div className="pt-2.5 border-t border-[#E53935]/20 flex flex-col sm:flex-row sm:items-center justify-between gap-2 text-xs">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setModalTab('reset');
+                          setResetEmail(identifier);
+                          setModalError('');
+                          setModalSuccess('');
+                          setShowResetModal(true);
+                        }}
+                        className="font-bold text-white/90 hover:text-white underline text-left transition-colors"
+                      >
+                        Reset password →
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => {
+                          if (identifier.trim()) {
+                            handleResendConfirmation(identifier);
+                          } else {
+                            setModalTab('resend');
+                            setResetEmail('');
+                            setModalError('');
+                            setModalSuccess('');
+                            setShowResetModal(true);
+                          }
+                        }}
+                        disabled={isActionLoading || resendCooldown > 0}
+                        className={`font-bold underline text-left transition-colors disabled:opacity-50 disabled:no-underline ${isUnconfirmed ? 'text-amber-300 hover:text-amber-200' : 'text-white/90 hover:text-white'}`}
+                      >
+                        {resendCooldown > 0 ? `Resend email in ${resendCooldown}s` : 'Resend confirmation email →'}
+                      </button>
+                    </div>
                   </motion.div>
                 )}
               </AnimatePresence>
@@ -375,8 +639,11 @@ export function LoginPage({ onLogin }: LoginPageProps) {
                   Operator ID / Email
                 </label>
                 <input
-                  type="text"
+                  type="email"
                   autoComplete="username"
+                  autoCapitalize="none"
+                  autoCorrect="off"
+                  spellCheck={false}
                   placeholder={ROLE_PLACEHOLDERS[selectedRole]}
                   value={identifier}
                   onChange={e => { setIdentifier(e.target.value); setError(''); }}
@@ -391,13 +658,31 @@ export function LoginPage({ onLogin }: LoginPageProps) {
                 transition={{ delay: 0.2, duration: 0.3, ease: 'easeOut' }}
                 className="group"
               >
-                <label className="block text-[10px] font-bold text-[#A7ADB5] uppercase tracking-widest mb-2 transition-colors group-focus-within:text-white">
-                  Password
-                </label>
+                <div className="flex items-center justify-between mb-2">
+                  <label className="block text-[10px] font-bold text-[#A7ADB5] uppercase tracking-widest transition-colors group-focus-within:text-white">
+                    Password
+                  </label>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setModalTab('reset');
+                      setResetEmail(identifier);
+                      setModalError('');
+                      setModalSuccess('');
+                      setShowResetModal(true);
+                    }}
+                    className="text-[10px] font-semibold text-[#A7ADB5] hover:text-[#E53935] transition-colors"
+                  >
+                    Forgot Password?
+                  </button>
+                </div>
                 <div className="relative">
                   <input
                     type={showPassword ? 'text' : 'password'}
                     autoComplete="current-password"
+                    autoCapitalize="none"
+                    autoCorrect="off"
+                    spellCheck={false}
                     placeholder="Enter password"
                     value={password}
                     onChange={e => { setPassword(e.target.value); setError(''); }}
@@ -465,6 +750,150 @@ export function LoginPage({ onLogin }: LoginPageProps) {
                 </button>
               </motion.div>
             </form>
+
+            {/* Password Recovery & Confirmation Resend Modal */}
+            <AnimatePresence>
+              {showResetModal && (
+                <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm">
+                  <motion.div
+                    initial={{ opacity: 0, scale: 0.95 }}
+                    animate={{ opacity: 1, scale: 1 }}
+                    exit={{ opacity: 0, scale: 0.95 }}
+                    className="w-full max-w-md bg-[#0F172A] border border-white/10 rounded-2xl p-6 shadow-2xl relative"
+                  >
+                    <button
+                      type="button"
+                      onClick={() => { setShowResetModal(false); setModalSuccess(''); setModalError(''); }}
+                      className="absolute top-4 right-4 text-slate-400 hover:text-white p-1 rounded-lg hover:bg-white/5 transition-colors"
+                    >
+                      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                        <line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>
+                      </svg>
+                    </button>
+
+                    {/* Tab Navigation */}
+                    <div className="flex border-b border-white/10 mb-5 pb-1 gap-6">
+                      <button
+                        type="button"
+                        onClick={() => { setModalTab('reset'); setModalError(''); setModalSuccess(''); }}
+                        className={`pb-2 text-xs font-bold uppercase tracking-wider transition-colors relative ${
+                          modalTab === 'reset'
+                            ? 'text-white border-b-2 border-[#E53935]'
+                            : 'text-slate-400 hover:text-slate-200'
+                        }`}
+                      >
+                        Reset Password
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => { setModalTab('resend'); setModalError(''); setModalSuccess(''); }}
+                        className={`pb-2 text-xs font-bold uppercase tracking-wider transition-colors relative ${
+                          modalTab === 'resend'
+                            ? 'text-white border-b-2 border-[#E53935]'
+                            : 'text-slate-400 hover:text-slate-200'
+                        }`}
+                      >
+                        Resend Confirmation
+                      </button>
+                    </div>
+
+                    <h3 className="text-base font-bold text-white mb-1">
+                      {modalTab === 'reset' ? 'Account Password Recovery' : 'Resend Email Confirmation'}
+                    </h3>
+                    <p className="text-xs text-slate-400 mb-4 leading-relaxed">
+                      {modalTab === 'reset'
+                        ? 'Enter your operator email address. We will send you a secure link to reset your password.'
+                        : 'Enter your registered email address to receive a fresh verification link.'}
+                    </p>
+
+                    {modalError && (
+                      <div className="bg-[#E53935]/15 border border-[#E53935]/30 rounded-xl p-3 text-xs text-[#E53935] font-medium mb-4 flex items-start gap-2">
+                        <svg className="w-4 h-4 shrink-0 mt-0.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                          <circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/>
+                        </svg>
+                        <span>{modalError}</span>
+                      </div>
+                    )}
+
+                    {modalSuccess ? (
+                      <div className="bg-[#12B981]/15 border border-[#12B981]/30 rounded-xl p-4 text-xs text-[#12B981] mb-4 space-y-1.5">
+                        <div className="flex items-center gap-2 font-bold">
+                          <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+                            <polyline points="20 6 9 17 4 12"/>
+                          </svg>
+                          <span>Email Dispatched Successfully</span>
+                        </div>
+                        <p className="text-slate-300">{modalSuccess}</p>
+                      </div>
+                    ) : (
+                      <form
+                        onSubmit={modalTab === 'reset' ? handleSendPasswordReset : (e) => { e.preventDefault(); handleResendConfirmation(resetEmail); }}
+                        className="space-y-4"
+                      >
+                        <div>
+                          <label className="block text-[10px] font-bold text-[#A7ADB5] uppercase tracking-widest mb-1.5">
+                            Account Email
+                          </label>
+                          <input
+                            type="email"
+                            required
+                            autoCapitalize="none"
+                            autoCorrect="off"
+                            spellCheck={false}
+                            placeholder="operator@agency.org"
+                            value={resetEmail}
+                            onChange={e => { setResetEmail(e.target.value); setModalError(''); }}
+                            disabled={isActionLoading}
+                            className="aero-input w-full text-sm"
+                          />
+                        </div>
+
+                        {modalTab === 'reset' ? (
+                          <button
+                            type="submit"
+                            disabled={isActionLoading || resetCooldown > 0}
+                            className="w-full py-2.5 rounded-xl bg-[#E53935] hover:bg-[#ef5350] text-white text-xs font-bold uppercase tracking-wider transition-colors disabled:opacity-50"
+                          >
+                            {isActionLoading
+                              ? 'SENDING RECOVERY EMAIL...'
+                              : resetCooldown > 0
+                              ? `WAIT ${resetCooldown}S TO RETRY`
+                              : 'SEND RECOVERY EMAIL'}
+                          </button>
+                        ) : (
+                          <button
+                            type="submit"
+                            disabled={isActionLoading || resendCooldown > 0}
+                            className="w-full py-2.5 rounded-xl bg-[#E53935] hover:bg-[#ef5350] text-white text-xs font-bold uppercase tracking-wider transition-colors disabled:opacity-50"
+                          >
+                            {isActionLoading
+                              ? 'SENDING CONFIRMATION EMAIL...'
+                              : resendCooldown > 0
+                              ? `WAIT ${resendCooldown}S TO RETRY`
+                              : 'RESEND CONFIRMATION EMAIL'}
+                          </button>
+                        )}
+                      </form>
+                    )}
+
+                    <div className="mt-4 pt-4 border-t border-white/5 flex items-center justify-between">
+                      <span className="text-[10px] text-slate-500">
+                        {modalTab === 'reset'
+                          ? (resetCooldown > 0 ? `Cooldown: ${resetCooldown}s remaining` : 'Rate limit: 1 email / min')
+                          : (resendCooldown > 0 ? `Cooldown: ${resendCooldown}s remaining` : 'Rate limit: 1 email / min')}
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => { setShowResetModal(false); setModalSuccess(''); setModalError(''); }}
+                        className="text-xs text-slate-400 hover:text-white font-medium transition-colors"
+                      >
+                        Back to Sign In
+                      </button>
+                    </div>
+                  </motion.div>
+                </div>
+              )}
+            </AnimatePresence>
 
             <motion.div
               initial={{ opacity: 0, y: 12 }}

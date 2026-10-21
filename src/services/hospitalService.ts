@@ -8,8 +8,9 @@ import type {
   EmergencyCategory,
   PatientInfo
 } from '../types';
+import { getBackendUrl } from './apiConfig';
 
-const API_BASE_URL = (typeof import.meta !== 'undefined' && import.meta.env?.VITE_BACKEND_URL) || 'http://localhost:3001';
+const API_BASE_URL = getBackendUrl();
 
 function mapPriority(pgPriority?: string): EmergencyPriority {
   switch ((pgPriority || '').toLowerCase()) {
@@ -155,40 +156,45 @@ export const hospitalService = {
     const { data, error } = await query;
     if (error || !data) return [];
     
-    return data.map((i: any) => ({
-      id: i.id,
-      status: (i.status || 'active').toUpperCase(),
-      priority: mapPriority(i.priority),
-      category: (i.incident_type as EmergencyCategory) || 'GENERAL',
-      ambulanceId: i.ambulance_id || 'UNAVAILABLE',
-      ambulanceDisplayName: i.ambulance_id || 'AERO ALS',
-      hospital: { 
-        id: '', 
-        name: i.destination_hospital || 'Hospital ER', 
-        address: i.destination_address || '', 
-        location: { latitude: i.destination_latitude || 0, longitude: i.destination_longitude || 0 }, 
-        emergencyCapable: true 
-      },
-      patient: parsePatientData(i),
-      currentSpeedKmH: i.current_speed != null ? Math.round(i.current_speed) : undefined,
-      route: {
-        etaSeconds: i.traffic_duration_seconds != null ? i.traffic_duration_seconds : i.route_duration_seconds,
-        trafficAwareEtaSeconds: i.traffic_duration_seconds,
+    return data.map((i: any) => {
+      const isArrived = (i.status || '').toLowerCase() === 'arrived';
+      return {
+        id: i.id,
+        status: (i.status || 'active').toUpperCase(),
+        priority: mapPriority(i.priority),
+        category: (i.incident_type as EmergencyCategory) || 'GENERAL',
+        ambulanceId: i.ambulance_id || 'UNAVAILABLE',
+        ambulanceDisplayName: i.ambulance_id || 'AERO ALS',
+        hospital: { 
+          id: '', 
+          name: i.destination_hospital || 'Hospital ER', 
+          address: i.destination_address || '', 
+          location: { latitude: i.destination_latitude || 0, longitude: i.destination_longitude || 0 }, 
+          emergencyCapable: true 
+        },
+        patient: parsePatientData(i),
+        currentSpeedKmH: isArrived ? 0 : (i.current_speed != null ? Math.round(i.current_speed) : undefined),
+        route: {
+          etaSeconds: isArrived ? 0 : (i.traffic_duration_seconds != null ? i.traffic_duration_seconds : i.route_duration_seconds),
+          trafficAwareEtaSeconds: isArrived ? 0 : i.traffic_duration_seconds,
+          isTrafficAware: i.traffic_status === 'LIVE' || i.route_provider === 'tomtom',
+          trafficDelaySeconds: (i.traffic_duration_seconds && i.route_duration_seconds && !isArrived) 
+            ? Math.max(0, i.traffic_duration_seconds - i.route_duration_seconds) 
+            : 0,
+          polyline: i.route_geometry || [],
+          distanceMeters: isArrived ? 0 : (i.route_distance_meters || 0),
+          routeProvider: i.route_provider || 'tomtom'
+        },
+        route_duration_seconds: isArrived ? 0 : i.route_duration_seconds,
+        traffic_duration_seconds: isArrived ? 0 : i.traffic_duration_seconds,
         isTrafficAware: i.traffic_status === 'LIVE' || i.route_provider === 'tomtom',
-        trafficDelaySeconds: (i.traffic_duration_seconds && i.route_duration_seconds) 
-          ? Math.max(0, i.traffic_duration_seconds - i.route_duration_seconds) 
-          : 0,
-        polyline: i.route_geometry || [],
-        distanceMeters: i.route_distance_meters || 0,
-        routeProvider: i.route_provider || 'tomtom'
-      },
-      route_duration_seconds: i.route_duration_seconds,
-      traffic_duration_seconds: i.traffic_duration_seconds,
-      isTrafficAware: i.traffic_status === 'LIVE' || i.route_provider === 'tomtom',
-      route_provider: i.route_provider || 'tomtom',
-      vehicleNumber: i.ambulance_id || 'UNAVAILABLE',
-      createdAt: i.created_at
-    } as Emergency));
+        route_provider: i.route_provider || 'tomtom',
+        vehicleNumber: i.ambulance_id || 'UNAVAILABLE',
+        createdAt: i.created_at,
+        arrivedAt: i.arrived_at,
+        arrived_at: i.arrived_at
+      } as Emergency;
+    });
   },
 
   async updateHospitalCapacity(hospitalId: string, capacities: { availableIcuBeds?: number; traumaBaysAvailable?: number }) {

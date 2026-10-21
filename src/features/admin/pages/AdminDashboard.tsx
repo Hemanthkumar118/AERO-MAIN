@@ -6,7 +6,7 @@ import { Tabs } from '../../../components/ui/Tabs';
 import { Dialog } from '../../../components/ui/Dialog';
 import { analyticsService, type AdminOverviewStats } from '../../../services/analyticsService';
 import { realtimeService } from '../../../services/realtimeService';
-import type { Emergency } from '../../../types';
+import type { Emergency, ConnectionState } from '../../../types';
 import { motion, AnimatePresence } from 'framer-motion';
 import { 
   AlertTriangle, 
@@ -20,7 +20,10 @@ import {
   Activity,
   Ambulance as AmbulanceIcon,
   Navigation,
-  UserCheck
+  UserCheck,
+  Flame,
+  Edit3,
+  Trash2
 } from 'lucide-react';
 import {
   policeCoordinationService,
@@ -29,6 +32,8 @@ import {
 } from '../../../services/policeCoordinationService';
 
 export function AdminDashboard() {
+  const [connectionState, setConnectionState] = useState<ConnectionState>(realtimeService.getConnectionState());
+
   const [stats, setStats] = useState<AdminOverviewStats>({
     activeEmergencies: 0,
     completedIncidents: 0,
@@ -49,6 +54,26 @@ export function AdminDashboard() {
   const [searchTerm, setSearchTerm] = useState('');
   const [filterCategory, setFilterCategory] = useState('ALL');
   const [selectedEmergency, setSelectedEmergency] = useState<Emergency | null>(null);
+
+  // Admin Superuser Edit & Nuke states
+  const [editModalOpen, setEditModalOpen] = useState(false);
+  const [editingEmergency, setEditingEmergency] = useState<Emergency | null>(null);
+  const [editForm, setEditForm] = useState({
+    status: 'ACTIVE',
+    priority: 'CODE_RED',
+    category: 'CARDIAC',
+    hospitalName: '',
+    corridorStatus: 'PENDING',
+    notes: ''
+  });
+  const [isSavingEdit, setIsSavingEdit] = useState(false);
+
+  const [nukeSingleModalOpen, setNukeSingleModalOpen] = useState(false);
+  const [emergencyToNuke, setEmergencyToNuke] = useState<Emergency | null>(null);
+  const [isNukingSingle, setIsNukingSingle] = useState(false);
+
+  const [nukeAllModalOpen, setNukeAllModalOpen] = useState(false);
+  const [isNukingAll, setIsNukingAll] = useState(false);
 
   // Central Police Route Coordination Overview & Dispatcher Override
   const [coordinationOverview, setCoordinationOverview] = useState<{
@@ -91,6 +116,12 @@ export function AdminDashboard() {
   };
 
   useEffect(() => {
+    realtimeService.initialize();
+
+    const unsubConn = realtimeService.on('connection_change', (state: ConnectionState) => {
+      setConnectionState(state);
+    });
+
     loadData();
 
     const unsubEmergency = realtimeService.on('incidents_updated', () => {
@@ -104,6 +135,7 @@ export function AdminDashboard() {
     });
 
     return () => {
+      unsubConn();
       unsubEmergency();
       unsubPolice();
     };
@@ -111,6 +143,82 @@ export function AdminDashboard() {
 
   const handleExport = (format: 'csv' | 'json') => {
     analyticsService.exportData(format);
+  };
+
+  // Open Edit Modal with incident data
+  const handleOpenEdit = (emg: Emergency) => {
+    setEditingEmergency(emg);
+    setEditForm({
+      status: emg.status,
+      priority: emg.priority || 'CODE_RED',
+      category: emg.patient?.category || 'CARDIAC',
+      hospitalName: emg.hospital?.name || '',
+      corridorStatus: (emg as any).corridorStatus || 'PENDING',
+      notes: emg.patient?.chiefComplaint || ''
+    });
+    setEditModalOpen(true);
+  };
+
+  // Save Edit Changes
+  const handleSaveEdit = async () => {
+    if (!editingEmergency) return;
+    setIsSavingEdit(true);
+    try {
+      const statusMap: Record<string, string> = {
+        'ACTIVE': 'active',
+        'ARRIVED': 'arrived',
+        'COMPLETED': 'resolved',
+        'CANCELLED': 'cancelled'
+      };
+      const rawStatus = statusMap[editForm.status] || editForm.status.toLowerCase();
+
+      await analyticsService.updateIncident(editingEmergency.id, {
+        status: rawStatus,
+        priority: editForm.priority.toLowerCase() === 'code_red' ? 'critical' : (editForm.priority.toLowerCase() === 'code_yellow' ? 'high' : 'medium'),
+        incident_type: editForm.category,
+        destination_hospital: editForm.hospitalName,
+        corridor_status: editForm.corridorStatus,
+        description: editForm.notes
+      });
+
+      setEditModalOpen(false);
+      setEditingEmergency(null);
+      await loadData();
+    } catch (err: any) {
+      alert(`Failed to save edit: ${err.message || 'Unknown error'}`);
+    } finally {
+      setIsSavingEdit(false);
+    }
+  };
+
+  // Nuke Single Incident
+  const handleConfirmNukeSingle = async () => {
+    if (!emergencyToNuke) return;
+    setIsNukingSingle(true);
+    try {
+      await analyticsService.nukeIncident(emergencyToNuke.id);
+      setNukeSingleModalOpen(false);
+      setEmergencyToNuke(null);
+      await loadData();
+    } catch (err: any) {
+      alert(`Nuke failed: ${err.message || 'Unknown error'}`);
+    } finally {
+      setIsNukingSingle(false);
+    }
+  };
+
+  // Nuke All Active Incidents
+  const handleConfirmNukeAll = async () => {
+    setIsNukingAll(true);
+    try {
+      await analyticsService.nukeAllActiveIncidents();
+      setNukeAllModalOpen(false);
+      await loadData();
+    } catch (err: any) {
+      alert(`Nuke all failed: ${err.message || 'Unknown error'}`);
+    } finally {
+      setIsNukingAll(false);
+    }
   };
 
   const statCards = [
@@ -159,7 +267,7 @@ export function AdminDashboard() {
   ];
 
   const activeList = emergencies.filter(emg => {
-    const isActive = emg.status === 'ACTIVE';
+    const isActive = emg.status === 'ACTIVE' || emg.status === 'ARRIVED';
     const matchesSearch = emg.id.toLowerCase().includes(searchTerm.toLowerCase()) ||
       (emg.ambulanceDisplayName || '').toLowerCase().includes(searchTerm.toLowerCase()) ||
       (emg.hospital?.name || '').toLowerCase().includes(searchTerm.toLowerCase());
@@ -168,7 +276,7 @@ export function AdminDashboard() {
   });
 
   const historyList = emergencies.filter(emg => {
-    const isHistory = emg.status !== 'ACTIVE';
+    const isHistory = emg.status === 'COMPLETED' || emg.status === 'CANCELLED';
     const matchesSearch = emg.id.toLowerCase().includes(searchTerm.toLowerCase()) ||
       (emg.ambulanceDisplayName || '').toLowerCase().includes(searchTerm.toLowerCase()) ||
       (emg.hospital?.name || '').toLowerCase().includes(searchTerm.toLowerCase());
@@ -212,15 +320,46 @@ export function AdminDashboard() {
                   </div>
                 </div>
 
-                <div className="flex items-center gap-3 shrink-0 self-end sm:self-auto bg-[#131826] px-3 py-1.5 rounded-lg border border-slate-800">
-                  <div className="text-right">
-                    <span className="text-[10px] text-slate-400 uppercase font-semibold block">ETA</span>
-                    <span className="text-xs text-slate-200 font-mono font-bold">
-                      {emg.route?.etaSeconds != null ? `${Math.round(emg.route.etaSeconds / 60)}m` : 'N/A'}
-                    </span>
+                <div className="flex items-center gap-2.5 shrink-0 self-end sm:self-auto flex-wrap">
+                  <div className="flex items-center gap-3 bg-[#131826] px-3 py-1.5 rounded-lg border border-slate-800">
+                    <div className="text-right">
+                      <span className="text-[10px] text-slate-400 uppercase font-semibold block">ETA</span>
+                      <span className="text-xs text-slate-200 font-mono font-bold">
+                        {emg.status === 'ARRIVED' ? (
+                          <span className="text-emerald-400 font-sans">ARRIVED</span>
+                        ) : emg.route?.etaSeconds != null ? (
+                          `${Math.round(emg.route.etaSeconds / 60)}m`
+                        ) : (
+                          'N/A'
+                        )}
+                      </span>
+                    </div>
+                    <div className="h-4 w-px bg-slate-800" />
+                    <StatusBadge status={emg.status} />
                   </div>
-                  <div className="h-4 w-px bg-slate-800" />
-                  <StatusBadge status={emg.status} />
+
+                  {/* Superuser Edit / Nuke Buttons */}
+                  <div className="flex items-center gap-1.5" onClick={(e) => e.stopPropagation()}>
+                    <button
+                      onClick={() => handleOpenEdit(emg)}
+                      className="px-2.5 py-1.5 rounded-lg bg-[#131826] hover:bg-cyan-950/80 text-slate-300 hover:text-cyan-300 border border-slate-700/80 hover:border-cyan-600/80 text-xs font-semibold flex items-center gap-1 transition-all cursor-pointer"
+                      title="Edit incident properties and status"
+                    >
+                      <Edit3 className="w-3.5 h-3.5 text-cyan-400" />
+                      <span className="hidden sm:inline">Edit</span>
+                    </button>
+                    <button
+                      onClick={() => {
+                        setEmergencyToNuke(emg);
+                        setNukeSingleModalOpen(true);
+                      }}
+                      className="px-2.5 py-1.5 rounded-lg bg-red-950/40 hover:bg-red-900/70 text-red-300 hover:text-white border border-red-800/40 hover:border-red-600 text-xs font-semibold flex items-center gap-1 transition-all cursor-pointer"
+                      title="Nuke (purge/cancel) this emergency incident"
+                    >
+                      <Trash2 className="w-3.5 h-3.5 text-red-400" />
+                      <span className="hidden sm:inline">Nuke</span>
+                    </button>
+                  </div>
                 </div>
               </div>
             </div>
@@ -239,7 +378,7 @@ export function AdminDashboard() {
   );
 
   return (
-    <AppShell userRole="ADMIN" userName="Central Command Admin" connectionState={realtimeService.getConnectionState()}>
+    <AppShell userRole="ADMIN" userName="Central Command Admin" connectionState={connectionState}>
       <div className="h-full overflow-y-auto pb-10 bg-[#07090C] text-slate-200">
         
         {/* Top Header */}
@@ -257,6 +396,14 @@ export function AdminDashboard() {
             >
               <RefreshCw className={`w-3.5 h-3.5 ${loading ? 'animate-spin' : ''}`} />
               <span>Refresh</span>
+            </button>
+            <button
+              onClick={() => setNukeAllModalOpen(true)}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-red-950/80 hover:bg-red-900 text-red-200 text-xs font-bold border border-red-700/80 transition-colors cursor-pointer shadow-sm hover:shadow-red-950/50"
+              title="Purge all active emergencies across all boards"
+            >
+              <Flame className="w-3.5 h-3.5 text-red-400" />
+              <span>Nuke All Active</span>
             </button>
             <button
               onClick={() => handleExport('csv')}
@@ -548,6 +695,147 @@ export function AdminDashboard() {
           />
         </div>
 
+        {/* Modal: Admin Superuser Edit Incident */}
+        <Dialog
+          open={editModalOpen}
+          onClose={() => setEditModalOpen(false)}
+          title={`Edit Incident: ${editingEmergency?.id.slice(0, 8)}...`}
+          variant="default"
+          confirmLabel={isSavingEdit ? "Saving..." : "Save Changes"}
+          onConfirm={handleSaveEdit}
+        >
+          <div className="space-y-3.5 text-xs text-slate-300">
+            <p className="text-slate-400 text-[11px]">
+              Administrator override: modify incident priority, status, corridor, or destination directly.
+            </p>
+
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className="text-[10px] uppercase font-bold text-slate-400 block mb-1">Status</label>
+                <select
+                  value={editForm.status}
+                  onChange={(e) => setEditForm(prev => ({ ...prev, status: e.target.value }))}
+                  className="w-full bg-[#131826] border border-slate-700 rounded-lg p-2.5 text-xs text-white focus:outline-none focus:border-cyan-500"
+                >
+                  <option value="ACTIVE">ACTIVE</option>
+                  <option value="COMPLETED">COMPLETED (Resolved)</option>
+                  <option value="CANCELLED">CANCELLED</option>
+                </select>
+              </div>
+
+              <div>
+                <label className="text-[10px] uppercase font-bold text-slate-400 block mb-1">Priority</label>
+                <select
+                  value={editForm.priority}
+                  onChange={(e) => setEditForm(prev => ({ ...prev, priority: e.target.value }))}
+                  className="w-full bg-[#131826] border border-slate-700 rounded-lg p-2.5 text-xs text-white focus:outline-none focus:border-cyan-500"
+                >
+                  <option value="CODE_RED">CODE RED (Critical)</option>
+                  <option value="CODE_YELLOW">CODE YELLOW (High)</option>
+                  <option value="CODE_GREEN">CODE GREEN (Medium)</option>
+                </select>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className="text-[10px] uppercase font-bold text-slate-400 block mb-1">Category</label>
+                <select
+                  value={editForm.category}
+                  onChange={(e) => setEditForm(prev => ({ ...prev, category: e.target.value }))}
+                  className="w-full bg-[#131826] border border-slate-700 rounded-lg p-2.5 text-xs text-white focus:outline-none focus:border-cyan-500"
+                >
+                  <option value="CARDIAC">CARDIAC</option>
+                  <option value="TRAUMA">TRAUMA</option>
+                  <option value="RESPIRATORY">RESPIRATORY</option>
+                  <option value="STROKE">STROKE</option>
+                  <option value="PEDIATRIC">PEDIATRIC</option>
+                  <option value="GENERAL">GENERAL</option>
+                  <option value="OTHER">OTHER</option>
+                </select>
+              </div>
+
+              <div>
+                <label className="text-[10px] uppercase font-bold text-slate-400 block mb-1">Corridor Status</label>
+                <select
+                  value={editForm.corridorStatus}
+                  onChange={(e) => setEditForm(prev => ({ ...prev, corridorStatus: e.target.value }))}
+                  className="w-full bg-[#131826] border border-slate-700 rounded-lg p-2.5 text-xs text-white focus:outline-none focus:border-cyan-500"
+                >
+                  <option value="PENDING">PENDING</option>
+                  <option value="CLEARING">CLEARING</option>
+                  <option value="CLEAR">CLEAR</option>
+                  <option value="CAUTION">CAUTION</option>
+                  <option value="BLOCKED">BLOCKED</option>
+                </select>
+              </div>
+            </div>
+
+            <div>
+              <label className="text-[10px] uppercase font-bold text-slate-400 block mb-1">Destination Hospital</label>
+              <input
+                type="text"
+                value={editForm.hospitalName}
+                onChange={(e) => setEditForm(prev => ({ ...prev, hospitalName: e.target.value }))}
+                className="w-full bg-[#131826] border border-slate-700 rounded-lg p-2.5 text-xs text-white focus:outline-none focus:border-cyan-500"
+                placeholder="Hospital name..."
+              />
+            </div>
+
+            <div>
+              <label className="text-[10px] uppercase font-bold text-slate-400 block mb-1">Chief Complaint / Description</label>
+              <textarea
+                value={editForm.notes}
+                onChange={(e) => setEditForm(prev => ({ ...prev, notes: e.target.value }))}
+                rows={2}
+                className="w-full bg-[#131826] border border-slate-700 rounded-lg p-2.5 text-xs text-white focus:outline-none focus:border-cyan-500 resize-none"
+                placeholder="Emergency description..."
+              />
+            </div>
+          </div>
+        </Dialog>
+
+        {/* Modal: Nuke Single Incident Confirmation */}
+        <Dialog
+          open={nukeSingleModalOpen}
+          onClose={() => setNukeSingleModalOpen(false)}
+          title="Confirm Incident Nuke"
+          variant="danger"
+          confirmLabel={isNukingSingle ? "Nuking..." : "Yes, Nuke Incident"}
+          onConfirm={handleConfirmNukeSingle}
+        >
+          <div className="space-y-3 text-xs text-slate-300">
+            <p className="text-red-300 font-semibold">
+              Warning: You are about to NUKE incident <span className="font-mono text-white font-bold select-all">{emergencyToNuke?.id}</span>.
+            </p>
+            <p>
+              This will immediately purge the incident from active queues, revoke police corridor checkpoints, and clear ambulance telemetry.
+            </p>
+          </div>
+        </Dialog>
+
+        {/* Modal: Nuke All Active Incidents Confirmation */}
+        <Dialog
+          open={nukeAllModalOpen}
+          onClose={() => setNukeAllModalOpen(false)}
+          title="⚠️ NUKE ALL ACTIVE EMERGENCIES"
+          variant="danger"
+          confirmLabel={isNukingAll ? "Nuking All..." : "Yes, Nuke All Active"}
+          onConfirm={handleConfirmNukeAll}
+        >
+          <div className="space-y-3 text-xs text-slate-300">
+            <p className="text-red-400 font-bold text-sm">
+              CAUTION: This will immediately purge ALL {activeList.length} active emergency incident(s) across the entire AERO platform.
+            </p>
+            <p>
+              All active ambulance corridors, police junction assignments, and hospital triage incoming queues will be cancelled and reset immediately.
+            </p>
+            <p className="text-slate-400">
+              Only perform this action for clearing test states or resetting emergency operations.
+            </p>
+          </div>
+        </Dialog>
+
         {/* Modal: Dispatcher Assignment Override / Reinforcement */}
         <Dialog
           open={reassignModalOpen}
@@ -566,7 +854,6 @@ export function AdminDashboard() {
                 newOfficerName
               );
               if (res?.assignment) {
-                // Refresh data
                 const updated = await policeCoordinationService.getAdminOverview();
                 if (updated) setCoordinationOverview(updated);
                 setReassignModalOpen(false);
@@ -680,6 +967,30 @@ export function AdminDashboard() {
                     {(selectedEmergency as any).resolvedAt ? new Date((selectedEmergency as any).resolvedAt).toLocaleString() : 'Ongoing / Unresolved'}
                   </span>
                 </div>
+              </div>
+
+              <div className="flex justify-end gap-2 pt-2 border-t border-slate-800">
+                <button
+                  onClick={() => {
+                    handleOpenEdit(selectedEmergency);
+                    setSelectedEmergency(null);
+                  }}
+                  className="px-3 py-1.5 rounded-lg bg-cyan-950/80 hover:bg-cyan-900 text-cyan-300 border border-cyan-700/80 text-xs font-semibold flex items-center gap-1.5 transition-all cursor-pointer"
+                >
+                  <Edit3 className="w-3.5 h-3.5" />
+                  <span>Edit Incident</span>
+                </button>
+                <button
+                  onClick={() => {
+                    setEmergencyToNuke(selectedEmergency);
+                    setSelectedEmergency(null);
+                    setNukeSingleModalOpen(true);
+                  }}
+                  className="px-3 py-1.5 rounded-lg bg-red-950/60 hover:bg-red-900 text-red-300 border border-red-800/60 text-xs font-semibold flex items-center gap-1.5 transition-all cursor-pointer"
+                >
+                  <Trash2 className="w-3.5 h-3.5" />
+                  <span>Nuke Incident</span>
+                </button>
               </div>
             </div>
           </Dialog>

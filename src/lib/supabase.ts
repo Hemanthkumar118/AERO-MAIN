@@ -1,7 +1,7 @@
 import { createClient } from '@supabase/supabase-js';
 
 const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
-const supabaseAnonKey = import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY;
+const supabaseAnonKey = import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY || import.meta.env.VITE_SUPABASE_ANON_KEY;
 const isConfigured = Boolean(supabaseUrl && supabaseAnonKey);
 
 if (!isConfigured) {
@@ -33,24 +33,42 @@ const createMockSupabase = () => {
   } as any;
 };
 
-const getStorageKey = () => {
-  if (typeof window === 'undefined') return 'aero-session';
-  const path = window.location.pathname;
-  if (path.startsWith('/ambulance')) return 'aero-session-ambulance';
-  if (path.startsWith('/police')) return 'aero-session-police';
-  if (path.startsWith('/hospital')) return 'aero-session-hospital';
-  if (path.startsWith('/admin')) return 'aero-session-admin';
-  return 'aero-session-default';
-};
+// Unified session storage key across all routes so mobile navigation and reloads stay logged in
+const AERO_STORAGE_KEY = 'aero-auth-session';
+
+// Migrate any legacy route-specific session keys to the unified key
+if (typeof window !== 'undefined' && window.localStorage) {
+  try {
+    if (!localStorage.getItem(AERO_STORAGE_KEY)) {
+      const legacyKeys = [
+        'aero-session-default',
+        'aero-session-ambulance',
+        'aero-session-police',
+        'aero-session-hospital',
+        'aero-session-admin',
+        'aero-session'
+      ];
+      for (const key of legacyKeys) {
+        const val = localStorage.getItem(key);
+        if (val) {
+          localStorage.setItem(AERO_STORAGE_KEY, val);
+          break;
+        }
+      }
+    }
+  } catch {
+    // Ignore storage migration errors
+  }
+}
 
 export const supabase = isConfigured 
   ? createClient(supabaseUrl, supabaseAnonKey, {
       auth: {
-        storage: window.localStorage,
-        storageKey: getStorageKey(), // Unique key per role to prevent overwriting sessions
+        storage: typeof window !== 'undefined' ? window.localStorage : undefined,
+        storageKey: AERO_STORAGE_KEY,
         autoRefreshToken: true,
         persistSession: true,
-        detectSessionInUrl: true
+        detectSessionInUrl: true,
       }
     }) 
   : createMockSupabase();

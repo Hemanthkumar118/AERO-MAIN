@@ -64,6 +64,7 @@ const statusConfig: Record<EmergencyStatus, { variant: BadgeVariant; label: stri
   PENDING: { variant: 'warning', label: 'PENDING' },
   ACCEPTED: { variant: 'info', label: 'ACCEPTED' },
   ACTIVE: { variant: 'emergency', label: 'ACTIVE' },
+  ARRIVED: { variant: 'info', label: 'ARRIVED AT HOSPITAL' },
   COMPLETED: { variant: 'success', label: 'COMPLETED' },
   CANCELLED: { variant: 'neutral', label: 'CANCELLED' },
 };

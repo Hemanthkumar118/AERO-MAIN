@@ -102,8 +102,9 @@ export interface GeneratePlanParams {
   priority?: string;
   reason?: string;
 }
+import { getBackendUrl } from './apiConfig';
 
-const BACKEND_URL = import.meta.env.VITE_BACKEND_URL || 'http://localhost:3001';
+const BACKEND_URL = getBackendUrl();
 
 async function getAuthHeaders(): Promise<Record<string, string>> {
   const headers: Record<string, string> = {
