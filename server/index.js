@@ -1395,12 +1395,13 @@ function calculateDestinationPoint(lat, lng, distanceMeters, bearingDeg) {
 
 const EXCLUDED_HEALTHCARE_KEYWORDS = [
   'pharmacy', 'chemist', 'drug store', 'medical & general store', 'medical store', 'druggist', 'medicals',
-  'diagnostic center', 'diagnostic centre', 'pathology', 'laboratory', 'path lab', 'scan center', 'scan centre', 'mri center', 'x-ray', 'imaging center',
-  'dental', 'dentist', 'dental clinic', 'orthodontic', 'tooth clinic',
-  'veterinary', 'pet clinic', 'animal hospital', 'vet care', 'dog clinic',
-  'beauty', 'wellness', 'spa', 'massage', 'cosmetic', 'hair clinic', 'skin clinic', 'laser clinic',
+  'diagnostic center', 'diagnostic centre', 'pathology', 'laboratory', 'path lab', 'scan center', 'scan centre', 'mri center', 'x-ray', 'imaging center', 'blood bank',
+  'dental', 'dentist', 'dental clinic', 'orthodontic', 'tooth clinic', 'teeth',
+  'veterinary', 'pet clinic', 'animal hospital', 'vet care', 'dog clinic', 'cat clinic',
+  'beauty', 'wellness', 'spa', 'massage', 'cosmetic', 'hair clinic', 'skin clinic', 'laser clinic', 'slimming',
   'optical', 'optician', 'eye wear', 'spectacles', 'lenskart',
-  'physiotherapy clinic', 'chiropractor'
+  'physiotherapy clinic', 'physio', 'chiropractor', 'rehab clinic',
+  'ayurveda', 'ayurvedic', 'ayuveda', 'ayur', 'homeopathy', 'homeopathic', 'naturopathy', 'nature cure', 'ayush', 'unani', 'siddha', 'panchakarma'
 ];
 
 function isLegitimateHospitalFacility(name) {
@@ -1545,9 +1546,9 @@ app.get(['/api/places/hospitals', '/api/hospitals/search'], authenticateOptional
         const { data: dbHospitals } = await supabase.from('hospitals').select('*');
         if (dbHospitals && Array.isArray(dbHospitals)) {
           for (const dbH of dbHospitals) {
-            const hLat = dbH.location?.coordinates ? dbH.location.coordinates[1] : null;
-            const hLng = dbH.location?.coordinates ? dbH.location.coordinates[0] : null;
-            if (hLat && hLng) {
+            const hLat = dbH.location?.coordinates ? dbH.location.coordinates[1] : (dbH.latitude || null);
+            const hLng = dbH.location?.coordinates ? dbH.location.coordinates[0] : (dbH.longitude || null);
+            if (hLat && hLng && !(hLat === 0 && hLng === 0)) {
               const d = Math.round(calculateHaversineMeters(lat, lng, hLat, hLng));
               if (d <= radiusMeters * 1.005) {
                 rawMap.set(`db_${dbH.id}`, {
@@ -1557,6 +1558,10 @@ app.get(['/api/places/hospitals', '/api/hospitals/search'], authenticateOptional
                   position: { lat: hLat, lon: hLng },
                   poi: { name: dbH.name, phone: dbH.phone },
                   address: { freeformAddress: dbH.address || dbH.name },
+                  emergencyCapable: dbH.emergency_capable,
+                  totalBeds: dbH.total_beds,
+                  availableIcuBeds: dbH.available_icu_beds,
+                  traumaBaysAvailable: dbH.trauma_bays_available,
                   dist: d
                 });
               }
@@ -1575,7 +1580,7 @@ app.get(['/api/places/hospitals', '/api/hospitals/search'], authenticateOptional
     for (const r of rawMap.values()) {
       const hLat = r.position?.lat;
       const hLng = r.position?.lon;
-      if (!hLat || !hLng) continue;
+      if (!hLat || !hLng || (hLat === 0 && hLng === 0)) continue;
 
       const distMeters = Math.round(calculateHaversineMeters(lat, lng, hLat, hLng));
 
@@ -1586,23 +1591,50 @@ app.get(['/api/places/hospitals', '/api/hospitals/search'], authenticateOptional
       if (textQuery && distMeters > 50000) continue;
 
       const name = r.poi?.name || 'Hospital';
-      if (!r.isDbHospital && !isLegitimateHospitalFacility(name)) continue;
+      const isLegit = isLegitimateHospitalFacility(name);
+      if (!r.isDbHospital && !isLegit) continue;
 
-      // Spatial dedup: ~55m grid bucket
-      const gridKey = `${Math.floor(hLat / 0.0005)}_${Math.floor(hLng / 0.0005)}`;
+      // Spatial dedup: ~35m grid bucket
+      const gridKey = `${Math.floor(hLat / 0.00035)}_${Math.floor(hLng / 0.00035)}`;
       const existing = spatialDeduplicationGrid.get(gridKey);
       if (
         existing &&
         (existing.name.toLowerCase() === name.toLowerCase() ||
-          calculateHaversineMeters(existing.lat, existing.lng, hLat, hLng) < 25)
+          calculateHaversineMeters(existing.lat, existing.lng, hLat, hLng) < 30)
       ) {
-        continue;
+        if (r.isDbHospital && !existing.isDbHospital) {
+          const idx = hospitals.findIndex(h => h.id === existing.id);
+          if (idx !== -1) hospitals.splice(idx, 1);
+        } else {
+          continue;
+        }
+      }
+
+      // Determine verification tier and emergency eligibility
+      let verificationTier = 'unverified';
+      let isEmergencyEligible = false;
+      let ineligibilityReason = 'Unverified external place result — not integrated into AERO dispatch network';
+
+      if (r.isDbHospital) {
+        const isAlternativeMedicine = !isLegit;
+        if (r.emergencyCapable === true && !isAlternativeMedicine) {
+          verificationTier = 'verified_emergency';
+          isEmergencyEligible = true;
+          ineligibilityReason = undefined;
+        } else {
+          verificationTier = 'registered';
+          isEmergencyEligible = false;
+          ineligibilityReason = isAlternativeMedicine 
+            ? 'Alternative healthcare facility — not certified for acute emergency trauma admissions'
+            : 'Registered with AERO, but not certified for acute emergency receiving';
+        }
       }
 
       const normalized = {
         id: r.isDbHospital ? `db_${r.dbId}` : `tomtom_${r.id}`,
         providerId: r.isDbHospital ? r.dbId : r.id,
         provider: r.isDbHospital ? 'db' : 'tomtom',
+        isDbHospital: r.isDbHospital,
         name,
         lat: hLat,
         lng: hLng,
@@ -1613,19 +1645,24 @@ app.get(['/api/places/hospitals', '/api/hospitals/search'], authenticateOptional
         phone: r.poi?.phone || null,
         types: ['hospital'],
         distanceMeters: distMeters,
-        isOutsideRadius
+        isOutsideRadius,
+        verificationTier,
+        isEmergencyEligible,
+        ineligibilityReason,
+        emergencyCapable: r.emergencyCapable,
+        totalBeds: r.totalBeds,
+        availableIcuBeds: r.availableIcuBeds,
+        traumaBaysAvailable: r.traumaBaysAvailable,
       };
 
       spatialDeduplicationGrid.set(gridKey, normalized);
       hospitals.push(normalized);
     }
 
-    // Sort: If text query, show in-radius matches first, then outside-radius; within each group sort by distance
+    // Sort: Verified emergency hospitals first, then strictly ascending by distance
     hospitals.sort((a, b) => {
-      if (textQuery) {
-        if (a.isOutsideRadius !== b.isOutsideRadius) {
-          return a.isOutsideRadius ? 1 : -1;
-        }
+      if (a.isEmergencyEligible !== b.isEmergencyEligible) {
+        return a.isEmergencyEligible ? -1 : 1;
       }
       return a.distanceMeters - b.distanceMeters;
     });

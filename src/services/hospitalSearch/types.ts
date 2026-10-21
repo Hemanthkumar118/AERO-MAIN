@@ -1,6 +1,8 @@
+export type VerificationTier = 'verified_emergency' | 'registered' | 'unverified';
+
 export interface RawHospitalResult {
   providerId: string;
-  provider: 'google' | 'osm' | 'db' | 'mappls';
+  provider: 'google' | 'osm' | 'db' | 'mappls' | 'tomtom';
   name: string;
   lat: number;
   lng: number;
@@ -17,7 +19,7 @@ export interface RawHospitalResult {
 
 export interface NormalizedHospital {
   id: string; // Internal AERO ID
-  provider: 'google' | 'osm' | 'merged' | 'db' | 'mappls';
+  provider: 'google' | 'osm' | 'merged' | 'db' | 'mappls' | 'tomtom';
   providerId: string;
   name: string;
   lat: number;
@@ -32,6 +34,15 @@ export interface NormalizedHospital {
   distanceMeters: number; // Straight-line distance from search center
   googleMapsUri?: string;
   
+  // Emergency Eligibility & Verification
+  verificationTier: VerificationTier;
+  isEmergencyEligible: boolean;
+  ineligibilityReason?: string;
+  emergencyCapable?: boolean;
+  totalBeds?: number | null;
+  availableIcuBeds?: number | null;
+  traumaBaysAvailable?: number | null;
+
   // Routing fields populated later by routing service
   routeDistanceMeters?: number;
   routeDurationSeconds?: number;

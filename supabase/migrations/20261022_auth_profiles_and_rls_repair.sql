@@ -134,15 +134,30 @@ ALTER TABLE public.profiles ENABLE ROW LEVEL SECURITY;
 
 DROP POLICY IF EXISTS "Users can view profiles" ON public.profiles;
 DROP POLICY IF EXISTS "Users can view own profile" ON public.profiles;
-CREATE POLICY "Users can view profiles"
-  ON public.profiles FOR SELECT TO authenticated
-  USING (
-    auth.uid() = id OR
-    EXISTS (
-      SELECT 1 FROM public.profiles p 
-      WHERE p.id = auth.uid() AND p.role IN ('admin', 'traffic_operator')
-    )
+DROP POLICY IF EXISTS "Admins can view all profiles" ON public.profiles;
+
+CREATE OR REPLACE FUNCTION public.is_admin_or_dispatcher(check_user_id UUID DEFAULT auth.uid())
+RETURNS BOOLEAN
+LANGUAGE sql
+SECURITY DEFINER
+SET search_path = public, pg_temp
+STABLE
+AS $$
+  SELECT EXISTS (
+    SELECT 1 FROM public.profiles
+    WHERE id = check_user_id
+      AND role IN ('admin', 'traffic_operator')
+      AND status = 'ACTIVE'
   );
+$$;
+
+CREATE POLICY "Users can view own profile"
+  ON public.profiles FOR SELECT TO authenticated
+  USING (auth.uid() = id);
+
+CREATE POLICY "Admins can view all profiles"
+  ON public.profiles FOR SELECT TO authenticated
+  USING (public.is_admin_or_dispatcher(auth.uid()));
 
 DROP POLICY IF EXISTS "Users can insert own profile" ON public.profiles;
 CREATE POLICY "Users can insert own profile"

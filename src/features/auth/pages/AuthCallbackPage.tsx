@@ -323,7 +323,12 @@ export function AuthCallbackPage() {
         setPendingStatusNotice('Your account is still pending administrative role assignment. Please contact dispatch administration.');
       }
     } catch (err: any) {
-      setPendingStatusNotice(err.message || 'Could not verify account status. Please try again.');
+      const msg = err.message || '';
+      if (msg.includes('recursion') || msg.includes('42P17')) {
+        setPendingStatusNotice('Database RLS policy recursion detected on profiles table. Run the migration in supabase/migrations/20261025_fix_profiles_rls_recursion.sql in your Supabase SQL editor.');
+      } else {
+        setPendingStatusNotice(msg || 'Could not verify account status. Please try again.');
+      }
     } finally {
       setIsCheckingStatus(false);
     }

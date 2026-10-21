@@ -5,7 +5,7 @@ import { Button } from '../../../components/ui/Button';
 import { Input } from '../../../components/ui/Input';
 import { useAuth, type AeroProfile } from '../../../providers/AuthProvider';
 import { hospitalService } from '../../../services/hospitalService';
-import { discoverHospitals, autocompleteGooglePlaces, getGooglePlaceDetails } from '../../../services/hospitalSearch';
+import { discoverHospitals, autocompleteGooglePlaces, getGooglePlaceDetails, assessHospitalEligibility } from '../../../services/hospitalSearch';
 import { geolocationService } from '../../../services/geolocationService';
 import type { Hospital } from '../../../types';
 import type { NormalizedHospital } from '../../../services/hospitalSearch/types';
@@ -130,6 +130,7 @@ export function AccountSettingsPage() {
       const details = await getGooglePlaceDetails(placeId);
       if (!details) throw new Error("Place details not found");
       
+      const assessment = assessHospitalEligibility(details.name, details.provider, false, details.types);
       const normalized: NormalizedHospital = {
         id: details.providerId,
         providerId: details.providerId,
@@ -141,6 +142,9 @@ export function AccountSettingsPage() {
         phone: details.phone,
         types: details.types,
         distanceMeters: 0,
+        verificationTier: assessment.verificationTier,
+        isEmergencyEligible: assessment.isEmergencyEligible,
+        ineligibilityReason: assessment.ineligibilityReason,
       };
 
       setMapHospitals(prev => [normalized, ...prev]);

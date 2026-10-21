@@ -324,12 +324,13 @@ export function AmbulanceDashboard() {
 
           setHospitalResults(ranked);
 
-          // Retain selected hospital if still in results, otherwise pick nearest
+          // Retain selected hospital if still in results, otherwise pick nearest eligible
           setSelectedHospital(prev => {
             if (prev && ranked.some(h => h.id === prev.id)) {
               return prev;
             }
-            const best = ranked[0];
+            const best = ranked.find(h => h.isEmergencyEligible);
+            if (!best) return prev || null;
             const autoHosp: any = {
               id: best.id,
               name: best.name,
@@ -337,9 +338,9 @@ export function AmbulanceDashboard() {
               location: { latitude: best.lat, longitude: best.lng },
               phone: best.phone || '',
               emergencyCapable: true,
-              totalBeds: 0,
-              availableIcuBeds: 0,
-              traumaBaysAvailable: 0,
+              totalBeds: best.totalBeds ?? 0,
+              availableIcuBeds: best.availableIcuBeds ?? 0,
+              traumaBaysAvailable: best.traumaBaysAvailable ?? 0,
               doctorsOnDuty: 0,
               distanceKm: parseFloat(((best as any).drivingDistanceMeters / 1000).toFixed(1)),
               drivingEtaSeconds: (best as any).drivingEtaSeconds
@@ -368,6 +369,9 @@ export function AmbulanceDashboard() {
   }, [baseLocation, radiusKm, activeIncident]);
 
   const handleSearchSelect = async (h: NormalizedHospital) => {
+    // Only allow verified emergency hospitals to become active destinations
+    if (!h.isEmergencyEligible) return;
+
     const hosp: any = {
       id: h.id,
       name: h.name,
@@ -375,6 +379,9 @@ export function AmbulanceDashboard() {
       location: { latitude: h.lat, longitude: h.lng },
       phone: h.phone || '',
       emergencyCapable: true,
+      totalBeds: h.totalBeds ?? 0,
+      availableIcuBeds: h.availableIcuBeds ?? 0,
+      traumaBaysAvailable: h.traumaBaysAvailable ?? 0,
       distanceKm: parseFloat((h.distanceMeters / 1000).toFixed(1)),
     };
     
