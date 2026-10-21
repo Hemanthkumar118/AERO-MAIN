@@ -55,7 +55,7 @@ export function AppRoutes() {
   };
 
   const ProtectedRoute = ({ allowedRoles, children }: { allowedRoles?: string[]; children: React.ReactNode }) => {
-    const { user, profile, authLoading, profileLoading, profileError, refreshProfile } = useAuth();
+    const { user, profile, authLoading, profileLoading, profileError, refreshProfile, signOut } = useAuth();
     const location = useLocation();
 
     if (authLoading || (profileLoading && !profile)) {
@@ -74,12 +74,20 @@ export function AppRoutes() {
           <div className="bg-aero-red-soft border border-aero-red/30 rounded-xl p-6 max-w-md text-center">
             <h2 className="text-xl font-bold text-aero-red mb-2">AERO ACCOUNT ERROR</h2>
             <p className="text-aero-text-secondary mb-6">{profileError || "Authentication could not be initialized."}</p>
-            <button 
-              onClick={() => refreshProfile()}
-              className="bg-aero-surface hover:bg-aero-surface-soft text-aero-text-primary px-6 py-2 rounded-lg border border-aero-border transition-colors"
-            >
-              Retry
-            </button>
+            <div className="flex gap-3 justify-center">
+              <button 
+                onClick={() => refreshProfile()}
+                className="bg-aero-surface hover:bg-aero-surface-soft text-aero-text-primary px-6 py-2 rounded-lg border border-aero-border transition-colors text-sm font-semibold"
+              >
+                Retry
+              </button>
+              <button 
+                onClick={() => signOut()}
+                className="bg-red-500/10 hover:bg-red-500/20 text-red-400 px-6 py-2 rounded-lg border border-red-500/30 transition-colors text-sm font-semibold"
+              >
+                Sign Out
+              </button>
+            </div>
           </div>
         </div>
       );
@@ -89,8 +97,42 @@ export function AppRoutes() {
       return <Navigate to="/login" state={{ from: location }} replace />;
     }
 
+    const userRole = profile?.role?.toUpperCase();
+    const isPending = profile?.status?.toUpperCase() === 'PENDING' || userRole === 'PENDING';
+
+    if (isPending) {
+      return (
+        <div className="min-h-dvh flex flex-col items-center justify-center bg-aero-background p-4 text-center">
+          <div className="bg-[#121926] border border-amber-500/30 rounded-2xl p-8 max-w-md w-full shadow-2xl">
+            <div className="w-12 h-12 rounded-xl bg-amber-500/20 text-amber-400 flex items-center justify-center mx-auto mb-4">
+              <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                <circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/>
+              </svg>
+            </div>
+            <h2 className="text-lg font-black tracking-wide text-white uppercase mb-2">ACCESS PENDING APPROVAL</h2>
+            <p className="text-sm text-slate-300 leading-relaxed mb-6">
+              Your account identity is verified. Your registration is awaiting administrator review and role authorization before operational dashboard access is granted.
+            </p>
+            <div className="flex flex-col gap-3">
+              <button
+                onClick={() => refreshProfile()}
+                className="w-full py-2.5 px-4 bg-cyan-600 hover:bg-cyan-500 text-white rounded-xl text-xs font-bold tracking-wider uppercase transition-colors"
+              >
+                Check Approval Status
+              </button>
+              <button
+                onClick={() => signOut()}
+                className="w-full py-2 px-4 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-xl text-xs font-semibold transition-colors"
+              >
+                Sign Out
+              </button>
+            </div>
+          </div>
+        </div>
+      );
+    }
+
     if (allowedRoles && allowedRoles.length > 0) {
-      const userRole = profile?.role?.toUpperCase();
       if (!userRole || !allowedRoles.includes(userRole)) {
         if (userRole === 'POLICE' || userRole === 'TRAFFIC_OPERATOR') {
           if (location.pathname !== '/police') return <Navigate to="/police" replace />;
@@ -98,14 +140,24 @@ export function AppRoutes() {
           if (location.pathname !== '/hospital') return <Navigate to="/hospital" replace />;
         } else if (userRole === 'ADMIN') {
           if (location.pathname !== '/admin') return <Navigate to="/admin" replace />;
-        } else {
+        } else if (userRole === 'AMBULANCE' || userRole === 'AMBULANCE_OPERATOR') {
           if (location.pathname !== '/ambulance') return <Navigate to="/ambulance" replace />;
         }
         
         return (
           <div className="min-h-dvh flex flex-col items-center justify-center bg-aero-background p-4 text-center">
-            <h2 className="text-xl font-bold text-aero-red mb-2">UNAUTHORIZED</h2>
-            <p className="text-aero-text-secondary">Your account role ({userRole || 'UNKNOWN'}) does not have access to this page.</p>
+            <div className="bg-[#121926] border border-red-500/30 rounded-2xl p-8 max-w-md w-full shadow-2xl">
+              <h2 className="text-xl font-bold text-aero-red mb-2">UNAUTHORIZED CONSOLE ACCESS</h2>
+              <p className="text-aero-text-secondary mb-6">
+                Your account is authenticated as <strong className="text-white">{userRole || 'UNKNOWN'}</strong>, which does not have permission to access this operational dashboard.
+              </p>
+              <button
+                onClick={() => signOut()}
+                className="w-full py-2.5 px-4 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-xl text-xs font-bold uppercase transition-colors"
+              >
+                Sign Out
+              </button>
+            </div>
           </div>
         );
       }

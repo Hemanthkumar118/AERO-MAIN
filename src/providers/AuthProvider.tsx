@@ -94,8 +94,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         }
       }
     } catch (err: any) {
-      console.warn('[AuthProvider] Profile fetch error, safely holding as pending:', err);
-      if (currentUser?.email) {
+      console.warn('[AuthProvider] Profile fetch notice:', err);
+      if (err?.message?.includes('recursion') || err?.code === '42P17') {
+        setProfileError('Database RLS recursion detected on public.profiles. Please execute the migration supabase/migrations/20261025_fix_profiles_rls_recursion.sql in Supabase SQL Editor.');
+        setProfile(null);
+      } else if (currentUser?.email) {
         setProfile({
           id: currentUser.id,
           role: currentUser.user_metadata?.role || 'pending',

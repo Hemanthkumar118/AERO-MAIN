@@ -87,6 +87,7 @@ export function LoginPage({ onLogin }: LoginPageProps) {
   const [isLoading, setIsLoading] = useState(false);
   const [isActionLoading, setIsActionLoading] = useState(false);
   const [error, setError] = useState('');
+  const [errorCategory, setErrorCategory] = useState<'credentials' | 'unconfirmed' | 'pending' | 'unassigned' | 'rls' | 'network' | 'timeout' | 'general'>('general');
   const [infoNotice, setInfoNotice] = useState('');
   const [isUnconfirmed, setIsUnconfirmed] = useState(false);
   const [showResetModal, setShowResetModal] = useState(false);
@@ -348,24 +349,30 @@ export function LoginPage({ onLogin }: LoginPageProps) {
         const msg = (error.message || '').toLowerCase();
         if (msg.includes('email not confirmed') || error.code === 'email_not_confirmed') {
           setIsUnconfirmed(true);
-          setError('Your email has not been confirmed yet. Please verify your inbox or click "Resend Confirmation" below.');
+          setErrorCategory('unconfirmed');
+          setError('Your email address has not been confirmed yet. Please verify your inbox or click "Resend confirmation email" below.');
           return;
         }
         if (msg.includes('invalid login credentials') || error.code === 'invalid_credentials') {
-          // Both wrong password and unconfirmed account (with email enumeration prevention) return invalid_credentials
           setIsUnconfirmed(true);
+          setErrorCategory('credentials');
           setError('Invalid email or password. Please verify your credentials or use the account recovery options below.');
           return;
         }
         if (msg.includes('rate limit')) {
+          setErrorCategory('general');
           setError('Too many login attempts. Please wait a moment and try again.');
           return;
         }
-        throw error;
+        setErrorCategory('general');
+        setError(error.message || 'Authentication failed. Please verify your credentials.');
+        return;
       }
 
       if (!data?.session || !data?.user) {
-        throw new Error("Authentication succeeded but no session was returned.");
+        setErrorCategory('general');
+        setError("Authentication succeeded but no active session was returned by the server.");
+        return;
       }
 
       console.info('[AERO Auth Diagnostic] Supabase credentials accepted. Inspecting public.profiles:', {
@@ -381,25 +388,37 @@ export function LoginPage({ onLogin }: LoginPageProps) {
         .maybeSingle();
 
       if (profileError) {
-        console.warn('[AERO Auth Diagnostic] Profile lookup notice:', profileError);
-      } else {
-        console.info('[AERO Auth Diagnostic] Profile lookup result:', {
-          hasProfile: Boolean(profileData),
-          role: profileData?.role || 'NONE',
-          status: profileData?.status || 'NONE',
-          timestamp: new Date().toISOString()
-        });
+        console.error('[AERO Auth Diagnostic] Profile lookup error:', profileError);
+        await supabase.auth.signOut();
+        setErrorCategory('rls');
+        if (profileError.code === '42P17' || profileError.message?.includes('recursion')) {
+          setError('Authentication succeeded, but profile verification failed due to a database RLS recursion policy error. Please run the database repair migration in Supabase SQL editor.');
+        } else {
+          setError(`Authentication succeeded, but profile verification failed (${profileError.message || 'database security policy'}). Please contact dispatch administration.`);
+        }
+        return;
       }
+
+      console.info('[AERO Auth Diagnostic] Profile lookup result:', {
+        hasProfile: Boolean(profileData),
+        role: profileData?.role || 'NONE',
+        status: profileData?.status || 'NONE',
+        timestamp: new Date().toISOString()
+      });
 
       // Check account operational status if profile exists
       if (profileData?.status && ['SUSPENDED', 'BLOCKED', 'DEACTIVATED'].includes(profileData.status.toUpperCase())) {
         await supabase.auth.signOut();
-        throw new Error('Your operator account has been suspended. Please contact dispatch administration.');
+        setErrorCategory('general');
+        setError('Your operator account has been suspended. Please contact dispatch administration.');
+        return;
       }
 
       if (profileData?.status && profileData.status.toUpperCase() === 'PENDING') {
         await supabase.auth.signOut();
-        throw new Error('Your registration is pending administrative approval.');
+        setErrorCategory('pending');
+        setError('Your registration is verified, but awaiting administrator approval before dashboard access can be granted.');
+        return;
       }
 
       if (!profileData) {
@@ -419,23 +438,35 @@ export function LoginPage({ onLogin }: LoginPageProps) {
           .single();
 
         if (createError) {
-          console.warn('[Login] Could not persist profile to DB (RLS), using session role:', createError);
-          onLogin(authoritativeRole);
+          console.warn('[Login] Could not persist profile to DB (RLS):', createError);
+          await supabase.auth.signOut();
+          setErrorCategory('unassigned');
+          setError('Account authenticated, but your operator profile could not be initialized in the database. Please contact dispatch administration.');
+          return;
         } else {
           onLogin(createdProfile.role);
         }
       } else {
+        if (!profileData.role || profileData.role.toLowerCase() === 'pending' || profileData.role.toLowerCase() === 'unassigned') {
+          await supabase.auth.signOut();
+          setErrorCategory('unassigned');
+          setError('Account authenticated, but your operator role is unassigned or pending authorization. Please contact dispatch administration.');
+          return;
+        }
         // Check role consistency: navigate safely to their authorized role dashboard
         onLogin(profileData.role);
       }
     } catch (err: any) {
       console.error('Login error:', err);
       if (err.message === 'TIMEOUT') {
+        setErrorCategory('timeout');
         setError("Authentication request timed out. Please check your network connection and retry.");
       } else if (err.message === 'Failed to fetch' || err.message === 'NetworkError') {
+        setErrorCategory('network');
         setError("Unable to connect to authentication server. Please check your connection.");
       } else {
-        setError(err.message || 'Invalid email or password.');
+        setErrorCategory('general');
+        setError(err.message || 'An unexpected error occurred during sign in. Please retry.');
       }
     } finally {
       setIsLoading(false);
@@ -650,16 +681,50 @@ export function LoginPage({ onLogin }: LoginPageProps) {
                     initial={{ opacity: 0, height: 0 }}
                     animate={{ opacity: 1, height: 'auto' }}
                     exit={{ opacity: 0, height: 0 }}
-                    className="space-y-3 bg-[#E53935]/10 border border-[#E53935]/20 rounded-xl px-4 py-3.5 text-sm text-[#E53935] font-medium overflow-hidden"
+                    className={`space-y-3 rounded-xl px-4 py-3.5 text-sm font-medium overflow-hidden border ${
+                      errorCategory === 'unconfirmed' || errorCategory === 'pending' || errorCategory === 'unassigned'
+                        ? 'bg-amber-500/10 border-amber-500/30 text-amber-200'
+                        : errorCategory === 'network' || errorCategory === 'timeout'
+                        ? 'bg-orange-500/10 border-orange-500/30 text-orange-200'
+                        : 'bg-[#E53935]/10 border-[#E53935]/20 text-[#E53935]'
+                    }`}
                   >
-                    <div className="flex items-center gap-3">
-                      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" className="shrink-0 text-[#E53935]">
-                        <circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/>
-                      </svg>
-                      <span className="leading-snug">{error}</span>
+                    <div className="flex items-start gap-3">
+                      {errorCategory === 'unconfirmed' || errorCategory === 'pending' || errorCategory === 'unassigned' ? (
+                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" className="shrink-0 text-amber-400 mt-0.5">
+                          <circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/>
+                        </svg>
+                      ) : (
+                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" className="shrink-0 text-[#E53935] mt-0.5">
+                          <circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/>
+                        </svg>
+                      )}
+                      <div className="min-w-0 flex-1">
+                        <span className="leading-snug block">{error}</span>
+                        {errorCategory === 'credentials' && (
+                          <p className="text-xs text-white/70 font-normal mt-1.5 leading-relaxed">
+                            <span className="font-semibold text-amber-300">Signed up with Google?</span> If you originally registered with Google, your account has no email password set yet. Click <button type="button" onClick={handleGoogleSignIn} className="underline text-white font-semibold hover:text-cyan-300">Sign in with Google</button> or click <button type="button" onClick={() => { setModalTab('reset'); setResetEmail(identifier); setShowResetModal(true); }} className="underline text-white font-semibold hover:text-cyan-300">Reset password</button> to create an email password.
+                          </p>
+                        )}
+                        {errorCategory === 'pending' && (
+                          <div className="mt-2 flex items-center gap-2">
+                            <button
+                              type="button"
+                              onClick={() => navigate('/auth/callback')}
+                              className="px-3 py-1 bg-amber-500/20 hover:bg-amber-500/30 text-amber-200 border border-amber-500/40 rounded-lg text-xs font-bold transition-colors"
+                            >
+                              Check Approval Status →
+                            </button>
+                          </div>
+                        )}
+                      </div>
                     </div>
 
-                    <div className="pt-2.5 border-t border-[#E53935]/20 flex flex-col sm:flex-row sm:items-center justify-between gap-2 text-xs">
+                    <div className={`pt-2.5 border-t flex flex-col sm:flex-row sm:items-center justify-between gap-2 text-xs ${
+                      errorCategory === 'unconfirmed' || errorCategory === 'pending' || errorCategory === 'unassigned'
+                        ? 'border-amber-500/20'
+                        : 'border-[#E53935]/20'
+                    }`}>
                       <button
                         type="button"
                         onClick={() => {
@@ -688,7 +753,11 @@ export function LoginPage({ onLogin }: LoginPageProps) {
                           }
                         }}
                         disabled={isActionLoading || resendCooldown > 0}
-                        className={`font-bold underline text-left transition-colors disabled:opacity-50 disabled:no-underline ${isUnconfirmed ? 'text-amber-300 hover:text-amber-200' : 'text-white/90 hover:text-white'}`}
+                        className={`font-bold underline text-left transition-colors disabled:opacity-50 disabled:no-underline ${
+                          isUnconfirmed || errorCategory === 'unconfirmed'
+                            ? 'text-amber-300 hover:text-amber-200'
+                            : 'text-white/90 hover:text-white'
+                        }`}
                       >
                         {resendCooldown > 0 ? `Resend email in ${resendCooldown}s` : 'Resend confirmation email →'}
                       </button>
