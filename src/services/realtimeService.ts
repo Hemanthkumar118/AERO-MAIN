@@ -182,15 +182,14 @@ class RealtimeService {
       const { data, error } = await supabase
         .from('emergency_incidents')
         .select('*')
-        .order('created_at', { ascending: false });
+        .in('status', ['active', 'dispatched', 'en_route', 'rerouting', 'arrived'])
+        .order('created_at', { ascending: false })
+        .limit(50);
         
-      if (!error && Array.isArray(data) && data.length > 0) {
+      if (!error && Array.isArray(data)) {
         this.incidents.clear();
         data.forEach((inc: any) => {
-          const statusLower = (inc.status || '').toLowerCase();
-          if (['active', 'dispatched', 'en_route', 'rerouting', 'arrived'].includes(statusLower)) {
-            this.incidents.set(inc.id, inc as EmergencyIncident);
-          }
+          this.incidents.set(inc.id, inc as EmergencyIncident);
         });
         this.broadcastIncidents();
         loaded = true;

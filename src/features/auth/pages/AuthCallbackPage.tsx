@@ -15,6 +15,15 @@ export function AuthCallbackPage() {
   const [passwordError, setPasswordError] = useState<string | null>(null);
   const navigate = useNavigate();
 
+  const [accessPendingInfo, setAccessPendingInfo] = useState<{
+    email: string;
+    name: string;
+    userId: string;
+    provider: string;
+  } | null>(null);
+  const [isCheckingStatus, setIsCheckingStatus] = useState(false);
+  const [pendingStatusNotice, setPendingStatusNotice] = useState<string | null>(null);
+
   useEffect(() => {
     let mounted = true;
 
@@ -32,6 +41,9 @@ export function AuthCallbackPage() {
           if (params.get('error')) {
             const errCode = params.get('error_code');
             const errDesc = params.get('error_description');
+            if (params.get('error') === 'access_denied') {
+              throw new Error('Google sign-in was cancelled or access was denied. Please try again.');
+            }
             if (errCode === 'otp_expired' || errDesc?.toLowerCase().includes('expired')) {
               throw new Error('This verification or recovery link has expired. Please request a new one from the sign-in page.');
             } else {
@@ -87,66 +99,102 @@ export function AuthCallbackPage() {
         }
 
         if (!session || !session.user) {
-          throw new Error('No active authentication session found. Please sign in with your email and password.');
+          throw new Error('No active authentication session found. Please sign in with your email or Google account.');
         }
 
-        // 3. Email confirmation / verification: fetch authoritative profile
-        let authoritativeRole = (session.user.user_metadata?.role || 'ambulance').toLowerCase();
+        // 3. Authoritative profile lookup from public.profiles
+        const { data: profileData, error: profileErr } = await supabase
+          .from('profiles')
+          .select('role, status, full_name')
+          .eq('id', session.user.id)
+          .maybeSingle();
 
-        try {
-          const { data: profileData } = await supabase
-            .from('profiles')
-            .select('role, status')
-            .eq('id', session.user.id)
-            .maybeSingle();
-
-          if (profileData) {
-            if (profileData.status && ['SUSPENDED', 'BLOCKED', 'DEACTIVATED'].includes(profileData.status.toUpperCase())) {
-              await supabase.auth.signOut();
-              throw new Error('Your operator account has been suspended. Please contact dispatch administration.');
-            }
-            if (profileData.role) {
-              authoritativeRole = profileData.role.toLowerCase();
-            }
-          } else {
-            // Profile record not found yet — auto-create active profile for confirmed user
-            await supabase.from('profiles').upsert({
-              id: session.user.id,
-              role: authoritativeRole,
-              full_name: session.user.user_metadata?.full_name || session.user.email?.split('@')[0] || 'AERO Operator',
-              status: 'ACTIVE'
-            }, { onConflict: 'id' });
-          }
-        } catch (profErr: any) {
-          if (profErr.message?.includes('suspended')) {
-            throw profErr;
-          }
-          console.warn('[AuthCallback] Profile resolution notice:', profErr);
+        if (profileErr) {
+          console.warn('[AuthCallback] Profile query notice:', profileErr);
         }
 
+        // Check if account is suspended or blocked
+        if (profileData?.status && ['SUSPENDED', 'BLOCKED', 'DEACTIVATED'].includes(profileData.status.toUpperCase())) {
+          await supabase.auth.signOut();
+          throw new Error('Your operator account has been suspended. Please contact dispatch administration.');
+        }
+
+        const validRoles = ['AMBULANCE', 'AMBULANCE_OPERATOR', 'POLICE', 'TRAFFIC_OPERATOR', 'HOSPITAL', 'HOSPITAL_OPERATOR', 'ADMIN'];
+        const currentRole = profileData?.role?.toUpperCase();
+        const isActive = profileData?.status?.toUpperCase() === 'ACTIVE';
+
+        // Check if user has an authorized, active role in DB
+        if (profileData && currentRole && validRoles.includes(currentRole) && isActive) {
+          if (!mounted) return;
+          setLoading(false);
+
+          // Route directly to authorized dashboard
+          switch (currentRole) {
+            case 'AMBULANCE_OPERATOR':
+            case 'AMBULANCE':
+              navigate('/ambulance', { replace: true });
+              break;
+            case 'TRAFFIC_OPERATOR':
+            case 'POLICE':
+              navigate('/police', { replace: true });
+              break;
+            case 'HOSPITAL_OPERATOR':
+            case 'HOSPITAL':
+              navigate('/hospital', { replace: true });
+              break;
+            case 'ADMIN':
+              navigate('/admin', { replace: true });
+              break;
+            default:
+              navigate('/ambulance', { replace: true });
+          }
+          return;
+        }
+
+        // If email registration with explicit metadata role:
+        const explicitMetaRole = session.user.user_metadata?.role?.toUpperCase();
+        if (!profileData && explicitMetaRole && validRoles.includes(explicitMetaRole)) {
+          // Complete profile creation for email signup
+          const newProfile = {
+            id: session.user.id,
+            role: explicitMetaRole.toLowerCase(),
+            full_name: session.user.user_metadata?.full_name || session.user.email?.split('@')[0] || 'AERO Operator',
+            status: 'ACTIVE'
+          };
+          const { error: insErr } = await supabase.from('profiles').insert(newProfile);
+          if (!insErr) {
+            if (!mounted) return;
+            setLoading(false);
+            switch (explicitMetaRole) {
+              case 'AMBULANCE':
+              case 'AMBULANCE_OPERATOR':
+                navigate('/ambulance', { replace: true });
+                return;
+              case 'POLICE':
+              case 'TRAFFIC_OPERATOR':
+                navigate('/police', { replace: true });
+                return;
+              case 'HOSPITAL':
+              case 'HOSPITAL_OPERATOR':
+                navigate('/hospital', { replace: true });
+                return;
+              case 'ADMIN':
+                navigate('/admin', { replace: true });
+                return;
+            }
+          }
+        }
+
+        // UNASSIGNED / GOOGLE OAUTH: Hold in secure access-pending state
+        // Never automatically grant administrator, ambulance, police or hospital privileges
         if (!mounted) return;
+        setAccessPendingInfo({
+          email: session.user.email || '',
+          name: session.user.user_metadata?.full_name || session.user.user_metadata?.name || 'Operator',
+          userId: session.user.id,
+          provider: session.user.app_metadata?.provider || 'google',
+        });
         setLoading(false);
-
-        // 4. Route directly to authorized dashboard
-        switch (authoritativeRole) {
-          case 'ambulance_operator':
-          case 'ambulance':
-            navigate('/ambulance', { replace: true });
-            break;
-          case 'traffic_operator':
-          case 'police':
-            navigate('/police', { replace: true });
-            break;
-          case 'hospital_operator':
-          case 'hospital':
-            navigate('/hospital', { replace: true });
-            break;
-          case 'admin':
-            navigate('/admin', { replace: true });
-            break;
-          default:
-            navigate('/ambulance', { replace: true });
-        }
       } catch (err: any) {
         if (!mounted) return;
         setError(err.message || 'An error occurred during authentication verification.');
@@ -237,12 +285,128 @@ export function AuthCallbackPage() {
     }
   };
 
+  const checkPendingProfile = async (userId: string) => {
+    setIsCheckingStatus(true);
+    setPendingStatusNotice(null);
+    try {
+      const { data, error } = await supabase
+        .from('profiles')
+        .select('role, status')
+        .eq('id', userId)
+        .maybeSingle();
+
+      if (error) throw error;
+
+      const validRoles = ['AMBULANCE', 'AMBULANCE_OPERATOR', 'POLICE', 'TRAFFIC_OPERATOR', 'HOSPITAL', 'HOSPITAL_OPERATOR', 'ADMIN'];
+      const r = data?.role?.toUpperCase();
+      const isActive = data?.status?.toUpperCase() === 'ACTIVE';
+
+      if (data && r && validRoles.includes(r) && isActive) {
+        switch (r) {
+          case 'AMBULANCE':
+          case 'AMBULANCE_OPERATOR':
+            navigate('/ambulance', { replace: true });
+            return;
+          case 'POLICE':
+          case 'TRAFFIC_OPERATOR':
+            navigate('/police', { replace: true });
+            return;
+          case 'HOSPITAL':
+          case 'HOSPITAL_OPERATOR':
+            navigate('/hospital', { replace: true });
+            return;
+          case 'ADMIN':
+            navigate('/admin', { replace: true });
+            return;
+        }
+      } else {
+        setPendingStatusNotice('Your account is still pending administrative role assignment. Please contact dispatch administration.');
+      }
+    } catch (err: any) {
+      setPendingStatusNotice(err.message || 'Could not verify account status. Please try again.');
+    } finally {
+      setIsCheckingStatus(false);
+    }
+  };
+
+  const handleSignOut = async () => {
+    try {
+      await supabase.auth.signOut();
+    } catch {}
+    navigate('/login', { replace: true });
+  };
+
   if (loading) {
     return (
       <div className="min-h-dvh flex flex-col items-center justify-center bg-aero-background p-4">
         <div className="w-16 h-16 rounded-full border-4 border-aero-border border-t-[#35C7FF] animate-spin mb-4"></div>
         <h2 className="text-xl font-bold text-aero-text-primary">Verifying Authentication...</h2>
         <p className="text-aero-text-secondary mt-2">Please wait while we confirm your credentials.</p>
+      </div>
+    );
+  }
+
+  // Access Pending Mode: Authenticated via OAuth or Registration, but role unassigned / awaiting activation
+  if (accessPendingInfo) {
+    return (
+      <div className="min-h-dvh flex items-center justify-center bg-aero-background p-4">
+        <div className="w-full max-w-md bg-[#0F172A] border border-white/10 rounded-2xl p-8 shadow-2xl text-center">
+          <div className="w-16 h-16 rounded-2xl bg-sky-500/10 border border-sky-500/30 mx-auto flex items-center justify-center mb-6">
+            <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="#38BDF8" strokeWidth="2">
+              <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>
+              <path d="M12 8v4M12 16h.01"/>
+            </svg>
+          </div>
+
+          <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 text-[11px] font-bold tracking-wide uppercase mb-3">
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3"><polyline points="20 6 9 17 4 12"/></svg>
+            Google Identity Verified
+          </div>
+
+          <h2 className="text-xl font-black text-white tracking-tight mb-2">Access Pending Approval</h2>
+          <p className="text-xs text-slate-300 leading-relaxed mb-6">
+            Your Google account (<span className="text-white font-mono font-semibold">{accessPendingInfo.email}</span>) has been authenticated. Because AERO is a restricted emergency dispatch and response network, an administrator must assign your operational role before dashboard access is permitted.
+          </p>
+
+          <div className="bg-white/[0.03] border border-white/10 rounded-xl p-4 text-left mb-6 space-y-2 text-xs">
+            <div className="flex justify-between">
+              <span className="text-slate-400">Operator:</span>
+              <span className="text-white font-medium">{accessPendingInfo.name}</span>
+            </div>
+            <div className="flex justify-between">
+              <span className="text-slate-400">Account Status:</span>
+              <span className="text-amber-400 font-bold uppercase">Pending Assignment</span>
+            </div>
+            <div className="flex justify-between">
+              <span className="text-slate-400">Operator ID:</span>
+              <span className="text-slate-400 font-mono text-[10px]">{accessPendingInfo.userId.substring(0, 16)}...</span>
+            </div>
+          </div>
+
+          {pendingStatusNotice && (
+            <div className="bg-amber-500/10 border border-amber-500/20 rounded-xl p-3 text-xs text-amber-300 font-medium mb-4 text-left">
+              {pendingStatusNotice}
+            </div>
+          )}
+
+          <div className="space-y-3">
+            <Button
+              variant="primary"
+              fullWidth
+              onClick={() => checkPendingProfile(accessPendingInfo.userId)}
+              disabled={isCheckingStatus}
+            >
+              {isCheckingStatus ? 'CHECKING ROLE STATUS...' : 'CHECK APPROVAL STATUS'}
+            </Button>
+            <Button
+              variant="outline"
+              fullWidth
+              onClick={handleSignOut}
+            >
+              SIGN OUT & RETURN TO LOGIN
+            </Button>
+          </div>
+        </div>
       </div>
     );
   }

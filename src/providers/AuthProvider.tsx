@@ -60,36 +60,47 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       }
 
       if (data) {
-        // Profile exists — use it
+        // Profile exists — use authoritative DB profile
         setProfile(data as AeroProfile);
       } else {
-        // Profile doesn't exist (PGRST116 or null) — auto-create one
-        const newProfile = {
-          id: currentUser.id,
-          role: currentUser.user_metadata?.role || 'ambulance',
-          full_name: currentUser.user_metadata?.full_name || currentUser.email?.split('@')[0] || 'AERO Operator',
-        };
-        const { data: createdProfile, error: insertError } = await supabase
-          .from('profiles')
-          .insert(newProfile)
-          .select('id, role, full_name, status')
-          .single();
+        // Profile doesn't exist in DB — check if an explicit registration role exists in user_metadata
+        const requestedRole = currentUser.user_metadata?.role;
+        if (requestedRole) {
+          const newProfile = {
+            id: currentUser.id,
+            role: requestedRole,
+            full_name: currentUser.user_metadata?.full_name || currentUser.email?.split('@')[0] || 'AERO Operator',
+          };
+          const { data: createdProfile, error: insertError } = await supabase
+            .from('profiles')
+            .insert(newProfile)
+            .select('id, role, full_name, status')
+            .single();
 
-        if (insertError) {
-          console.warn('[AuthProvider] Failed to create profile in DB (RLS?), falling back to local metadata:', insertError);
-          setProfile({ ...newProfile, status: 'ACTIVE' } as AeroProfile);
+          if (insertError) {
+            console.warn('[AuthProvider] Failed to create profile in DB, holding as pending:', insertError);
+            setProfile({ ...newProfile, status: 'PENDING' } as AeroProfile);
+          } else {
+            setProfile(createdProfile as AeroProfile);
+          }
         } else {
-          setProfile(createdProfile as AeroProfile);
+          // Unprovisioned or OAuth account: Do NOT automatically assign emergency privileges
+          setProfile({
+            id: currentUser.id,
+            role: 'pending',
+            full_name: currentUser.user_metadata?.full_name || currentUser.email?.split('@')[0] || 'AERO Operator',
+            status: 'PENDING',
+          } as AeroProfile);
         }
       }
     } catch (err: any) {
-      console.warn('[AuthProvider] Profile fetch error, falling back to local user metadata:', err);
-      if (currentUser?.user_metadata?.role || currentUser?.email) {
+      console.warn('[AuthProvider] Profile fetch error, safely holding as pending:', err);
+      if (currentUser?.email) {
         setProfile({
           id: currentUser.id,
-          role: currentUser.user_metadata?.role || 'ambulance',
+          role: currentUser.user_metadata?.role || 'pending',
           full_name: currentUser.user_metadata?.full_name || currentUser.email?.split('@')[0] || 'AERO Operator',
-          status: 'ACTIVE',
+          status: 'PENDING',
         } as AeroProfile);
       } else {
         setProfileError(err.message || 'Failed to load profile');

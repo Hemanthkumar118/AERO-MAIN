@@ -201,12 +201,12 @@ export const HospitalPins = memo(function HospitalPins({
       map.once('load', setupClusteredLayers);
     }
 
-    // 2. Render prominent DOM pins for the closest 40 visible hospitals
-    // Clear old markers
+    // 2. Render prominent DOM pins for the closest 15 visible hospitals
+    // (Remaining hospitals are smoothly handled by the MapLibre GeoJSON cluster/circle layer)
     markersRef.current.forEach(m => m.remove());
     markersRef.current = [];
 
-    const closestHospitals = uniqueHospitals.slice(0, 40);
+    const closestHospitals = uniqueHospitals.slice(0, 15);
     const newMarkers: maplibregl.Marker[] = [];
 
     closestHospitals.forEach(hospital => {

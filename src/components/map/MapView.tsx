@@ -173,8 +173,7 @@ export function MapView({
         applyEnglish(coreMap);
         setIsMapLoaded(true);
       });
-      coreMap.on('styledata', () => applyEnglish(coreMap));
-      coreMap.on('idle', () => applyEnglish(coreMap));
+      coreMap.once('styledata', () => applyEnglish(coreMap));
 
       // Fallback in case load takes longer or already ready
       setTimeout(() => {
@@ -206,8 +205,7 @@ export function MapView({
           applyEnglish(mlMap);
           setIsMapLoaded(true);
         });
-        mlMap.on('styledata', () => applyEnglish(mlMap));
-        mlMap.on('idle', () => applyEnglish(mlMap));
+        mlMap.once('styledata', () => applyEnglish(mlMap));
       } catch (fallbackErr: any) {
         console.error('[MapView] Fatal MapLibre initialization error:', fallbackErr);
         setTrafficError(fallbackErr.message || 'Failed to initialize TomTom Maps');
@@ -230,13 +228,23 @@ export function MapView({
     };
   }, []);
 
-  // Update center when prop changes
+  // Update center when prop changes (with threshold check to prevent tile thrashing)
   useEffect(() => {
     if (isMapLoaded && mapRef.current) {
       const safeCenter = (center[0] === 0 && center[1] === 0)
         ? { lat: 17.4435, lng: 78.3772 }
         : { lat: center[0], lng: center[1] };
-      mapRef.current.setCenter([safeCenter.lng, safeCenter.lat]);
+      const cur = mapRef.current.getCenter();
+      if (cur) {
+        const dLat = Math.abs(cur.lat - safeCenter.lat);
+        const dLng = Math.abs(cur.lng - safeCenter.lng);
+        // Only re-center if change is greater than ~11 meters
+        if (dLat > 0.0001 || dLng > 0.0001) {
+          mapRef.current.setCenter([safeCenter.lng, safeCenter.lat]);
+        }
+      } else {
+        mapRef.current.setCenter([safeCenter.lng, safeCenter.lat]);
+      }
     }
   }, [center[0], center[1], isMapLoaded]);
 

@@ -28,6 +28,7 @@ export function TomTomMapMarker({
 
   const popupHtmlDep = popupContent ? renderToString(<div className="aero-custom-popup">{popupContent}</div>) : '';
 
+  // Create and manage MapLibre Marker instance
   useEffect(() => {
     if (!map) return;
 
@@ -82,7 +83,24 @@ export function TomTomMapMarker({
     } catch (err) {
       console.error('[TomTomMapMarker] Error creating marker:', err);
     }
-  }, [map, html, popupHtmlDep, width, height]);
+  }, [map, html, width, height]);
+
+  // Update popup content in-place without destroying the marker
+  useEffect(() => {
+    if (popupRef.current && popupHtmlDep) {
+      popupRef.current.setHTML(popupHtmlDep);
+    } else if (!popupRef.current && popupHtmlDep && markerRef.current) {
+      const popup = new maplibregl.Popup({
+        offset: 25,
+        maxWidth: '320px',
+        closeButton: true,
+        closeOnClick: false,
+        className: 'aero-maplibre-popup'
+      }).setHTML(popupHtmlDep);
+      markerRef.current.setPopup(popup);
+      popupRef.current = popup;
+    }
+  }, [popupHtmlDep]);
 
   // Update marker position smoothly
   useEffect(() => {
