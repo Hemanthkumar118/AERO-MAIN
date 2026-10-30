@@ -36,7 +36,7 @@ function toEnglishTextField(expr: any): any {
  * Enforces English-only map labels across all symbol layers on MapLibre map instance
  */
 export function enforceEnglishLabels(map: MapLibreMap) {
-  if (!map || !map.getStyle) return;
+  if (!map || !map.getStyle || (map as any).__englishLabelsEnforced) return;
   try {
     const style = map.getStyle();
     if (!style || !style.layers) return;
@@ -58,6 +58,7 @@ export function enforceEnglishLabels(map: MapLibreMap) {
         }
       }
     }
+    (map as any).__englishLabelsEnforced = true;
   } catch (err) {
     console.warn('[MapView] Error enforcing English labels:', err);
   }

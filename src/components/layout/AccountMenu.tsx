@@ -3,14 +3,57 @@ import type { UserRole } from '../../types';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../../providers/AuthProvider';
 
-export function AccountMenu() {
+interface AccountMenuProps {
+  userName?: string;
+  userRole?: UserRole;
+}
+
+export function AccountMenu({ userName: propUserName, userRole: propUserRole }: AccountMenuProps = {}) {
   const [isOpen, setIsOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
-  const { profile, signOut } = useAuth();
+  const { user, profile, signOut } = useAuth();
   const navigate = useNavigate();
   
-  const userName = profile?.full_name || 'Operator';
-  const userRole = (profile?.role?.toUpperCase() || 'UNKNOWN') as UserRole;
+  // High-fidelity fallback resolution:
+  // 1. Explicit valid prop passed from dashboard/StatusBar (ignoring generic placeholders)
+  // 2. Verified profile from database
+  // 3. User metadata from Supabase session
+  // 4. Cached user name from localStorage
+  // 5. Email username
+  // 6. Context-aware fallback
+  const validPropName = (propUserName && propUserName !== 'Operator' && !propUserName.includes('Unknown') && propUserName !== 'Ambulance Operator')
+    ? propUserName
+    : null;
+
+  const resolvedName = 
+    validPropName ||
+    profile?.full_name ||
+    user?.user_metadata?.full_name ||
+    user?.user_metadata?.name ||
+    (typeof window !== 'undefined' ? localStorage.getItem('aero-user-name') : null) ||
+    (user?.email ? user.email.split('@')[0] : null) ||
+    propUserName ||
+    'Ambulance Operator';
+
+  const validPropRole = (propUserRole && propUserRole !== ('UNKNOWN' as any)) ? propUserRole : null;
+
+  const rawRole = (
+    validPropRole ||
+    profile?.role ||
+    user?.user_metadata?.role ||
+    (typeof window !== 'undefined' ? localStorage.getItem('aero-user-role') : null) ||
+    'AMBULANCE'
+  ).toUpperCase();
+
+  const userRole = (['AMBULANCE', 'POLICE', 'HOSPITAL', 'ADMIN'].includes(rawRole) 
+    ? rawRole 
+    : rawRole.includes('AMBULANCE') ? 'AMBULANCE'
+    : rawRole.includes('POLICE') || rawRole.includes('TRAFFIC') ? 'POLICE'
+    : rawRole.includes('HOSPITAL') ? 'HOSPITAL'
+    : rawRole === 'ADMIN' ? 'ADMIN'
+    : 'AMBULANCE') as UserRole;
+
+  const userName = resolvedName;
 
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {

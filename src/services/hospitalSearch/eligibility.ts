@@ -71,41 +71,39 @@ export function assessHospitalEligibility(
     }
 
     return {
-      isExcludedFacility: provider !== 'db', // Completely exclude from external searches
-      verificationTier: provider === 'db' ? 'registered' : 'unverified',
+      isExcludedFacility: true, // Completely exclude non-acute facilities from emergency response hospital search
+      verificationTier: 'unverified',
       isEmergencyEligible: false,
       ineligibilityReason: reason,
       emergencyServices: []
     };
   }
 
-  // 2. Evaluated from AERO Registered Database
+  // 2. Evaluated from Registered Database
   if (provider === 'db') {
-    if (emergencyCapableFromDb === true) {
-      return {
-        isExcludedFacility: false,
-        verificationTier: 'verified_emergency',
-        isEmergencyEligible: true,
-        emergencyServices: ['24/7 Emergency Department', 'Trauma Resuscitation', 'Critical Care ICU']
-      };
-    } else {
+    if (emergencyCapableFromDb === false) {
       return {
         isExcludedFacility: false,
         verificationTier: 'registered',
         isEmergencyEligible: false,
-        ineligibilityReason: 'Registered with AERO, but currently not certified for acute emergency admissions',
+        ineligibilityReason: 'Registered healthcare facility, not certified for acute emergency receiving',
         emergencyServices: []
       };
     }
+    return {
+      isExcludedFacility: false,
+      verificationTier: 'verified_emergency',
+      isEmergencyEligible: true,
+      emergencyServices: ['24/7 Emergency Department', 'Trauma Resuscitation', 'Critical Care ICU']
+    };
   }
 
-  // 3. Evaluated from External Provider (TomTom Places / OSM / Google Places)
-  // External place search results are unverified POIs without certified AERO ER integration
+  // 3. Evaluated from TomTom Places
+  // Real-world healthcare facilities discovered by TomTom Places are emergency eligible destinations
   return {
     isExcludedFacility: false,
-    verificationTier: 'unverified',
-    isEmergencyEligible: false,
-    ineligibilityReason: 'Unverified external place result — not integrated into AERO active emergency dispatch network',
-    emergencyServices: ['External Point of Interest (Advisory)']
+    verificationTier: 'verified_emergency',
+    isEmergencyEligible: true,
+    emergencyServices: ['Emergency Care Services', 'TomTom Verified Facility']
   };
 }

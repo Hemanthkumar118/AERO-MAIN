@@ -203,6 +203,7 @@ export interface Hospital {
   traumaBaysAvailable?: number;
   doctorsOnDuty?: number;
   distanceKm?: number;
+  drivingEtaSeconds?: number;
 }
 
 // ── Junction & Police-Assisted Clearance ──

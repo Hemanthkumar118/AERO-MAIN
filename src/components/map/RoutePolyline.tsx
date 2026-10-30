@@ -26,19 +26,55 @@ export function RoutePolyline({
   const congestionSourceIdRef = useRef('aero-live-cong');
   const lastFittedRouteKey = useRef<string>('');
 
+  // Unmount cleanup ONLY: tear down layers and sources when unmounting
+  useEffect(() => {
+    return () => {
+      try {
+        if (!map) return;
+        const sourceId = sourceIdRef.current;
+        const congSourceId = congestionSourceIdRef.current;
+        const casingLayerId = `${sourceId}-casing`;
+        const glowLayerId = `${sourceId}-glow`;
+        const baseLayerId = `${sourceId}-base`;
+        const congLayerId = `${congSourceId}-layer`;
+
+        if (map.getLayer(congLayerId)) map.removeLayer(congLayerId);
+        if (map.getSource(congSourceId)) map.removeSource(congSourceId);
+        if (map.getLayer(baseLayerId)) map.removeLayer(baseLayerId);
+        if (map.getLayer(glowLayerId)) map.removeLayer(glowLayerId);
+        if (map.getLayer(casingLayerId)) map.removeLayer(casingLayerId);
+        if (map.getSource(sourceId)) map.removeSource(sourceId);
+      } catch (e) {}
+    };
+  }, [map]);
+
   useEffect(() => {
     if (!map || !positions || positions.length < 2) return;
 
     const sourceId = sourceIdRef.current;
     const casingLayerId = `${sourceId}-casing`;
-    const glowLayerId = `${sourceId}-glow`;
     const baseLayerId = `${sourceId}-base`;
 
     const congSourceId = congestionSourceIdRef.current;
     const congLayerId = `${congSourceId}-layer`;
 
     // Coordinates in MapLibre format: [lng, lat]
-    const coordinates = positions.map(([lat, lng]) => [lng, lat]);
+    const len = positions.length;
+    const coordinates: [number, number][] = new Array(len);
+    let minLng = Infinity;
+    let maxLng = -Infinity;
+    let minLat = Infinity;
+    let maxLat = -Infinity;
+
+    for (let i = 0; i < len; i++) {
+      const lat = positions[i][0];
+      const lng = positions[i][1];
+      coordinates[i] = [lng, lat];
+      if (lng < minLng) minLng = lng;
+      if (lng > maxLng) maxLng = lng;
+      if (lat < minLat) minLat = lat;
+      if (lat > maxLat) maxLat = lat;
+    }
 
     const routeGeoJson: any = {
       type: 'Feature',
@@ -52,9 +88,14 @@ export function RoutePolyline({
     const existingSource = map.getSource(sourceId) as GeoJSONSource | undefined;
 
     if (existingSource) {
-      // 1. Efficient In-place Data Update
+      // 1. Efficient In-place Data Update (Zero layer teardown)
       try {
         existingSource.setData(routeGeoJson);
+
+        // Update color dynamically if active toggled
+        if (map.getLayer(baseLayerId)) {
+          map.setPaintProperty(baseLayerId, 'line-color', active ? '#dc2626' : '#2563eb');
+        }
 
         // Update congestion segments if present
         if (congestionSegments && congestionSegments.length > 0) {
@@ -172,12 +213,6 @@ export function RoutePolyline({
     const routeKey = `${coordinates[0]?.[0].toFixed(3)},${coordinates[0]?.[1].toFixed(3)}-${coordinates[coordinates.length - 1]?.[0].toFixed(3)},${coordinates[coordinates.length - 1]?.[1].toFixed(3)}`;
     if (lastFittedRouteKey.current !== routeKey) {
       lastFittedRouteKey.current = routeKey;
-      const lngs = coordinates.map(c => c[0]);
-      const lats = coordinates.map(c => c[1]);
-      const minLng = Math.min(...lngs);
-      const maxLng = Math.max(...lngs);
-      const minLat = Math.min(...lats);
-      const maxLat = Math.max(...lats);
 
       map.fitBounds(
         [
@@ -191,19 +226,6 @@ export function RoutePolyline({
         }
       );
     }
-
-    return () => {
-      // Clean up when component unmounts
-      try {
-        if (!map) return;
-        if (map.getLayer(congLayerId)) map.removeLayer(congLayerId);
-        if (map.getSource(congSourceId)) map.removeSource(congSourceId);
-        if (map.getLayer(baseLayerId)) map.removeLayer(baseLayerId);
-        if (map.getLayer(glowLayerId)) map.removeLayer(glowLayerId);
-        if (map.getLayer(casingLayerId)) map.removeLayer(casingLayerId);
-        if (map.getSource(sourceId)) map.removeSource(sourceId);
-      } catch (e) {}
-    };
   }, [map, positions, active, congestionSegments]);
 
   return null;

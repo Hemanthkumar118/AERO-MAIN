@@ -1,5 +1,4 @@
 import { memo, useEffect, useRef } from 'react';
-import { renderToString } from 'react-dom/server';
 import * as maplibregl from 'maplibre-gl';
 import type { FeatureCollection, Point } from 'geojson';
 import type { NormalizedHospital } from '../../../services/hospitalSearch/types';
@@ -27,19 +26,67 @@ const CLUSTERS_LAYER_ID = 'aero-hospitals-clusters';
 const CLUSTER_COUNT_LAYER_ID = 'aero-hospitals-cluster-count';
 const UNCLUSTERED_LAYER_ID = 'aero-hospitals-unclustered';
 
+function escapeHtml(str: string): string {
+  return str
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#039;');
+}
+
+function getHospitalPopupHtml(hospital: NormalizedHospital, distKm: number): string {
+  const phoneSection = hospital.phone
+    ? `<div class="flex justify-between"><span class="text-slate-400">Phone:</span><span class="text-slate-200">${escapeHtml(hospital.phone)}</span></div>`
+    : '';
+  const distLabel = distKm > 0 ? `${distKm.toFixed(1)} km` : 'Calculating...';
+
+  return `<div class="aero-custom-popup">
+    <div class="p-2 min-w-[200px]">
+      <div class="flex items-center gap-1.5 text-[10px] font-bold text-sky-500 uppercase tracking-wide">
+        <span class="w-2 h-2 rounded-full bg-sky-500" style="display:inline-block;width:8px;height:8px;border-radius:50%;background:#0284c7;"></span>
+        <span>Hospital</span>
+      </div>
+      <p class="font-bold text-sm text-slate-100 mt-1">${escapeHtml(hospital.name)}</p>
+      <p class="text-xs text-slate-400">${escapeHtml(hospital.address || 'Address unavailable')}</p>
+      <div class="mt-2 pt-2 border-t border-slate-700/60 space-y-1 text-xs">
+        <div class="flex justify-between">
+          <span class="text-slate-400">Distance:</span>
+          <span class="font-bold text-sky-400">${distLabel}</span>
+        </div>
+        ${phoneSection}
+      </div>
+    </div>
+  </div>`;
+}
+
+interface ActiveMarkerEntry {
+  marker: maplibregl.Marker;
+  popup: maplibregl.Popup;
+  lastDistKm: number;
+}
+
 export const HospitalPins = memo(function HospitalPins({
   hospitals,
   selectedHospitalId,
   onSelect,
 }: HospitalPinsProps) {
   const { map } = useTomTomMap();
-  const markersRef = useRef<maplibregl.Marker[]>([]);
-  const popupRef = useRef<maplibregl.Popup | null>(null);
+  const markersPoolRef = useRef<Map<string, ActiveMarkerEntry>>(new Map());
+  const layersInitializedRef = useRef(false);
 
   const onSelectRef = useRef(onSelect);
   useEffect(() => {
     onSelectRef.current = onSelect;
   }, [onSelect]);
+
+  // Teardown all markers on unmount
+  useEffect(() => {
+    return () => {
+      markersPoolRef.current.forEach(entry => entry.marker.remove());
+      markersPoolRef.current.clear();
+    };
+  }, []);
 
   useEffect(() => {
     if (!map) return;
@@ -154,42 +201,46 @@ export const HospitalPins = memo(function HospitalPins({
           });
         }
 
-        // Cluster click to zoom in
-        map.on('click', CLUSTERS_LAYER_ID, (e) => {
-          const features = map.queryRenderedFeatures(e.point, { layers: [CLUSTERS_LAYER_ID] });
-          if (!features.length) return;
-          const clusterId = features[0].properties?.cluster_id;
-          const source = map.getSource(GEOJSON_SOURCE_ID) as maplibregl.GeoJSONSource;
-          if (source && clusterId) {
-            source.getClusterExpansionZoom(clusterId).then((zoom: number) => {
-              const geometry = features[0].geometry as Point;
-              map.easeTo({
-                center: geometry.coordinates as [number, number],
-                zoom: zoom + 0.5,
-                duration: 500
-              });
-            }).catch(() => {});
-          }
-        });
+        if (!layersInitializedRef.current) {
+          layersInitializedRef.current = true;
 
-        // Unclustered point click to select
-        map.on('click', UNCLUSTERED_LAYER_ID, (e) => {
-          const features = map.queryRenderedFeatures(e.point, { layers: [UNCLUSTERED_LAYER_ID] });
-          if (!features.length) return;
-          const clickedId = features[0].properties?.id;
-          const clickedHosp = uniqueHospitals.find(h => h.id === clickedId);
-          if (clickedHosp) {
-            onSelectRef.current(clickedHosp);
-          }
-        });
+          // Cluster click to zoom in
+          map.on('click', CLUSTERS_LAYER_ID, (e) => {
+            const features = map.queryRenderedFeatures(e.point, { layers: [CLUSTERS_LAYER_ID] });
+            if (!features.length) return;
+            const clusterId = features[0].properties?.cluster_id;
+            const source = map.getSource(GEOJSON_SOURCE_ID) as maplibregl.GeoJSONSource;
+            if (source && clusterId) {
+              source.getClusterExpansionZoom(clusterId).then((zoom: number) => {
+                const geometry = features[0].geometry as Point;
+                map.easeTo({
+                  center: geometry.coordinates as [number, number],
+                  zoom: zoom + 0.5,
+                  duration: 500
+                });
+              }).catch(() => {});
+            }
+          });
 
-        // Pointer cursor on hover
-        const setPointer = () => { map.getCanvas().style.cursor = 'pointer'; };
-        const resetPointer = () => { map.getCanvas().style.cursor = ''; };
-        map.on('mouseenter', CLUSTERS_LAYER_ID, setPointer);
-        map.on('mouseleave', CLUSTERS_LAYER_ID, resetPointer);
-        map.on('mouseenter', UNCLUSTERED_LAYER_ID, setPointer);
-        map.on('mouseleave', UNCLUSTERED_LAYER_ID, resetPointer);
+          // Unclustered point click to select
+          map.on('click', UNCLUSTERED_LAYER_ID, (e) => {
+            const features = map.queryRenderedFeatures(e.point, { layers: [UNCLUSTERED_LAYER_ID] });
+            if (!features.length) return;
+            const clickedId = features[0].properties?.id;
+            const clickedHosp = uniqueHospitals.find(h => h.id === clickedId);
+            if (clickedHosp) {
+              onSelectRef.current(clickedHosp);
+            }
+          });
+
+          // Pointer cursor on hover
+          const setPointer = () => { map.getCanvas().style.cursor = 'pointer'; };
+          const resetPointer = () => { map.getCanvas().style.cursor = ''; };
+          map.on('mouseenter', CLUSTERS_LAYER_ID, setPointer);
+          map.on('mouseleave', CLUSTERS_LAYER_ID, resetPointer);
+          map.on('mouseenter', UNCLUSTERED_LAYER_ID, setPointer);
+          map.on('mouseleave', UNCLUSTERED_LAYER_ID, resetPointer);
+        }
       } catch (err) {
         console.warn('[HospitalPins] Clustered layer setup warning:', err);
       }
@@ -201,89 +252,74 @@ export const HospitalPins = memo(function HospitalPins({
       map.once('load', setupClusteredLayers);
     }
 
-    // 2. Render prominent DOM pins for the closest 15 visible hospitals
-    // (Remaining hospitals are smoothly handled by the MapLibre GeoJSON cluster/circle layer)
-    markersRef.current.forEach(m => m.remove());
-    markersRef.current = [];
-
+    // 2. High-performance DOM Marker Pooling (diffing instead of full teardown)
     const closestHospitals = uniqueHospitals.slice(0, 15);
-    const newMarkers: maplibregl.Marker[] = [];
+    const targetIds = new Set(closestHospitals.map(h => h.id));
+    const currentPool = markersPoolRef.current;
 
+    // Remove markers that are no longer in the top 15
+    for (const [id, entry] of currentPool.entries()) {
+      if (!targetIds.has(id)) {
+        entry.marker.remove();
+        currentPool.delete(id);
+      }
+    }
+
+    // Update existing or create new markers
     closestHospitals.forEach(hospital => {
-      const contentEl = document.createElement('div');
-      contentEl.innerHTML = BLUE_ICON_HTML;
-      contentEl.style.width = '28px';
-      contentEl.style.height = '36px';
-      contentEl.style.cursor = 'pointer';
-
       const distKm = ((hospital as any).drivingDistanceMeters
         ? (hospital as any).drivingDistanceMeters
         : (hospital.distanceMeters ?? 0)) / 1000;
 
-      const popupContent = (
-        <div className="p-2 min-w-[200px]">
-          <div className="flex items-center gap-1.5 text-[10px] font-bold text-sky-500 uppercase tracking-wide">
-            <span className="w-2 h-2 rounded-full bg-sky-500" />
-            <span>Hospital</span>
-          </div>
-          <p className="font-bold text-sm text-slate-100 mt-1">{hospital.name}</p>
-          <p className="text-xs text-slate-400">{hospital.address || 'Address unavailable'}</p>
+      const existing = currentPool.get(hospital.id);
 
-          <div className="mt-2 pt-2 border-t border-slate-700/60 space-y-1 text-xs">
-            <div className="flex justify-between">
-              <span className="text-slate-400">Distance:</span>
-              <span className="font-bold text-sky-400">{distKm > 0 ? `${distKm.toFixed(1)} km` : 'Calculating...'}</span>
-            </div>
-            {hospital.phone && (
-              <div className="flex justify-between">
-                <span className="text-slate-400">Phone:</span>
-                <span className="text-slate-200">{hospital.phone}</span>
-              </div>
-            )}
-          </div>
-        </div>
-      );
+      if (existing) {
+        // Reuse DOM element, update position and popup if distance changed
+        existing.marker.setLngLat([hospital.lng, hospital.lat]);
+        if (Math.abs(existing.lastDistKm - distKm) > 0.05) {
+          existing.popup.setHTML(getHospitalPopupHtml(hospital, distKm));
+          existing.lastDistKm = distKm;
+        }
+      } else {
+        // Create new marker
+        const contentEl = document.createElement('div');
+        contentEl.innerHTML = BLUE_ICON_HTML;
+        contentEl.style.width = '28px';
+        contentEl.style.height = '36px';
+        contentEl.style.cursor = 'pointer';
 
-      const popupHtml = renderToString(<div className="aero-custom-popup">{popupContent}</div>);
+        const popup = new maplibregl.Popup({
+          offset: 25,
+          maxWidth: '300px',
+          closeButton: true,
+          closeOnClick: false,
+          className: 'aero-maplibre-popup'
+        }).setHTML(getHospitalPopupHtml(hospital, distKm));
 
-      const popup = new maplibregl.Popup({
-        offset: 25,
-        maxWidth: '300px',
-        closeButton: true,
-        closeOnClick: false,
-        className: 'aero-maplibre-popup'
-      }).setHTML(popupHtml);
+        const marker = new maplibregl.Marker({
+          element: contentEl,
+        })
+          .setLngLat([hospital.lng, hospital.lat])
+          .setPopup(popup)
+          .addTo(map);
 
-      const marker = new maplibregl.Marker({
-        element: contentEl,
-      })
-        .setLngLat([hospital.lng, hospital.lat])
-        .setPopup(popup)
-        .addTo(map);
-
-      contentEl.addEventListener('click', (e) => {
-        e.stopPropagation();
-        onSelectRef.current(hospital);
-        map.flyTo({
-          center: [hospital.lng, hospital.lat],
-          zoom: Math.max(map.getZoom(), 15),
-          duration: 1000,
+        contentEl.addEventListener('click', (e) => {
+          e.stopPropagation();
+          onSelectRef.current(hospital);
+          map.flyTo({
+            center: [hospital.lng, hospital.lat],
+            zoom: Math.max(map.getZoom(), 15),
+            duration: 1000,
+          });
         });
-      });
 
-      newMarkers.push(marker);
-    });
-
-    markersRef.current = newMarkers;
-
-    return () => {
-      newMarkers.forEach(m => m.remove());
-      markersRef.current = [];
-      if (popupRef.current) {
-        popupRef.current.remove();
-        popupRef.current = null;
+        currentPool.set(hospital.id, {
+          marker,
+          popup,
+          lastDistKm: distKm
+        });
       }
-    };
+    });
   }, [map, hospitals, selectedHospitalId]);
 
   return null;

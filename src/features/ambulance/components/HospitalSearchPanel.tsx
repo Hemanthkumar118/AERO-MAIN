@@ -152,9 +152,6 @@ export function HospitalSearchPanelInner({
     setOpen(false);
   };
 
-  const eligibleCount = hospitals.filter(h => h.isEmergencyEligible).length;
-  const unverifiedCount = hospitals.length - eligibleCount;
-
   return (
     <>
       {/* Floating button to reopen search when hidden */}
@@ -253,20 +250,16 @@ export function HospitalSearchPanelInner({
                       {!gpsEnabled ? 'DETECTING LOCATION...' :
                        loading ? `SEARCHING WITHIN ${radiusKm} KM...` : 
                        error ? (error.includes('configured') ? 'HOSPITAL SERVICE NOT CONFIGURED' : 'HOSPITAL SEARCH ERROR') :
-                       eligibleCount > 0 ? (
-                         <span>
-                           <strong className="text-emerald-400">{eligibleCount} VERIFIED</strong> {eligibleCount === 1 ? 'HOSPITAL' : 'HOSPITALS'} ({radiusKm} KM)
-                           {unverifiedCount > 0 && <span className="text-slate-400 font-normal"> • {unverifiedCount} UNVERIFIED</span>}
-                         </span>
-                       ) :
                        hospitals.length > 0 ? (
-                         <span className="text-amber-400">0 VERIFIED EMERGENCY HOSPITALS ({hospitals.length} UNVERIFIED)</span>
+                         <span>
+                           <strong className="text-emerald-400">{hospitals.length} HOSPITALS FOUND</strong> ({radiusKm} KM)
+                         </span>
                        ) :
                        `NO HOSPITALS WITHIN ${radiusKm} KM`}
                     </span>
                     {!loading && !error && hospitals.length > 0 && (
                       <span className="text-[10px] text-cyan-400 font-bold uppercase tracking-wider bg-cyan-950/60 px-2 py-0.5 rounded border border-cyan-800/40">
-                        AERO Network
+                        TOMTOM PLACES
                       </span>
                     )}
                     {error && (
@@ -376,18 +369,19 @@ export function HospitalSearchPanelInner({
 
                             {/* Verification Tier Badge */}
                             <div className="mt-1 flex items-center gap-2">
-                              {place.verificationTier === 'verified_emergency' ? (
+                              {place.provider === 'tomtom' ? (
                                 <span className="inline-flex items-center gap-1 text-[10px] font-bold uppercase tracking-wider text-emerald-400 bg-emerald-950/80 border border-emerald-500/40 px-2 py-0.5 rounded-full">
                                   <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
-                                  Verified Emergency
+                                  TomTom Places
                                 </span>
-                              ) : place.verificationTier === 'registered' ? (
-                                <span className="inline-flex items-center gap-1 text-[10px] font-bold uppercase tracking-wider text-blue-400 bg-blue-950/80 border border-blue-500/40 px-2 py-0.5 rounded-full">
-                                  Registered Facility
+                              ) : place.verificationTier === 'verified_emergency' ? (
+                                <span className="inline-flex items-center gap-1 text-[10px] font-bold uppercase tracking-wider text-emerald-400 bg-emerald-950/80 border border-emerald-500/40 px-2 py-0.5 rounded-full">
+                                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
+                                  Verified Hospital
                                 </span>
                               ) : (
-                                <span className="inline-flex items-center gap-1 text-[10px] font-bold uppercase tracking-wider text-amber-400 bg-amber-950/80 border border-amber-500/40 px-2 py-0.5 rounded-full">
-                                  Unverified External
+                                <span className="inline-flex items-center gap-1 text-[10px] font-bold uppercase tracking-wider text-cyan-400 bg-cyan-950/80 border border-cyan-500/40 px-2 py-0.5 rounded-full">
+                                  Hospital Facility
                                 </span>
                               )}
                             </div>
@@ -482,18 +476,19 @@ export function HospitalSearchPanelInner({
 
                             {/* Verification Tier Badge */}
                             <div className="mt-1 flex items-center gap-2">
-                              {h.verificationTier === 'verified_emergency' ? (
+                              {h.provider === 'tomtom' ? (
                                 <span className="inline-flex items-center gap-1 text-[10px] font-bold uppercase tracking-wider text-emerald-400 bg-emerald-950/80 border border-emerald-500/40 px-2 py-0.5 rounded-full">
                                   <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
-                                  Verified Emergency Hospital
+                                  TomTom Places
                                 </span>
-                              ) : h.verificationTier === 'registered' ? (
-                                <span className="inline-flex items-center gap-1 text-[10px] font-bold uppercase tracking-wider text-blue-400 bg-blue-950/80 border border-blue-500/40 px-2 py-0.5 rounded-full">
-                                  Registered Facility (Non-Acute)
+                              ) : h.verificationTier === 'verified_emergency' ? (
+                                <span className="inline-flex items-center gap-1 text-[10px] font-bold uppercase tracking-wider text-emerald-400 bg-emerald-950/80 border border-emerald-500/40 px-2 py-0.5 rounded-full">
+                                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
+                                  Verified Hospital
                                 </span>
                               ) : (
-                                <span className="inline-flex items-center gap-1 text-[10px] font-bold uppercase tracking-wider text-amber-400 bg-amber-950/80 border border-amber-500/40 px-2 py-0.5 rounded-full">
-                                  Unverified External Result
+                                <span className="inline-flex items-center gap-1 text-[10px] font-bold uppercase tracking-wider text-cyan-400 bg-cyan-950/80 border border-cyan-500/40 px-2 py-0.5 rounded-full">
+                                  Hospital Facility
                                 </span>
                               )}
                             </div>

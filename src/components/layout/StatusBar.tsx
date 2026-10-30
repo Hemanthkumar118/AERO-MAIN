@@ -45,10 +45,36 @@ export function StatusBar({
   gpsTimestamp,
 }: StatusBarProps) {
   const navigate = useNavigate();
-  const { profile } = useAuth();
+  const { user, profile } = useAuth();
   
-  const userRole = propUserRole || (profile?.role?.toUpperCase() as UserRole) || 'AMBULANCE';
-  const userName = propUserName || profile?.full_name || 'Operator';
+  const validPropRole = (propUserRole && propUserRole !== ('UNKNOWN' as any)) ? propUserRole : null;
+  const rawRole = (
+    validPropRole || 
+    profile?.role || 
+    user?.user_metadata?.role || 
+    (typeof window !== 'undefined' ? localStorage.getItem('aero-user-role') : null) || 
+    'AMBULANCE'
+  ).toUpperCase();
+  const userRole = (['AMBULANCE', 'POLICE', 'HOSPITAL', 'ADMIN'].includes(rawRole) 
+    ? rawRole 
+    : rawRole.includes('AMBULANCE') ? 'AMBULANCE'
+    : rawRole.includes('POLICE') || rawRole.includes('TRAFFIC') ? 'POLICE'
+    : rawRole.includes('HOSPITAL') ? 'HOSPITAL'
+    : rawRole === 'ADMIN' ? 'ADMIN'
+    : 'AMBULANCE') as UserRole;
+
+  const validPropName = (propUserName && propUserName !== 'Operator' && !propUserName.includes('Unknown') && propUserName !== 'Ambulance Operator')
+    ? propUserName
+    : null;
+
+  const userName = 
+    validPropName || 
+    profile?.full_name || 
+    user?.user_metadata?.full_name || 
+    user?.user_metadata?.name || 
+    (typeof window !== 'undefined' ? localStorage.getItem('aero-user-name') : null) || 
+    (user?.email ? user.email.split('@')[0] : null) || 
+    'Ambulance Operator';
 
   return (
     <header className="relative z-40 h-14 bg-aero-surface border-b border-aero-border flex items-center justify-between px-3 sm:px-6 shrink-0">
@@ -89,7 +115,7 @@ export function StatusBar({
         {userName && userRole && (
           <>
             <div className="w-px h-6 bg-border-subtle hidden sm:block mx-1" />
-            <AccountMenu />
+            <AccountMenu userName={userName} userRole={userRole} />
           </>
         )}
       </div>

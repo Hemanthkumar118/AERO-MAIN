@@ -1,5 +1,5 @@
-import { useEffect, useRef } from 'react';
-import { renderToString } from 'react-dom/server';
+import { useEffect, useRef, memo } from 'react';
+import { createPortal } from 'react-dom';
 import * as maplibregl from 'maplibre-gl';
 import { useTomTomMap } from './TomTomMapContext';
 
@@ -13,7 +13,7 @@ export interface TomTomMapMarkerProps {
   onClick?: () => void;
 }
 
-export function TomTomMapMarker({
+export const TomTomMapMarker = memo(function TomTomMapMarker({
   position,
   html,
   popupContent,
@@ -25,8 +25,13 @@ export function TomTomMapMarker({
   const { map } = useTomTomMap();
   const markerRef = useRef<maplibregl.Marker | null>(null);
   const popupRef = useRef<maplibregl.Popup | null>(null);
+  const popupContainerRef = useRef<HTMLDivElement | null>(null);
 
-  const popupHtmlDep = popupContent ? renderToString(<div className="aero-custom-popup">{popupContent}</div>) : '';
+  if (!popupContainerRef.current) {
+    const el = document.createElement('div');
+    el.className = 'aero-custom-popup';
+    popupContainerRef.current = el;
+  }
 
   // Create and manage MapLibre Marker instance
   useEffect(() => {
@@ -52,14 +57,14 @@ export function TomTomMapMarker({
       markerRef.current = marker;
 
       // Attach Popup if content exists
-      if (popupHtmlDep) {
+      if (popupContent && popupContainerRef.current) {
         const popup = new maplibregl.Popup({
           offset: 25,
           maxWidth: '320px',
           closeButton: true,
           closeOnClick: false,
           className: 'aero-maplibre-popup'
-        }).setHTML(popupHtmlDep);
+        }).setDOMContent(popupContainerRef.current);
 
         marker.setPopup(popup);
         popupRef.current = popup;
@@ -85,22 +90,23 @@ export function TomTomMapMarker({
     }
   }, [map, html, width, height]);
 
-  // Update popup content in-place without destroying the marker
+  // Ensure popup is attached or detached if popupContent presence toggles
   useEffect(() => {
-    if (popupRef.current && popupHtmlDep) {
-      popupRef.current.setHTML(popupHtmlDep);
-    } else if (!popupRef.current && popupHtmlDep && markerRef.current) {
+    if (popupContent && !popupRef.current && markerRef.current && popupContainerRef.current) {
       const popup = new maplibregl.Popup({
         offset: 25,
         maxWidth: '320px',
         closeButton: true,
         closeOnClick: false,
         className: 'aero-maplibre-popup'
-      }).setHTML(popupHtmlDep);
+      }).setDOMContent(popupContainerRef.current);
       markerRef.current.setPopup(popup);
       popupRef.current = popup;
+    } else if (!popupContent && popupRef.current && markerRef.current) {
+      popupRef.current.remove();
+      popupRef.current = null;
     }
-  }, [popupHtmlDep]);
+  }, [Boolean(popupContent)]);
 
   // Update marker position smoothly
   useEffect(() => {
@@ -113,8 +119,12 @@ export function TomTomMapMarker({
     }
   }, [position[0], position[1]]);
 
-  return null;
-}
+  if (!popupContent || !popupContainerRef.current) {
+    return null;
+  }
+
+  return createPortal(popupContent, popupContainerRef.current);
+});
 
 // Backwards compatibility alias
 export const GoogleMapMarker = TomTomMapMarker;

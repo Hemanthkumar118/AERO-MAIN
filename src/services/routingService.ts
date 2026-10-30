@@ -5,6 +5,7 @@
 
 import type { RouteInfo, LatLng } from '../types';
 import { toLeafletPos, toOsrmCoord, fromOsrmToLeaflet } from '../utils/coordinates';
+import { getBackendUrl } from './apiConfig';
 
 const routeCache = new Map<string, { data: RouteInfo, timestamp: number }>();
 
@@ -111,18 +112,52 @@ export const routingService = {
 
     // Process top candidates concurrently for much faster load times
     const routePromises = topCandidates.map(async (hospital) => {
-      console.log(`[AERO ROUTING] Routing candidate: ${hospital.name}`);
       try {
         const dest: [number, number] = [hospital.lat, hospital.lng];
-        const routeInfo = await this.getLiveRoute(origin, dest);
-        
-        if (routeInfo && routeInfo.polyline.length > 0) {
-          console.log(`[AERO ROUTING] ETA: ${Math.round(routeInfo.etaSeconds/60)} min`);
-          console.log(`[AERO ROUTING] Distance: ${(routeInfo.distanceMeters/1000).toFixed(1)} km`);
-        } else {
-           console.log(`[AERO ROUTING] Fallback ETA used for ${hospital.name}`);
+        let routeInfo: RouteInfo | null = null;
+        try {
+          const originCoords = Array.isArray(origin) ? origin : [origin.latitude, origin.longitude];
+          const backendUrl = getBackendUrl();
+          const res = await fetch(`${backendUrl}/api/route/calculate`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              origin: { lat: originCoords[0], lng: originCoords[1] },
+              destination: { lat: dest[0], lng: dest[1] },
+              provider: 'tomtom'
+            }),
+            signal: AbortSignal.timeout(4000)
+          });
+          if (res.ok) {
+            const data = await res.json();
+            if (data.success && data.polyline) {
+              const poly = Array.isArray(data.polyline) ? data.polyline : [];
+              if (poly.length > 0) {
+                routeInfo = {
+                  polyline: poly,
+                  distanceMeters: data.distanceMeters,
+                  etaSeconds: data.durationSeconds,
+                  trafficAwareEtaSeconds: data.durationSeconds,
+                  staticEtaSeconds: data.staticDurationSeconds,
+                  trafficDelaySeconds: data.trafficDelaySeconds || 0,
+                  isTrafficAware: Boolean(data.isTrafficAware),
+                  trafficStatus: data.isTrafficAware ? 'LIVE' : 'UNAVAILABLE',
+                  routeProvider: data.provider || 'tomtom',
+                  calculatedAt: data.calculatedAt || new Date().toISOString(),
+                  congestionSegments: data.congestionSegments || [],
+                  steps: []
+                };
+              }
+            }
+          }
+        } catch {
+          // fallback to getLiveRoute
         }
-        
+
+        if (!routeInfo) {
+          routeInfo = await this.getLiveRoute(origin, dest);
+        }
+
         return { hospital, routeInfo };
       } catch (error) {
         console.warn(`[AERO ROUTING] Failed routing for ${hospital.name}`);
@@ -175,69 +210,80 @@ export const routingService = {
 
   /**
    * Calculates the shortest distance in meters from a point to a polyline.
+   * Uses high-efficiency equirectangular planar projection with zero trig operations
+   * in the inner loop and squared-distance comparisons for optimal time complexity.
    */
   getDistanceToRoute(point: [number, number], polyline: [number, number][]): number {
     if (!polyline || polyline.length < 2) return 0;
     
-    // Haversine distance between two points
-    const getDist = (p1: [number, number], p2: [number, number]) => {
-      const R = 6371e3; // meters
-      const lat1 = p1[0] * Math.PI / 180;
-      const lat2 = p2[0] * Math.PI / 180;
-      const deltaLat = (p2[0] - p1[0]) * Math.PI / 180;
-      const deltaLon = (p2[1] - p1[1]) * Math.PI / 180;
-      const a = Math.sin(deltaLat/2) * Math.sin(deltaLat/2) +
-                Math.cos(lat1) * Math.cos(lat2) *
-                Math.sin(deltaLon/2) * Math.sin(deltaLon/2);
-      const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
-      return R * c;
-    };
-
-    let minDist = Infinity;
-    // ~0.001 deg ≈ 111m, use as cheap bounding filter to skip distant segments
-    const CHEAP_THRESHOLD = 0.005; // ~550m lat/lng box — skip if clearly far
     const pLat = point[0];
     const pLng = point[1];
-    
-    for (let i = 0; i < polyline.length - 1; i++) {
-      const p1 = polyline[i];
-      const p2 = polyline[i+1];
-      
-      // Cheap bounding-box pre-filter: skip segment if clearly far away
-      const segMinLat = Math.min(p1[0], p2[0]) - CHEAP_THRESHOLD;
-      const segMaxLat = Math.max(p1[0], p2[0]) + CHEAP_THRESHOLD;
-      const segMinLng = Math.min(p1[1], p2[1]) - CHEAP_THRESHOLD;
-      const segMaxLng = Math.max(p1[1], p2[1]) + CHEAP_THRESHOLD;
-      
-      if (pLat < segMinLat || pLat > segMaxLat || pLng < segMinLng || pLng > segMaxLng) {
-        continue; // Skip this segment entirely — clearly too far
+    const rad = Math.PI / 180;
+    // Flat-earth approximation coefficients centered at current latitude (meters per degree)
+    const cosLat = Math.cos(pLat * rad);
+    const kx = 111320 * cosLat; // meters per degree lng
+    const ky = 110540;          // meters per degree lat
+
+    let minDistSq = Infinity;
+    const EARLY_EXIT_SQ = 100; // 10 meters squared (clearly on route)
+    const SKIP_BOUND_METERS = 600; // ~600m threshold to quickly bypass distant segments
+
+    // Cache first vertex relative to point in meters
+    let x1 = (polyline[0][1] - pLng) * kx;
+    let y1 = (polyline[0][0] - pLat) * ky;
+
+    for (let i = 1; i < polyline.length; i++) {
+      const x2 = (polyline[i][1] - pLng) * kx;
+      const y2 = (polyline[i][0] - pLat) * ky;
+
+      // Fast bounding box rejection in local meters
+      const minX = x1 < x2 ? x1 : x2;
+      const maxX = x1 > x2 ? x1 : x2;
+      const minY = y1 < y2 ? y1 : y2;
+      const maxY = y1 > y2 ? y1 : y2;
+
+      if (minX > SKIP_BOUND_METERS || maxX < -SKIP_BOUND_METERS ||
+          minY > SKIP_BOUND_METERS || maxY < -SKIP_BOUND_METERS) {
+        x1 = x2;
+        y1 = y2;
+        continue;
       }
-      
-      // Calculate cross-track distance (simplified for small distances)
-      const d13 = getDist(p1, point);
-      const d12 = getDist(p1, p2);
-      const d23 = getDist(p2, point);
-      
-      let segDist: number;
-      // If point is beyond the ends of the segment, use distance to endpoints
-      if (d13 * d13 > d12 * d12 + d23 * d23) {
-        segDist = d23;
-      } else if (d23 * d23 > d12 * d12 + d13 * d13) {
-        segDist = d13;
+
+      // Vector from p1 to p2
+      const dx = x2 - x1;
+      const dy = y2 - y1;
+      const segLenSq = dx * dx + dy * dy;
+
+      let distSq: number;
+      if (segLenSq <= 1e-6) {
+        distSq = x1 * x1 + y1 * y1;
       } else {
-        // Cross-track distance via Heron's formula
-        const s = (d12 + d13 + d23) / 2;
-        const area = Math.sqrt(Math.max(0, s * (s - d12) * (s - d13) * (s - d23)));
-        segDist = d12 > 0 ? 2 * area / d12 : d13;
+        // Parameter t of projection of origin (0, 0) onto segment p1->p2
+        // Vector from p1 to origin is (-x1, -y1)
+        const t = (-x1 * dx - y1 * dy) / segLenSq;
+        if (t <= 0) {
+          distSq = x1 * x1 + y1 * y1;
+        } else if (t >= 1) {
+          distSq = x2 * x2 + y2 * y2;
+        } else {
+          const projX = x1 + t * dx;
+          const projY = y1 + t * dy;
+          distSq = projX * projX + projY * projY;
+        }
       }
-      
-      if (segDist < minDist) {
-        minDist = segDist;
-        if (minDist < 10) return minDist; // Early exit: clearly on-route
+
+      if (distSq < minDistSq) {
+        minDistSq = distSq;
+        if (minDistSq < EARLY_EXIT_SQ) {
+          return Math.sqrt(minDistSq);
+        }
       }
+
+      x1 = x2;
+      y1 = y2;
     }
-    
-    return minDist;
+
+    return Math.sqrt(minDistSq);
   }
 };
 

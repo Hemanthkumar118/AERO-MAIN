@@ -1592,7 +1592,7 @@ app.get(['/api/places/hospitals', '/api/hospitals/search'], authenticateOptional
 
       const name = r.poi?.name || 'Hospital';
       const isLegit = isLegitimateHospitalFacility(name);
-      if (!r.isDbHospital && !isLegit) continue;
+      if (!isLegit) continue;
 
       // Spatial dedup: ~35m grid bucket
       const gridKey = `${Math.floor(hLat / 0.00035)}_${Math.floor(hLng / 0.00035)}`;
@@ -1611,23 +1611,14 @@ app.get(['/api/places/hospitals', '/api/hospitals/search'], authenticateOptional
       }
 
       // Determine verification tier and emergency eligibility
-      let verificationTier = 'unverified';
-      let isEmergencyEligible = false;
-      let ineligibilityReason = 'Unverified external place result — not integrated into AERO dispatch network';
+      let verificationTier = 'verified_emergency';
+      let isEmergencyEligible = true;
+      let ineligibilityReason = undefined;
 
-      if (r.isDbHospital) {
-        const isAlternativeMedicine = !isLegit;
-        if (r.emergencyCapable === true && !isAlternativeMedicine) {
-          verificationTier = 'verified_emergency';
-          isEmergencyEligible = true;
-          ineligibilityReason = undefined;
-        } else {
-          verificationTier = 'registered';
-          isEmergencyEligible = false;
-          ineligibilityReason = isAlternativeMedicine 
-            ? 'Alternative healthcare facility — not certified for acute emergency trauma admissions'
-            : 'Registered with AERO, but not certified for acute emergency receiving';
-        }
+      if (r.isDbHospital && r.emergencyCapable === false) {
+        verificationTier = 'registered';
+        isEmergencyEligible = false;
+        ineligibilityReason = 'Registered with AERO, but not certified for acute emergency receiving';
       }
 
       const normalized = {

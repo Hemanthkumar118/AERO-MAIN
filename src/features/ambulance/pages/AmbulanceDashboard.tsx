@@ -29,13 +29,15 @@ import { ambulanceService } from '../../../services/ambulanceService';
 
 export function AmbulanceDashboard() {
   const { user, profile } = useAuth();
-  const [ambulance] = useState({
+  const ambulanceName = profile?.full_name || user?.user_metadata?.full_name || user?.user_metadata?.name || (typeof window !== 'undefined' ? localStorage.getItem('aero-user-name') : null) || (user?.email ? user.email.split('@')[0] : null) || 'Ambulance Operator';
+  const ambulanceVehicle = profile?.organization || 'AMB-108';
+  const ambulance = {
     id: user?.id || 'unknown-id',
-    name: profile?.full_name || 'Ambulance Operator',
-    vehicleNumber: profile?.organization || 'Unknown Vehicle',
+    name: ambulanceName,
+    vehicleNumber: ambulanceVehicle,
     heading: 0,
     speedKmH: 0,
-  });
+  };
 
   // Base Map State (initialized once or on major shifts, avoids micro-rerenders)
   const [baseLocation, setBaseLocation] = useState<[number, number] | null>(null);
@@ -324,14 +326,17 @@ export function AmbulanceDashboard() {
 
           setHospitalResults(ranked);
 
-          // Retain selected hospital if still in results, otherwise pick nearest eligible
+          // Retain selected hospital if still in results and eligible, otherwise pick fastest eligible
+          let targetCandidate: any = null;
           setSelectedHospital(prev => {
-            if (prev && ranked.some(h => h.id === prev.id)) {
+            if (prev && ranked.some(h => h.id === prev.id && h.isEmergencyEligible)) {
+              targetCandidate = ranked.find(h => h.id === prev.id);
               return prev;
             }
             const best = ranked.find(h => h.isEmergencyEligible);
             if (!best) return prev || null;
-            const autoHosp: any = {
+            targetCandidate = best;
+            const autoHosp: Hospital = {
               id: best.id,
               name: best.name,
               address: best.address || best.name,
@@ -342,12 +347,49 @@ export function AmbulanceDashboard() {
               availableIcuBeds: best.availableIcuBeds ?? 0,
               traumaBaysAvailable: best.traumaBaysAvailable ?? 0,
               doctorsOnDuty: 0,
-              distanceKm: parseFloat(((best as any).drivingDistanceMeters / 1000).toFixed(1)),
+              distanceKm: parseFloat(((best as any).drivingDistanceMeters ? (best as any).drivingDistanceMeters / 1000 : best.distanceMeters / 1000).toFixed(1)),
               drivingEtaSeconds: (best as any).drivingEtaSeconds
             };
-            calculateRouteForHospital(autoHosp, baseLocation);
             return autoHosp;
           });
+
+          // Immediately hydrate routeInfo with live route calculated during ranking
+          if (targetCandidate && (targetCandidate as any).routePolyline && (targetCandidate as any).routePolyline.length > 0) {
+            const eta = (targetCandidate as any).drivingEtaSeconds || Math.round(targetCandidate.distanceMeters / 15);
+            const dist = (targetCandidate as any).drivingDistanceMeters || targetCandidate.distanceMeters;
+            setRouteInfo({
+              polyline: (targetCandidate as any).routePolyline,
+              distanceMeters: dist,
+              etaSeconds: eta,
+              trafficAwareEtaSeconds: eta,
+              staticEtaSeconds: eta,
+              trafficDelaySeconds: 0,
+              isTrafficAware: true,
+              trafficStatus: 'LIVE',
+              routeProvider: 'tomtom',
+              calculatedAt: new Date().toISOString(),
+              congestionSegments: [],
+              alternatives: []
+            });
+          }
+
+          if (targetCandidate) {
+            const autoHosp: Hospital = {
+              id: targetCandidate.id,
+              name: targetCandidate.name,
+              address: targetCandidate.address || targetCandidate.name,
+              location: { latitude: targetCandidate.lat, longitude: targetCandidate.lng },
+              phone: targetCandidate.phone || '',
+              emergencyCapable: true,
+              totalBeds: targetCandidate.totalBeds ?? 0,
+              availableIcuBeds: targetCandidate.availableIcuBeds ?? 0,
+              traumaBaysAvailable: targetCandidate.traumaBaysAvailable ?? 0,
+              doctorsOnDuty: 0,
+              distanceKm: parseFloat(((targetCandidate as any).drivingDistanceMeters ? (targetCandidate as any).drivingDistanceMeters / 1000 : targetCandidate.distanceMeters / 1000).toFixed(1)),
+              drivingEtaSeconds: (targetCandidate as any).drivingEtaSeconds
+            };
+            calculateRouteForHospital(autoHosp, baseLocation, true);
+          }
         } else {
           if (currentSeq === searchSeqRef.current) setHospitalResults([]);
         }
@@ -372,7 +414,10 @@ export function AmbulanceDashboard() {
     // Only allow verified emergency hospitals to become active destinations
     if (!h.isEmergencyEligible) return;
 
-    const hosp: any = {
+    const distMeters = (h as any).drivingDistanceMeters || h.distanceMeters;
+    const eta = (h as any).drivingEtaSeconds || Math.round(distMeters / 15);
+
+    const hosp: Hospital = {
       id: h.id,
       name: h.name,
       address: h.address || h.name,
@@ -382,11 +427,31 @@ export function AmbulanceDashboard() {
       totalBeds: h.totalBeds ?? 0,
       availableIcuBeds: h.availableIcuBeds ?? 0,
       traumaBaysAvailable: h.traumaBaysAvailable ?? 0,
-      distanceKm: parseFloat((h.distanceMeters / 1000).toFixed(1)),
+      doctorsOnDuty: 0,
+      distanceKm: parseFloat((distMeters / 1000).toFixed(1)),
+      drivingEtaSeconds: eta
     };
     
     setSelectedHospital(hosp);
-    calculateRouteForHospital(hosp, currentLiveLocation.current || baseLocation);
+
+    if ((h as any).routePolyline && (h as any).routePolyline.length > 0) {
+      setRouteInfo({
+        polyline: (h as any).routePolyline,
+        distanceMeters: distMeters,
+        etaSeconds: eta,
+        trafficAwareEtaSeconds: eta,
+        staticEtaSeconds: eta,
+        trafficDelaySeconds: 0,
+        isTrafficAware: true,
+        trafficStatus: 'LIVE',
+        routeProvider: 'tomtom',
+        calculatedAt: new Date().toISOString(),
+        congestionSegments: [],
+        alternatives: []
+      });
+    }
+
+    calculateRouteForHospital(hosp, currentLiveLocation.current || baseLocation, true);
   };
 
   // Live Location Update & Off-Route Detection
@@ -489,7 +554,7 @@ export function AmbulanceDashboard() {
   return (
     <AppShell
       userRole="AMBULANCE"
-      userName={`${ambulance.name} (${ambulance.vehicleNumber})`}
+      userName={ambulance.name}
       connectionState={connectionState}
       gpsState={currentGpsState}
       gpsAccuracy={currentAccuracy}
